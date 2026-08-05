@@ -6,16 +6,20 @@
     "build": "next build",
     "lint": "tsc --noEmit",
     "start": "next start",
+    "test": "node --import tsx --test \"app/**/*.test.ts\"",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@powerotp/api": "*",
     "@powerotp/contracts": "^0.1.0",
+    "@powerotp/mcp": "*",
     "next": "^16.3.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
   },
   "devDependencies": {
     "@types/react": "^19.2.18",
-    "@types/react-dom": "^19.2.4"
+    "@types/react-dom": "^19.2.4",
+    "tsx": "^4.23.6"
   }
 }

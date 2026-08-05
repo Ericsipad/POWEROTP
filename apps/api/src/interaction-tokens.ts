@@ -6,7 +6,10 @@ import { createSecret, signPayload, verifySignedPayload } from "./security.js";
 const DEFAULT_LIFETIME_MS = 5 * 60 * 1_000;
 
 export class InteractionTokenError extends Error {
-  constructor(readonly code: string) {
+  constructor(
+    readonly code: string,
+    readonly statusCode = 401,
+  ) {
     super(code);
   }
 }

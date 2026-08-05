@@ -103,11 +103,12 @@ envs:
     type: SECRET
     value: SET_IN_APP_PLATFORM
 
-# One component. Everything (marketing/dashboard site, the /v1 customer
-# and verification API with its durable background workers, and the
-# public /mcp integration guide) runs in a single Node process — see
-# apps/api/src/server.ts. There is no ingress/path-routing configuration
-# to keep in sync across separate services.
+# One component, one normal Next.js app. Everything (marketing/dashboard
+# site, the /v1 customer and verification API with its durable background
+# workers, and the public /mcp integration guide) is served by Next.js
+# Route Handlers in apps/web, with the API/queue logic imported as a
+# library from apps/api. Build and start are exactly what every other app
+# here uses — no custom server, no ingress rules to keep in sync.
 services:
   - name: app
     github:
@@ -116,8 +117,8 @@ services:
       deploy_on_push: true
     source_dir: /
     environment_slug: node-js
-    build_command: npm ci && npm run build -w @powerotp/contracts && npm run build -w @powerotp/mcp && npm run build -w @powerotp/web && npm run build -w @powerotp/api
-    run_command: npm run start -w @powerotp/api
+    build_command: npm ci && npm run build
+    run_command: npm run start -w @powerotp/web -- -p $PORT
     http_port: 8080
     instance_count: 1
     instance_size_slug: apps-s-1vcpu-1gb

@@ -10,9 +10,9 @@
     "libraries/*"
   ],
   "scripts": {
-    "build": "npm run build -w @powerotp/contracts && npm run build -w @powerotp/server-sdk -w @powerotp/widget-loader && npm run build -w @powerotp/mcp && npm run build -w @powerotp/web && npm run build -w @powerotp/api -w @powerotp/telephony-agent",
+    "build": "npm run build -w @powerotp/contracts && npm run build -w @powerotp/server-sdk -w @powerotp/widget-loader && npm run build -w @powerotp/mcp -w @powerotp/api && npm run build -w @powerotp/web && npm run build -w @powerotp/telephony-agent",
     "lint": "npm run lint --workspaces --if-present",
-    "start": "npm run start -w @powerotp/api",
+    "start": "npm run start -w @powerotp/web",
     "test": "npm run test --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "verify": "npm run build && npm run lint && npm run test"

@@ -10,18 +10,17 @@
 The source directory must be `/`, not a subfolder. This is an npm workspace monorepo and
 the build needs the root lockfile plus shared contracts.
 
-## One component
+## One component, one normal Next.js app
 
-There is exactly **one** App Platform component, `app`. It runs a single Node process
-(`apps/api/src/server.ts`) that serves:
-
-- The marketing/dashboard site (Next.js, embedded via its programmatic server API)
-- The customer and verification API under `/v1`, plus its durable background queue workers
-- The public, read-only MCP integration guide under `/mcp`
+There is exactly **one** App Platform component, `app`. It is built and run exactly like
+any other Next.js app — `npm run build`, `npm start` — with no custom server. Every
+API endpoint (`/v1/*`, `/mcp`, `/health`, `/ready`) is a standard Next.js Route Handler
+under `apps/web/app`, backed by library code imported from `apps/api` and `apps/mcp`
+(see `apps/web/lib/server-context.ts` for how the database connection, background
+workers, and services are initialized once via `apps/web/instrumentation.ts`).
 
 There is no separate `web`/`api`/`mcp` service split and no ingress path-routing
-configuration to keep in sync — Fastify handles `/health`, `/ready`, `/v1/*`, and `/mcp`
-directly, and falls through to Next.js for every other path.
+configuration to keep in sync.
 
 Do not deploy `apps/telephony-agent` to App Platform. It belongs on each Asterisk droplet
 in Phase 4.

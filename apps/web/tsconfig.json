@@ -1,6 +1,11 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
+    "paths": {
+      "@/*": [
+        "./*"
+      ]
+    },
     "incremental": true,
     "jsx": "preserve",
     "lib": [

@@ -3,25 +3,24 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "exports": {
+    "./*.js": "./dist/*.js"
+  },
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "lint": "tsc -p tsconfig.json --noEmit",
-    "start": "node dist/server.js",
     "test": "node --import tsx --test \"src/**/*.test.ts\"",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@fastify/cookie": "^11.1.2",
-    "@fastify/helmet": "^13.1.0",
-    "@fastify/rate-limit": "^11.2.0",
     "@node-rs/argon2": "^2.0.2",
     "@powerotp/contracts": "*",
-    "@powerotp/mcp": "*",
     "bullmq": "^5.81.3",
-    "fastify": "^5.11.2",
     "ioredis": "^6.0.0",
     "mongodb": "^7.5.0",
-    "next": "^16.3.0",
     "otpauth": "^9.5.1",
     "zod": "^4.4.3"
   },

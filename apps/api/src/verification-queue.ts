@@ -57,17 +57,19 @@ export function createVerificationQueues(connection: ConnectionOptions): Verific
     jobsQueue,
     callbacksQueue,
     async enqueueDispatch(interactionId) {
+      // BullMQ job IDs may not contain ":" (it uses colons as a Redis key
+      // delimiter internally), so job names and IDs are hyphen-separated.
       await jobsQueue.add(
         "dispatch",
         { interactionId },
-        { jobId: `dispatch:${interactionId}`, attempts: 3, backoff: { type: "exponential", delay: 2_000 } },
+        { jobId: `dispatch-${interactionId}`, attempts: 3, backoff: { type: "exponential", delay: 2_000 } },
       );
     },
     async enqueueTimeout(interactionId, delayMs) {
       await jobsQueue.add(
         "timeout",
         { interactionId },
-        { jobId: `timeout:${interactionId}`, delay: Math.max(delayMs, 0) },
+        { jobId: `timeout-${interactionId}`, delay: Math.max(delayMs, 0) },
       );
     },
     async enqueueCallback(interactionId, eventId) {
@@ -75,7 +77,7 @@ export function createVerificationQueues(connection: ConnectionOptions): Verific
         "callback",
         { interactionId, eventId },
         {
-          jobId: `callback:${eventId}`,
+          jobId: `callback-${eventId}`,
           attempts: 8,
           backoff: { type: "exponential", delay: 5_000 },
           removeOnComplete: true,

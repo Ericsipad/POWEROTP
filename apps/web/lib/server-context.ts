@@ -1,0 +1,78 @@
+import { AuthService } from "@powerotp/api/auth-service.js";
+import { createCallbackWorker } from "@powerotp/api/callback-worker.js";
+import { loadConfig, type ProductionConfig } from "@powerotp/api/config.js";
+import { connectDataStores, type DataStores } from "@powerotp/api/dependencies.js";
+import { createBrevoEmailService } from "@powerotp/api/email.js";
+import { ensureIndexes } from "@powerotp/api/persistence.js";
+import { ProjectService } from "@powerotp/api/project-service.js";
+import { productionTransportRegistry } from "@powerotp/api/transport.js";
+import {
+  createDispatchWorker,
+  createVerificationQueues,
+  toQueueConnectionOptions,
+} from "@powerotp/api/verification-queue.js";
+import { VerificationService } from "@powerotp/api/verification-service.js";
+
+export interface ServerContext {
+  config: ProductionConfig;
+  dataStores: DataStores;
+  auth: AuthService;
+  projects: ProjectService;
+  verifications: VerificationService;
+}
+
+/**
+ * Every dependency (database, queues, background workers, services) is
+ * built exactly once per server process and memoized here, the same
+ * dependency graph the old standalone server built at boot. Next.js Route
+ * Handlers are stateless functions, so this is the one place that owns
+ * long-lived resources; `instrumentation.ts` calls this eagerly at server
+ * start so the app fails fast on bad configuration instead of on the
+ * first request.
+ */
+let contextPromise: Promise<ServerContext> | undefined;
+
+async function buildServerContext(): Promise<ServerContext> {
+  const config = loadConfig();
+  const dataStores = await connectDataStores(config);
+  await ensureIndexes(dataStores.db);
+
+  const queueConnection = toQueueConnectionOptions(config.VALKEY_URL);
+  const queues = createVerificationQueues(queueConnection);
+  const verifications = new VerificationService(
+    dataStores.db,
+    config,
+    queues.enqueueDispatch,
+    queues.enqueueTimeout,
+    queues.enqueueCallback,
+  );
+  const dispatchWorker = createDispatchWorker(
+    queueConnection,
+    verifications,
+    productionTransportRegistry(),
+  );
+  const callbackWorker = createCallbackWorker(queueConnection, dataStores.db, config);
+
+  const auth = new AuthService(dataStores.db, config, createBrevoEmailService(config));
+  const projects = new ProjectService(dataStores.db, config, verifications);
+
+  async function shutdown(signal: string) {
+    console.info(JSON.stringify({ service: "powerotp", signal, msg: "shutting down" }));
+    await Promise.allSettled([
+      dispatchWorker.close(),
+      callbackWorker.close(),
+      queues.close(),
+    ]);
+    await dataStores.close();
+    process.exit(0);
+  }
+  process.on("SIGINT", () => void shutdown("SIGINT"));
+  process.on("SIGTERM", () => void shutdown("SIGTERM"));
+
+  return { config, dataStores, auth, projects, verifications };
+}
+
+export function getServerContext(): Promise<ServerContext> {
+  contextPromise ??= buildServerContext();
+  return contextPromise;
+}

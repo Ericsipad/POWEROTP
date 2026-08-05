@@ -5,13 +5,18 @@ five-digit voice codes, recording challenges, and SMS codes.
 
 ## Repository
 
-- `apps/web` — Next.js landing page and account UI (code lives here; embedded and served
-  by `apps/api`'s process in production, not deployed separately)
-- `apps/api` — the single deployed process: Fastify public API and control plane, durable
-  background processing, and the marketing/dashboard site and MCP guide embedded via
-  `apps/api/src/server.ts`
-- `apps/mcp` — anonymous read-only integration MCP server (embedded the same way; its own
-  `npm run start` remains available for local development)
+This is a normal Next.js app: `npm run build`, `npm start`, no custom server. The
+customer/verification API, durable background workers, and the public MCP guide are
+Next.js Route Handlers in `apps/web/app`, backed by library code from `apps/api`/`apps/mcp`.
+
+- `apps/web` — the one deployed app: Next.js marketing/dashboard site, and every `/v1`
+  and `/mcp` API route as a standard Route Handler (see `apps/web/app` and `apps/web/lib`)
+- `apps/api` — library only (no server of its own): auth/project/verification services,
+  persistence, security primitives, durable background queue workers. Imported by
+  `apps/web` via its package exports (e.g. `@powerotp/api/auth-service.js`)
+- `apps/mcp` — library only: builds the MCP server/transport, imported by
+  `apps/web/app/mcp/route.ts`. Its own `npm run start` remains available for local
+  development of the MCP guide in isolation
 - `apps/telephony-agent` — Phase 4 Asterisk droplet agent
 - `libraries/contracts` — shared runtime schemas
 - `libraries/sdk-js` — server-side TypeScript client foundation

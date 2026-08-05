@@ -165,6 +165,22 @@ async function readRequestBody(request: Readable): Promise<Buffer | undefined> {
   return chunks.length > 0 ? Buffer.concat(chunks) : undefined;
 }
 
+/**
+ * The transport's `handleRequest` already speaks the standard Fetch API
+ * (`Request` in, `Response` out), which is exactly what a Next.js Route
+ * Handler receives and returns — so that's the only integration most
+ * callers need.
+ */
+export async function createMcpTransport() {
+  const mcp = createMcpApp();
+  const transport = new WebStandardStreamableHTTPServerTransport({
+    sessionIdGenerator: undefined,
+    enableJsonResponse: true,
+  });
+  await mcp.connect(transport);
+  return { mcp, transport };
+}
+
 export interface McpHandler {
   handleHttp(request: IncomingMessage, response: ServerResponse): Promise<void>;
   close(): Promise<void>;
@@ -172,17 +188,12 @@ export interface McpHandler {
 
 /**
  * Bridges Node's raw request/response objects to the MCP transport's
- * Fetch-API-based `Request`/`Response`, so this can be mounted inside any
- * Node HTTP server (a standalone one, or an existing Fastify instance's
- * raw `request`/`reply.raw`).
+ * Fetch-API-based `Request`/`Response`. Only needed for the standalone
+ * Node-http bootstrap used in local development (`server.ts`); a Next.js
+ * Route Handler should use `createMcpTransport` directly instead.
  */
 export async function createMcpHandler(publicOrigin: string): Promise<McpHandler> {
-  const mcp = createMcpApp();
-  const transport = new WebStandardStreamableHTTPServerTransport({
-    sessionIdGenerator: undefined,
-    enableJsonResponse: true,
-  });
-  await mcp.connect(transport);
+  const { mcp, transport } = await createMcpTransport();
 
   return {
     async handleHttp(request, response) {
