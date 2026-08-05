@@ -13,9 +13,8 @@ workspace monorepo and each component needs the root lockfile plus shared contra
 ## Components
 
 - `web`: Next.js marketing and account application
-- `api`: Fastify control-plane API
+- `api`: Fastify control plane and durable background queue processing
 - `mcp`: public read-only integration MCP server
-- `worker`: private background worker
 
 Do not deploy `apps/telephony-agent` to App Platform. It belongs on each Asterisk droplet
 in Phase 4.
@@ -38,11 +37,6 @@ their values and do not create a repository `.env` file.
 - `EMAIL_FROM`: verified POWEROTP sender address
 - `PUBLIC_APP_URL`: final HTTPS web origin
 - `PUBLIC_API_URL`: final HTTPS API origin
-
-### Worker
-
-- `MONGODB_URI`
-- `VALKEY_URL`
 
 ### Web and MCP
 
@@ -71,7 +65,7 @@ the component plus shared contracts. A deployment is healthy only when:
 - Web returns `200` from `/api/health`
 - API returns `200` from `/health` and can reach Atlas/Valkey through `/ready`
 - MCP returns `200` from `/health`
-- Worker starts with valid production configuration
+- API can reach Atlas and Valkey before accepting background work
 
 The API intentionally fails startup when required configuration is missing or data stores
 are unreachable.

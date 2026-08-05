@@ -29,7 +29,7 @@ flowchart LR
   ClientUi[ClientUI] -->|"Short-lived interaction token"| Api
   Api --> Mongo[MongoDBAtlas]
   Api --> Valkey[ManagedValkey]
-  Worker[AppPlatformWorker] --> Valkey
+  Api -->|"Durable background jobs"| Valkey
   NodeAgent[DropletAgent] -->|"Outbound mTLS"| NodeApi[CentralNodeAPI]
   NodeApi --> Valkey
   NodeAgent -->|"Local ARI"| Asterisk[Asterisk]
@@ -84,8 +84,8 @@ or SMS.
 
 ### Phase 1 — Production foundation
 
-- Create the TypeScript monorepo, Next.js site, Fastify API, worker, MCP server,
-  telephony-agent boundary, shared contracts, tests, and CI.
+- Create the TypeScript monorepo, Next.js site, Fastify API with durable background
+  processing, MCP server, telephony-agent boundary, shared contracts, tests, and CI.
 - Add one production App Platform specification with encrypted variable declarations,
   health checks, canary controls, and rollback documentation.
 - Establish the exact folder and build commands used by App Platform.

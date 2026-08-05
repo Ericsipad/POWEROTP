@@ -83,28 +83,6 @@ services:
     instance_size_slug: apps-s-1vcpu-1gb
     health_check:
       http_path: /health
-workers:
-  - name: worker
-    github:
-      repo: Ericsipad/POWEROTP
-      branch: main
-      deploy_on_push: true
-    source_dir: /
-    environment_slug: node-js
-    build_command: npm ci && npm run build -w @powerotp/worker
-    run_command: npm run start -w @powerotp/worker
-    instance_count: 1
-    instance_size_slug: apps-s-1vcpu-1gb
-    envs:
-      - key: MONGODB_URI
-        scope: RUN_TIME
-        type: SECRET
-        value: SET_IN_APP_PLATFORM
-      - key: VALKEY_URL
-        scope: RUN_TIME
-        type: SECRET
-        value: SET_IN_APP_PLATFORM
-
 ingress:
   rules:
     - component:

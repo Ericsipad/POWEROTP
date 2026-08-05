@@ -13,7 +13,7 @@
 1. Deploy the immutable commit from `main`.
 2. Wait for App Platform component health checks.
 3. Confirm web `/api/health`, API `/health` and `/ready`, and MCP `/health`.
-4. Confirm worker reports dependency-ready without logging connection strings.
+4. Confirm the API reports dependency-ready without logging connection strings.
 5. Exercise the public MCP capability and request-shape tools.
 6. When verification transport exists, run one canary interaction per enabled method.
 

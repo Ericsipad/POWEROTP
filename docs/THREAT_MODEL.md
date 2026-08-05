@@ -15,7 +15,7 @@
 4. Telephony agent to the central node API over mTLS
 5. Telephony agent to localhost-only Asterisk ARI
 6. Asterisk to VoIP.ms SIP trunks
-7. POWEROTP callback worker to customer-controlled HTTPS endpoints
+7. POWEROTP API background processor to customer-controlled HTTPS endpoints
 8. Public AI clients to the anonymous read-only MCP server
 
 ## Required controls

@@ -6,9 +6,8 @@ five-digit voice codes, recording challenges, and SMS codes.
 ## Repository
 
 - `apps/web` — Next.js landing page and account UI
-- `apps/api` — Fastify public/control-plane API
+- `apps/api` — Fastify public API, control plane, and durable background processing
 - `apps/mcp` — anonymous read-only integration MCP server
-- `apps/worker` — background orchestration
 - `apps/telephony-agent` — Phase 4 Asterisk droplet agent
 - `libraries/contracts` — shared runtime schemas
 - `libraries/sdk-js` — server-side TypeScript client foundation
