@@ -47,6 +47,24 @@ services:
         scope: RUN_TIME
         type: SECRET
         value: SET_IN_APP_PLATFORM
+      - key: SESSION_HASH_SECRET
+        scope: RUN_TIME
+        type: SECRET
+        value: SET_IN_APP_PLATFORM
+      - key: API_KEY_HASH_SECRET
+        scope: RUN_TIME
+        type: SECRET
+        value: SET_IN_APP_PLATFORM
+      - key: BREVO_API_KEY
+        scope: RUN_TIME
+        type: SECRET
+        value: SET_IN_APP_PLATFORM
+      - key: EMAIL_FROM
+        scope: RUN_TIME
+        value: login@powerotp.com
+      - key: PUBLIC_APP_URL
+        scope: RUN_TIME
+        value: https://app.powerotp.com
       - key: PUBLIC_API_URL
         scope: RUN_TIME
         value: https://api.powerotp.com

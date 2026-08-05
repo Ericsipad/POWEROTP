@@ -1,0 +1,254 @@
+import type {
+  CreateProject,
+  Project,
+  UpdateProject,
+  VerificationType,
+} from "@powerotp/contracts";
+import type { Db } from "mongodb";
+
+import type { ProductionConfig } from "./config.js";
+import type {
+  ApiKeyDocument,
+  AuditDocument,
+  ProjectDocument,
+} from "./persistence.js";
+import {
+  createId,
+  createSecret,
+  createSlug,
+  encryptString,
+  hashToken,
+} from "./security.js";
+
+const emptyByType: Record<VerificationType, number> = {
+  call_reachability: 0,
+  voice_code: 0,
+  voice_challenge: 0,
+  sms_code: 0,
+};
+
+export class ProjectError extends Error {
+  constructor(
+    readonly code: string,
+    readonly statusCode: number,
+  ) {
+    super(code);
+  }
+}
+
+export class ProjectService {
+  readonly #projects;
+  readonly #apiKeys;
+  readonly #audits;
+
+  constructor(
+    db: Db,
+    private readonly config: ProductionConfig,
+  ) {
+    this.#projects = db.collection<ProjectDocument>("projects");
+    this.#apiKeys = db.collection<ApiKeyDocument>("apiKeys");
+    this.#audits = db.collection<AuditDocument>("auditEvents");
+  }
+
+  async create(customerId: string, input: CreateProject, ip?: string) {
+    const now = new Date();
+    const project: ProjectDocument = {
+      _id: createId("prj"),
+      customerId,
+      name: input.name,
+      slug: createSlug(input.name),
+      enabledMethods: input.enabledMethods,
+      allowedOrigins: input.allowedOrigins,
+      callbackUrl: input.callbackUrl,
+      active: true,
+      activatedAt: now,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    const apiKey = this.#newApiKey(project, customerId);
+    const callbackSigningSecret = input.callbackUrl ? createSecret() : undefined;
+    if (callbackSigningSecret) {
+      project.callbackSecretEncrypted = encryptString(
+        callbackSigningSecret,
+        this.config.CONFIG_ENCRYPTION_KEY,
+      );
+    }
+
+    await this.#projects.insertOne(project);
+    try {
+      await this.#apiKeys.insertOne(apiKey.document);
+    } catch (error) {
+      await this.#projects.deleteOne({ _id: project._id });
+      throw error;
+    }
+    await this.#audit(customerId, "project.created", "project", project._id, ip);
+
+    return {
+      project: await this.#toResponse(project),
+      apiKey: apiKey.raw,
+      callbackSigningSecret,
+    };
+  }
+
+  async list(customerId: string) {
+    const projects = await this.#projects
+      .find({ customerId })
+      .sort({ createdAt: -1 })
+      .toArray();
+    return Promise.all(projects.map((project) => this.#toResponse(project)));
+  }
+
+  async update(
+    customerId: string,
+    projectId: string,
+    input: UpdateProject,
+    ip?: string,
+  ) {
+    const changes: Partial<ProjectDocument> = { updatedAt: new Date() };
+    if (input.name !== undefined) changes.name = input.name;
+    if (input.enabledMethods !== undefined) {
+      changes.enabledMethods = input.enabledMethods;
+    }
+    if (input.allowedOrigins !== undefined) {
+      changes.allowedOrigins = input.allowedOrigins;
+    }
+    if (input.active !== undefined) changes.active = input.active;
+    if (input.callbackUrl) changes.callbackUrl = input.callbackUrl;
+
+    if (input.callbackUrl) {
+      const existing = await this.#ownedProject(customerId, projectId);
+      if (existing.callbackUrl !== input.callbackUrl) {
+        throw new ProjectError("rotate_callback_secret_required", 409);
+      }
+    }
+
+    const unset =
+      input.callbackUrl === null
+        ? { callbackUrl: 1 as const, callbackSecretEncrypted: 1 as const }
+        : undefined;
+    const project = await this.#projects.findOneAndUpdate(
+      { _id: projectId, customerId },
+      { $set: changes, ...(unset ? { $unset: unset } : {}) },
+      { returnDocument: "after" },
+    );
+    if (!project) throw new ProjectError("project_not_found", 404);
+    await this.#audit(customerId, "project.updated", "project", projectId, ip);
+    return this.#toResponse(project);
+  }
+
+  async rotateApiKey(customerId: string, projectId: string, ip?: string) {
+    const project = await this.#ownedProject(customerId, projectId);
+    const key = this.#newApiKey(project, customerId);
+    const now = new Date();
+    await this.#apiKeys.insertOne(key.document);
+    await this.#apiKeys.updateMany(
+      {
+        _id: { $ne: key.document._id },
+        projectId,
+        customerId,
+        revokedAt: { $exists: false },
+      },
+      { $set: { revokedAt: now } },
+    );
+    await this.#audit(customerId, "api_key.rotated", "project", projectId, ip);
+    return key.raw;
+  }
+
+  async rotateCallback(
+    customerId: string,
+    projectId: string,
+    callbackUrl: string,
+    ip?: string,
+  ) {
+    await this.#ownedProject(customerId, projectId);
+    const secret = createSecret();
+    await this.#projects.updateOne(
+      { _id: projectId, customerId },
+      {
+        $set: {
+          callbackUrl,
+          callbackSecretEncrypted: encryptString(
+            secret,
+            this.config.CONFIG_ENCRYPTION_KEY,
+          ),
+          updatedAt: new Date(),
+        },
+      },
+    );
+    await this.#audit(customerId, "callback.rotated", "project", projectId, ip);
+    return secret;
+  }
+
+  async #ownedProject(customerId: string, projectId: string) {
+    const project = await this.#projects.findOne({ _id: projectId, customerId });
+    if (!project) throw new ProjectError("project_not_found", 404);
+    return project;
+  }
+
+  #newApiKey(project: ProjectDocument, customerId: string) {
+    const raw = `potp_sk_${createSecret()}`;
+    return {
+      raw,
+      document: {
+        _id: createId("key"),
+        projectId: project._id,
+        customerId,
+        keyHash: hashToken(raw, this.config.API_KEY_HASH_SECRET),
+        prefix: raw.slice(0, 12),
+        lastFour: raw.slice(-4),
+        createdAt: new Date(),
+      } satisfies ApiKeyDocument,
+    };
+  }
+
+  async #toResponse(project: ProjectDocument): Promise<Project> {
+    const key = await this.#apiKeys.findOne(
+      { projectId: project._id, revokedAt: { $exists: false } },
+      { sort: { createdAt: -1 } },
+    );
+    return {
+      id: project._id,
+      name: project.name,
+      slug: project.slug,
+      apiUrl: new URL(
+        `/v1/projects/${project.slug}/verifications`,
+        this.config.PUBLIC_API_URL,
+      ).toString(),
+      enabledMethods: project.enabledMethods,
+      allowedOrigins: project.allowedOrigins,
+      callbackUrl: project.callbackUrl,
+      callbackConfigured: Boolean(
+        project.callbackUrl && project.callbackSecretEncrypted,
+      ),
+      active: project.active,
+      activatedAt: project.activatedAt.toISOString(),
+      apiKeyPrefix: key?.prefix,
+      apiKeyLastFour: key?.lastFour,
+      stats: {
+        total: 0,
+        succeeded: 0,
+        failed: 0,
+        byType: { ...emptyByType },
+      },
+    };
+  }
+
+  async #audit(
+    actorId: string,
+    action: string,
+    targetType: string,
+    targetId: string,
+    ip?: string,
+  ) {
+    await this.#audits.insertOne({
+      _id: createId("aud"),
+      actorId,
+      action,
+      targetType,
+      targetId,
+      occurredAt: new Date(),
+      ip,
+    });
+  }
+}

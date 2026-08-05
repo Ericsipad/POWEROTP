@@ -15,6 +15,9 @@ five-digit voice codes, recording challenges, and SMS codes.
 - `libraries/widget-loader` — hosted-widget loader foundation
 - `docs` — product plan, specification, threat model, and acceptance criteria
 
+Phase 2 customer/admin setup and first-admin enrollment are documented in
+[`docs/PHASE2_OPERATIONS.md`](docs/PHASE2_OPERATIONS.md).
+
 ## DigitalOcean
 
 Connect App Platform to repository `Ericsipad/POWEROTP`, branch `main`, using source

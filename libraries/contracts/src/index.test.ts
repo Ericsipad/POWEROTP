@@ -4,7 +4,9 @@ import { describe, it } from "node:test";
 import {
   ChallengeSchema,
   CreateVerificationSchema,
+  CustomerRegistrationSchema,
   InteractionTokenClaimsSchema,
+  UpdateProjectSchema,
 } from "./index.js";
 
 describe("CreateVerificationSchema", () => {
@@ -77,6 +79,27 @@ describe("InteractionTokenClaimsSchema", () => {
         expiresAt: 1_786_000_300,
       }).success,
       true,
+    );
+  });
+});
+
+describe("Phase 2 contracts", () => {
+  it("requires strong customer passwords", () => {
+    assert.equal(
+      CustomerRegistrationSchema.safeParse({
+        email: "customer@example.com",
+        password: "weak-password",
+      }).success,
+      false,
+    );
+  });
+
+  it("requires HTTPS callback URLs", () => {
+    assert.equal(
+      UpdateProjectSchema.safeParse({
+        callbackUrl: "http://customer.example/callback",
+      }).success,
+      false,
     );
   });
 });

@@ -4,6 +4,10 @@ This is the approved implementation direction for POWEROTP. The system is a cent
 verification control plane on DigitalOcean App Platform with geographically scalable
 Asterisk nodes.
 
+Implementation status: Phases 0, 1, and 2 are implemented. Phase 2 requires the production
+Atlas, Valkey, Brevo, domain, and cryptographic configuration listed in
+[`PHASE2_OPERATIONS.md`](PHASE2_OPERATIONS.md) before activation.
+
 ## Product contract
 
 | Type | API name | Result |

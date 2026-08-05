@@ -1,0 +1,100 @@
+.authPage {
+  align-items: center;
+  display: flex;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 40px 20px;
+}
+
+.authCard {
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 36px;
+  width: min(100%, 460px);
+}
+
+.authCard h1 {
+  font-size: 42px;
+  letter-spacing: -0.05em;
+  line-height: 1;
+  margin: 24px 0 12px;
+}
+
+.authCard > p {
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.formStack {
+  display: grid;
+  gap: 18px;
+  margin-top: 28px;
+}
+
+.field {
+  display: grid;
+  font-size: 13px;
+  font-weight: 800;
+  gap: 8px;
+}
+
+.field input,
+.field textarea,
+.field select {
+  background: white;
+  border: 1px solid #b8c2bd;
+  border-radius: 8px;
+  color: var(--ink);
+  font: inherit;
+  font-weight: 500;
+  padding: 13px 14px;
+}
+
+.field textarea {
+  min-height: 90px;
+  resize: vertical;
+}
+
+.formError {
+  background: #fff1f0;
+  border: 1px solid #e8aaa5;
+  border-radius: 8px;
+  color: #8d241b;
+  font-size: 13px;
+  padding: 12px;
+}
+
+.formSuccess {
+  background: #eff9e6;
+  border: 1px solid #b8d69d;
+  border-radius: 8px;
+  color: #2f6e49;
+  font-size: 13px;
+  padding: 12px;
+}
+
+.authLinks {
+  color: var(--muted);
+  font-size: 13px;
+  margin-top: 24px;
+  text-align: center;
+}
+
+.authLinks a {
+  color: var(--green-dark);
+  font-weight: 800;
+}
+
+.adminNotice {
+  color: #8d4c18;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.button:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}

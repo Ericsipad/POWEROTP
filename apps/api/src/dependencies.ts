@@ -1,9 +1,11 @@
 import { Redis } from "ioredis";
-import { MongoClient } from "mongodb";
+import { type Db, MongoClient } from "mongodb";
 
 import type { ProductionConfig } from "./config.js";
 
 export interface DataStores {
+  db: Db;
+  rateLimitStore: Redis;
   isReady(): Promise<boolean>;
   close(): Promise<void>;
 }
@@ -30,6 +32,8 @@ export async function connectDataStores(
   }
 
   return {
+    db: mongo.db("powerotp"),
+    rateLimitStore: valkey,
     async isReady() {
       try {
         await Promise.all([mongo.db("admin").command({ ping: 1 }), valkey.ping()]);

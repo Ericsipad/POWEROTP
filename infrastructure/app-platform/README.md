@@ -31,6 +31,12 @@ their values and do not create a repository `.env` file.
 - `VALKEY_URL`: authenticated `rediss://` connection string
 - `INTERACTION_TOKEN_SECRET`: at least 32 random bytes
 - `CONFIG_ENCRYPTION_KEY`: at least 32 random bytes, independent from the token secret
+- `SESSION_HASH_SECRET`: at least 32 random bytes, independent from other secrets
+- `API_KEY_HASH_SECRET`: at least 32 random bytes, independent from other secrets
+- `ADMIN_BOOTSTRAP_TOKEN`: at least 32 random bytes; remove after first admin setup
+- `BREVO_API_KEY`: production transactional-email API key
+- `EMAIL_FROM`: verified POWEROTP sender address
+- `PUBLIC_APP_URL`: final HTTPS web origin
 - `PUBLIC_API_URL`: final HTTPS API origin
 
 ### Worker
