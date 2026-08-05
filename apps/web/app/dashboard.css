@@ -135,6 +135,36 @@
   padding: 11px;
 }
 
+.interactionTimeline {
+  margin-top: 20px;
+}
+
+.timelineTable {
+  border-collapse: collapse;
+  font-size: 12px;
+  margin-top: 14px;
+  width: 100%;
+}
+
+.timelineTable th,
+.timelineTable td {
+  border-bottom: 1px solid var(--line);
+  padding: 9px 8px;
+  text-align: left;
+}
+
+.timelineTable th {
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.timelineTable td:first-child,
+.timelineTable td:last-child {
+  font-family: monospace;
+  overflow-wrap: anywhere;
+}
+
 .emptyState {
   border: 1px dashed #aeb9b3;
   border-radius: 14px;

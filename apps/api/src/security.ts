@@ -22,6 +22,16 @@ export function createId(prefix: string) {
   return `${prefix}_${randomUUID()}`;
 }
 
+/**
+ * Sortable identifier: a millisecond timestamp prefix keeps ids roughly
+ * time-ordered for efficient range indexes, followed by random entropy so
+ * ids remain unguessable.
+ */
+export function createSortableId(prefix: string) {
+  const timestamp = Date.now().toString(16).padStart(12, "0");
+  return `${prefix}_${timestamp}${randomBytes(10).toString("hex")}`;
+}
+
 export function createSecret(bytes = 32) {
   return randomBytes(bytes).toString("base64url");
 }
@@ -36,6 +46,32 @@ export async function hashPassword(password: string) {
 
 export async function verifyPassword(passwordHash: string, password: string) {
   return verify(passwordHash, password, ARGON2_OPTIONS);
+}
+
+/**
+ * Signs a compact JSON payload with HMAC-SHA256, producing a two-part
+ * `payload.signature` token in the same shape used for interaction tokens
+ * and callback envelopes. Verification is constant-time.
+ */
+export function signPayload(payload: unknown, secret: string) {
+  const encodedPayload = Buffer.from(JSON.stringify(payload), "utf8").toString(
+    "base64url",
+  );
+  const signature = hashToken(encodedPayload, secret);
+  return `${encodedPayload}.${signature}`;
+}
+
+export function verifySignedPayload<T>(token: string, secret: string): T {
+  const [encodedPayload, signature] = token.split(".");
+  if (!encodedPayload || !signature) {
+    throw new Error("Malformed signed payload");
+  }
+  if (!safeEqual(signature, hashToken(encodedPayload, secret))) {
+    throw new Error("Invalid signature");
+  }
+  return JSON.parse(
+    Buffer.from(encodedPayload, "base64url").toString("utf8"),
+  ) as T;
 }
 
 export function safeEqual(left: string, right: string) {

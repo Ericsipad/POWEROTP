@@ -5,13 +5,17 @@ import helmet from "@fastify/helmet";
 import rateLimit from "@fastify/rate-limit";
 import { verificationStates, verificationTypes } from "@powerotp/contracts";
 import type { Redis } from "ioredis";
+import type { Db } from "mongodb";
 
 import { AuthError, type AuthService } from "./auth-service.js";
 import { registerAuthRoutes } from "./auth-routes.js";
 import type { ProductionConfig } from "./config.js";
+import { createId } from "./security.js";
 import { ApiError } from "./errors.js";
 import { ProjectError, type ProjectService } from "./project-service.js";
 import { registerProjectRoutes } from "./project-routes.js";
+import { VerificationError, type VerificationService } from "./verification-service.js";
+import { registerVerificationRoutes } from "./verification-routes.js";
 
 export interface AppReadiness {
   rateLimitStore?: Redis;
@@ -24,6 +28,12 @@ export interface Phase2Services {
   projects: ProjectService;
 }
 
+export interface Phase3Services {
+  db: Db;
+  config: Pick<ProductionConfig, "API_KEY_HASH_SECRET" | "INTERACTION_TOKEN_SECRET">;
+  verifications: VerificationService;
+}
+
 const alwaysReady: AppReadiness = {
   async isReady() {
     return true;
@@ -33,8 +43,10 @@ const alwaysReady: AppReadiness = {
 export function buildApp(
   dependencies: AppReadiness = alwaysReady,
   phase2?: Phase2Services,
+  phase3?: Phase3Services,
 ) {
   const app = Fastify({
+    genReqId: () => createId("req"),
     logger: {
       redact: {
         paths: [
@@ -45,12 +57,18 @@ export function buildApp(
           "req.body.totpCode",
           "req.body.token",
           "req.headers.x-admin-bootstrap-token",
+          "req.headers.x-interaction-token",
           "res.headers.set-cookie",
         ],
         censor: "[REDACTED]",
       },
     },
     trustProxy: true,
+  });
+
+  app.addHook("onSend", async (request, reply, payload) => {
+    reply.header("x-correlation-id", request.id);
+    return payload;
   });
 
   void app.register(cookie);
@@ -69,7 +87,8 @@ export function buildApp(
     if (
       error instanceof ApiError ||
       error instanceof AuthError ||
-      error instanceof ProjectError
+      error instanceof ProjectError ||
+      error instanceof VerificationError
     ) {
       return reply.code(error.statusCode).send({ error: error.code });
     }
@@ -116,9 +135,10 @@ export function buildApp(
     verificationTypes,
   }));
 
-  if (phase2) {
+  if (phase2 && phase3) {
     registerAuthRoutes(app, phase2.auth, phase2.config);
-    registerProjectRoutes(app, phase2.auth, phase2.projects);
+    registerProjectRoutes(app, phase2.auth, phase2.projects, phase3.verifications);
+    registerVerificationRoutes(app, phase3.db, phase3.config, phase3.verifications);
   }
 
   return app;

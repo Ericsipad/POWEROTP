@@ -1,6 +1,8 @@
 import type { AccountClass, VerificationType } from "@powerotp/contracts";
 import type { Db } from "mongodb";
 
+import { ensureVerificationIndexes } from "./verification-persistence.js";
+
 export interface UserDocument {
   _id: string;
   email: string;
@@ -92,4 +94,5 @@ export async function ensureIndexes(db: Db) {
       .collection<AuditDocument>("auditEvents")
       .createIndex({ actorId: 1, occurredAt: -1 }),
   ]);
+  await ensureVerificationIndexes(db);
 }

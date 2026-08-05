@@ -27,6 +27,15 @@ const emptyByType: Record<VerificationType, number> = {
   sms_code: 0,
 };
 
+export interface ProjectStatsProvider {
+  projectStats(projectId: string): Promise<{
+    total: number;
+    succeeded: number;
+    failed: number;
+    byType: Record<VerificationType, number>;
+  }>;
+}
+
 export class ProjectError extends Error {
   constructor(
     readonly code: string,
@@ -44,6 +53,7 @@ export class ProjectService {
   constructor(
     db: Db,
     private readonly config: ProductionConfig,
+    private readonly stats?: ProjectStatsProvider,
   ) {
     this.#projects = db.collection<ProjectDocument>("projects");
     this.#apiKeys = db.collection<ApiKeyDocument>("apiKeys");
@@ -180,6 +190,10 @@ export class ProjectService {
     return secret;
   }
 
+  async assertOwned(customerId: string, projectId: string) {
+    await this.#ownedProject(customerId, projectId);
+  }
+
   async #ownedProject(customerId: string, projectId: string) {
     const project = await this.#projects.findOne({ _id: projectId, customerId });
     if (!project) throw new ProjectError("project_not_found", 404);
@@ -225,12 +239,9 @@ export class ProjectService {
       activatedAt: project.activatedAt.toISOString(),
       apiKeyPrefix: key?.prefix,
       apiKeyLastFour: key?.lastFour,
-      stats: {
-        total: 0,
-        succeeded: 0,
-        failed: 0,
-        byType: { ...emptyByType },
-      },
+      stats: this.stats
+        ? await this.stats.projectStats(project._id)
+        : { total: 0, succeeded: 0, failed: 0, byType: { ...emptyByType } },
     };
   }
 

@@ -10,6 +10,15 @@
 Enter all values through App Platform encrypted variables. Generate each cryptographic
 secret independently with at least 32 random bytes.
 
+### Provisioning Valkey
+
+Valkey is created as its own DigitalOcean **Managed Database** resource (Databases →
+Create Database Cluster → engine Valkey), separate from the App Platform app and from
+any telephony droplet. Once created, copy its `rediss://` connection string into the
+`api` component's `VALKEY_URL` environment variable in App Platform. Phase 2 uses it for
+rate limiting; Phase 3 also uses it (via BullMQ) for the verification dispatch, timeout,
+and signed-callback-retry queues. No droplet ever needs direct access to Valkey.
+
 ## First platform administrator
 
 The bootstrap endpoint works only while no platform administrator exists. Set a temporary

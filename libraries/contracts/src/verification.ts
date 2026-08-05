@@ -131,6 +131,26 @@ export const CallbackEnvelopeSchema = z.object({
   event: VerificationEventSchema,
 });
 
+export const VerificationStatusSchema = z.object({
+  interactionId: z.string().min(16),
+  type: VerificationTypeSchema,
+  state: VerificationStateSchema,
+  reasonCode: z.string().min(1).max(100).optional(),
+  createdAt: z.string().datetime(),
+  expiresAt: z.string().datetime(),
+  challenge: ChallengeSchema.optional(),
+});
+
+export const InteractionSummarySchema = z.object({
+  interactionId: z.string().min(16),
+  occurredAt: z.string().datetime(),
+  type: VerificationTypeSchema,
+  state: VerificationStateSchema,
+  maskedTarget: z.string().min(1),
+  durationMs: z.number().int().nonnegative().optional(),
+  correlationId: z.string().min(1).optional(),
+});
+
 export type VerificationType = z.infer<typeof VerificationTypeSchema>;
 export type VerificationState = z.infer<typeof VerificationStateSchema>;
 export type AccountClass = z.infer<typeof AccountClassSchema>;
@@ -142,3 +162,5 @@ export type ChallengeSubmission = z.infer<typeof ChallengeSubmissionSchema>;
 export type CodeSubmission = z.infer<typeof CodeSubmissionSchema>;
 export type VerificationEvent = z.infer<typeof VerificationEventSchema>;
 export type CallbackEnvelope = z.infer<typeof CallbackEnvelopeSchema>;
+export type VerificationStatus = z.infer<typeof VerificationStatusSchema>;
+export type InteractionSummary = z.infer<typeof InteractionSummarySchema>;

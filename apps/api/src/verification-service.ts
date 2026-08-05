@@ -1,0 +1,289 @@
+import type {
+  CreateVerification,
+  VerificationState,
+  VerificationStatus,
+  VerificationType,
+} from "@powerotp/contracts";
+import { createHash } from "node:crypto";
+import type { Db } from "mongodb";
+
+import type { ProductionConfig } from "./config.js";
+import { createSortableId } from "./security.js";
+import {
+  initialVerificationState,
+  isTerminalState,
+  isTransitionAllowed,
+} from "./verification-state-machine.js";
+import {
+  idempotencyRecordId,
+  type IdempotencyRecordDocument,
+  type VerificationEventDocument,
+  type VerificationRequestDocument,
+} from "./verification-persistence.js";
+import { computeProjectStats, listProjectInteractions } from "./verification-reporting.js";
+
+const VERIFICATION_LIFETIME_MS = 10 * 60 * 1_000;
+
+export class VerificationError extends Error {
+  constructor(
+    readonly code: string,
+    readonly statusCode: number,
+  ) {
+    super(code);
+  }
+}
+
+export interface EnqueueDispatch {
+  (interactionId: string): Promise<void>;
+}
+
+export interface EnqueueTimeout {
+  (interactionId: string, delayMs: number): Promise<void>;
+}
+
+export interface EnqueueCallback {
+  (interactionId: string, eventId: string): Promise<void>;
+}
+
+export class VerificationService {
+  readonly #requests;
+  readonly #events;
+  readonly #idempotency;
+
+  constructor(
+    db: Db,
+    private readonly config: Pick<ProductionConfig, "PUBLIC_API_URL">,
+    private readonly enqueueDispatch: EnqueueDispatch,
+    private readonly enqueueTimeout: EnqueueTimeout,
+    private readonly enqueueCallback: EnqueueCallback,
+  ) {
+    this.#requests = db.collection<VerificationRequestDocument>("verificationRequests");
+    this.#events = db.collection<VerificationEventDocument>("verificationEvents");
+    this.#idempotency = db.collection<IdempotencyRecordDocument>("idempotencyRecords");
+  }
+
+  async create(
+    projectId: string,
+    customerId: string,
+    input: CreateVerification,
+    idempotencyKey: string,
+    correlationId: string,
+  ) {
+    const requestHash = createHash("sha256")
+      .update(JSON.stringify(input))
+      .digest("base64url");
+    const recordId = idempotencyRecordId(projectId, idempotencyKey);
+
+    const existing = await this.#idempotency.findOne({ _id: recordId });
+    if (existing) {
+      if (existing.requestHash !== requestHash) {
+        throw new VerificationError("idempotency_key_conflict", 409);
+      }
+      const verification = await this.#requests.findOne({ _id: existing.interactionId });
+      if (verification) return this.#toAccepted(verification);
+    }
+
+    const now = new Date();
+    const verification: VerificationRequestDocument = {
+      _id: createSortableId("int"),
+      projectId,
+      customerId,
+      type: input.type,
+      targetNumber: input.targetNumber,
+      state: initialVerificationState,
+      sequence: 0,
+      correlationId,
+      browserResponse: input.browserResponse,
+      expectedCode: input.code,
+      createdAt: now,
+      updatedAt: now,
+      expiresAt: new Date(now.getTime() + VERIFICATION_LIFETIME_MS),
+    };
+
+    await this.#requests.insertOne(verification);
+
+    try {
+      await this.#idempotency.insertOne({
+        _id: recordId,
+        projectId,
+        idempotencyKey,
+        requestHash,
+        interactionId: verification._id,
+        createdAt: now,
+      });
+    } catch {
+      // A concurrent request already created the interaction for this key.
+      const winner = await this.#idempotency.findOne({ _id: recordId });
+      if (winner) {
+        await this.#requests.deleteOne({ _id: verification._id });
+        const winningVerification = await this.#requests.findOne({
+          _id: winner.interactionId,
+        });
+        if (winningVerification) return this.#toAccepted(winningVerification);
+      }
+    }
+
+    await this.#writeEvent(verification, initialVerificationState);
+    await this.enqueueDispatch(verification._id);
+    await this.enqueueTimeout(verification._id, VERIFICATION_LIFETIME_MS);
+
+    return this.#toAccepted(verification);
+  }
+
+  async get(interactionId: string): Promise<VerificationRequestDocument | null> {
+    return this.#requests.findOne({ _id: interactionId });
+  }
+
+  toStatus(verification: VerificationRequestDocument): VerificationStatus {
+    return {
+      interactionId: verification._id,
+      type: verification.type,
+      state: verification.state,
+      reasonCode: verification.reasonCode,
+      createdAt: verification.createdAt.toISOString(),
+      expiresAt: verification.expiresAt.toISOString(),
+    };
+  }
+
+  /**
+   * The single shared transition function used by every transport and by
+   * response submission. Guards against stale/invalid transitions with an
+   * atomic conditional update, writes the append-only event before any
+   * derived counter or callback, then enqueues the callback delivery.
+   */
+  async transition(
+    interactionId: string,
+    to: VerificationState,
+    reasonCode?: string,
+  ): Promise<boolean> {
+    const current = await this.#requests.findOne({ _id: interactionId });
+    if (!current) return false;
+    if (current.expiresAt.getTime() < Date.now() && !isTerminalState(current.state)) {
+      to = "expired";
+      reasonCode = "interaction_expired";
+    }
+    if (!isTransitionAllowed(current.type, current.state, to)) return false;
+
+    const nextSequence = current.sequence + 1;
+    const updated = await this.#requests.findOneAndUpdate(
+      { _id: interactionId, state: current.state, sequence: current.sequence },
+      {
+        $set: {
+          state: to,
+          reasonCode,
+          sequence: nextSequence,
+          updatedAt: new Date(),
+        },
+      },
+      { returnDocument: "after" },
+    );
+    if (!updated) return false;
+
+    const event = await this.#writeEvent(updated, to, reasonCode);
+    await this.enqueueCallback(interactionId, event._id);
+    return true;
+  }
+
+  async attachInteractionToken(interactionId: string, nonce: string) {
+    await this.#requests.updateOne(
+      { _id: interactionId },
+      { $set: { interactionTokenNonce: nonce } },
+    );
+  }
+
+  /**
+   * Atomically marks a browser-issued interaction token as used. Returns
+   * false if the nonce does not match or the token was already consumed,
+   * which the caller must treat as a replay.
+   */
+  async consumeInteractionToken(interactionId: string, nonce: string) {
+    const updated = await this.#requests.findOneAndUpdate(
+      {
+        _id: interactionId,
+        interactionTokenNonce: nonce,
+        interactionTokenConsumedAt: { $exists: false },
+      },
+      { $set: { interactionTokenConsumedAt: new Date() } },
+    );
+    return Boolean(updated);
+  }
+
+  /**
+   * Exactly one response is accepted per interaction: `#requireActive`
+   * rejects a second submission once the interaction is terminal, which
+   * covers both replay and over-attempt cases from a single durable check.
+   */
+  async submitCode(interactionId: string, code: string) {
+    const verification = await this.#requireActive(interactionId, "voice_code");
+    if (verification.state !== "awaiting_response") {
+      throw new VerificationError("not_awaiting_response", 409);
+    }
+
+    const correct = verification.expectedCode === code;
+    const applied = await this.transition(
+      interactionId,
+      correct ? "succeeded" : "failed",
+      correct ? "code_matched" : "code_mismatch",
+    );
+    if (!applied) throw new VerificationError("stale_verification_state", 409);
+    return { succeeded: correct };
+  }
+
+  async cancel(interactionId: string, projectId: string) {
+    const verification = await this.#requests.findOne({ _id: interactionId, projectId });
+    if (!verification) throw new VerificationError("verification_not_found", 404);
+    const applied = await this.transition(interactionId, "canceled", "customer_canceled");
+    if (!applied) throw new VerificationError("verification_not_cancelable", 409);
+  }
+
+  async projectStats(projectId: string) {
+    return computeProjectStats(this.#requests, projectId);
+  }
+
+  async listInteractions(projectId: string, limit = 50) {
+    return listProjectInteractions(this.#requests, projectId, limit);
+  }
+
+  async #requireActive(interactionId: string, expectedType: VerificationType) {
+    const verification = await this.#requests.findOne({ _id: interactionId });
+    if (!verification) throw new VerificationError("verification_not_found", 404);
+    if (verification.type !== expectedType) {
+      throw new VerificationError("unsupported_response_type", 400);
+    }
+    if (isTerminalState(verification.state)) {
+      throw new VerificationError("verification_already_resolved", 409);
+    }
+    return verification;
+  }
+
+  async #writeEvent(
+    verification: VerificationRequestDocument,
+    state: VerificationState,
+    reasonCode?: string,
+  ) {
+    const event: VerificationEventDocument = {
+      _id: createSortableId("evt"),
+      interactionId: verification._id,
+      projectId: verification.projectId,
+      sequence: verification.sequence,
+      type: verification.type,
+      state,
+      reasonCode,
+      occurredAt: new Date(),
+    };
+    await this.#events.insertOne(event);
+    return event;
+  }
+
+  #toAccepted(verification: VerificationRequestDocument) {
+    return {
+      interactionId: verification._id,
+      state: initialVerificationState,
+      statusUrl: new URL(
+        `/v1/verifications/${verification._id}`,
+        this.config.PUBLIC_API_URL,
+      ).toString(),
+      expiresAt: verification.expiresAt.toISOString(),
+    };
+  }
+}

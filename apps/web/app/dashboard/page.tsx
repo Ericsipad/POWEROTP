@@ -172,6 +172,7 @@ export default function DashboardPage() {
             project={project}
             onRotateApiKey={rotateApiKey}
             onSetCallback={setCallback}
+            authenticatedFetch={authenticatedFetch}
           />
         ))}
       </section>

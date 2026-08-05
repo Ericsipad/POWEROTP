@@ -19,6 +19,14 @@ describe("API health", () => {
   });
 });
 
+describe("Correlation IDs", () => {
+  it("assigns a correlation id to every request and echoes it back", async () => {
+    const response = await app.inject({ method: "GET", url: "/health" });
+
+    assert.ok(response.headers["x-correlation-id"]);
+  });
+});
+
 describe("API readiness", () => {
   it("reports unavailable dependencies without claiming readiness", async () => {
     const unavailableApp = buildApp({

@@ -7,7 +7,9 @@ import { z } from "zod";
 
 import type { AuthService } from "./auth-service.js";
 import { ApiError, parseBody } from "./errors.js";
+import { clientIp, header } from "./http-helpers.js";
 import type { ProjectService } from "./project-service.js";
+import type { VerificationService } from "./verification-service.js";
 
 const SESSION_COOKIE = "powerotp_session";
 const ProjectParamsSchema = z.object({
@@ -20,11 +22,6 @@ const CallbackSchema = z.object({
     .refine((value) => new URL(value).protocol === "https:", "HTTPS is required"),
 });
 
-function header(request: FastifyRequest, name: string) {
-  const value = request.headers[name];
-  return Array.isArray(value) ? value[0] : value;
-}
-
 async function customerSession(request: FastifyRequest, auth: AuthService) {
   const authenticated = await auth.authenticate(
     request.cookies[SESSION_COOKIE],
@@ -35,14 +32,11 @@ async function customerSession(request: FastifyRequest, auth: AuthService) {
   return authenticated;
 }
 
-function clientIp(request: FastifyRequest) {
-  return request.ip || undefined;
-}
-
 export function registerProjectRoutes(
   app: FastifyInstance,
   auth: AuthService,
   projects: ProjectService,
+  verifications: VerificationService,
 ) {
   app.get("/v1/projects", async (request, reply) => {
     const authenticated = await customerSession(request, auth);
@@ -87,6 +81,14 @@ export function registerProjectRoutes(
     );
     reply.header("cache-control", "no-store");
     return { value };
+  });
+
+  app.get("/v1/projects/:projectId/interactions", async (request, reply) => {
+    const authenticated = await customerSession(request, auth);
+    const { projectId } = parseBody(ProjectParamsSchema, request.params);
+    await projects.assertOwned(authenticated.user._id, projectId);
+    reply.header("cache-control", "no-store");
+    return { interactions: await verifications.listInteractions(projectId) };
   });
 
   app.post("/v1/projects/:projectId/callback", async (request, reply) => {

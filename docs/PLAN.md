@@ -4,9 +4,15 @@ This is the approved implementation direction for POWEROTP. The system is a cent
 verification control plane on DigitalOcean App Platform with geographically scalable
 Asterisk nodes.
 
-Implementation status: Phases 0, 1, and 2 are implemented. Phase 2 requires the production
-Atlas, Valkey, Brevo, domain, and cryptographic configuration listed in
-[`PHASE2_OPERATIONS.md`](PHASE2_OPERATIONS.md) before activation.
+Implementation status: Phases 0, 1, 2, and 3 are implemented. Phase 2 requires the
+production Atlas, Valkey, Brevo, domain, and cryptographic configuration listed in
+[`PHASE2_OPERATIONS.md`](PHASE2_OPERATIONS.md) before activation. Phase 3's durable
+queue (idempotent creation, dispatch, timeouts, and signed callback retries) runs on the
+same Valkey instance via BullMQ and stays idle until `VALKEY_URL` is provisioned; real
+call/SMS transports arrive in Phases 4–6, so every verification method currently resolves
+to `failed` with reason `method_not_available` in production until then. The durable
+state machine, events, callbacks, and interaction tokens are fully exercised by automated
+tests using a test-only fake transport that never runs outside `*.test.ts` files.
 
 ## Product contract
 
@@ -95,10 +101,12 @@ or SMS.
 - Add separate customer and platform-admin login paths.
 - Add projects, stable URLs, API-key lifecycle, callbacks, origins, settings, and audit logs.
 
-### Phase 3 — Verification core
+### Phase 3 — Verification core (implemented)
 
 - Implement idempotency, durable state transitions, events, queues, signed callbacks,
   interaction tokens, status lookup, and dashboard timelines.
+- Transports for real telephony/SMS are intentionally deferred to Phases 4–6; Phase 3
+  ships the shared machinery plus a test-only fake transport for automated coverage.
 
 ### Phase 4 — Voice types 1 and 2
 
