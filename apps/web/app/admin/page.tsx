@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 export default function AdminPage() {
   const router = useRouter();
   const [session, setSession] = useState<SessionResponse>();
+  const [demoStatus, setDemoStatus] = useState("");
 
   useEffect(() => {
     void fetch("/v1/auth/session", {
@@ -25,6 +26,27 @@ export default function AdminPage() {
       setSession(result);
     });
   }, [router]);
+
+  async function ensureDemoProject() {
+    if (!session) return;
+    setDemoStatus("Provisioning…");
+    const response = await fetch("/v1/admin/demo-project", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "x-csrf-token": session.csrfToken },
+    });
+    if (!response.ok) {
+      const body = await response.json().catch(() => undefined);
+      setDemoStatus(
+        body?.error === "demo_not_configured"
+          ? "Set DEMO_PROJECT_SLUG in App Platform first."
+          : "Could not provision the demo project.",
+      );
+      return;
+    }
+    const { project } = (await response.json()) as { project: { slug: string } };
+    setDemoStatus(`Live demo project ready at slug "${project.slug}".`);
+  }
 
   async function logout() {
     if (!session) return;
@@ -61,6 +83,17 @@ export default function AdminPage() {
             in their implementation phases. This route already requires an administrator
             session and TOTP authentication.
           </p>
+        </article>
+        <article className="projectCard">
+          <h2>Public &quot;try it now&quot; demo project</h2>
+          <p>
+            Creates (or refreshes) the fixed-slug project backing the anonymous demo
+            widget on the marketing homepage. Safe to run more than once.
+          </p>
+          <button className="button buttonSmall" type="button" onClick={ensureDemoProject}>
+            Provision demo project
+          </button>
+          {demoStatus && <p>{demoStatus}</p>}
         </article>
       </section>
     </main>

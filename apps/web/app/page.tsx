@@ -1,3 +1,5 @@
+import { TryItNow } from "./try-it-now";
+
 const methods = [
   {
     number: "01",
@@ -47,39 +49,44 @@ export default function Home() {
       </nav>
 
       <section className="hero shell" id="top">
-        <div className="eyebrow">
-          <span className="pulse" />
-          Programmable phone verification
-        </div>
-        <h1>
-          One API.
-          <br />
-          Four ways to <em>verify.</em>
-        </h1>
-        <p className="heroCopy">
-          Orchestrate calls, spoken codes, listening challenges, and SMS from
-          one secure control plane—with real-time status callbacks at every step.
-        </p>
-        <div className="heroActions">
-          <a className="button" href="/register">
-            Start building <span>→</span>
-          </a>
-          <a className="textLink" href="#integration">
-            See the API flow
-          </a>
-        </div>
-        <div className="statusStrip">
-          <span>Request accepted</span>
-          <i>→</i>
-          <span>Calling</span>
-          <i>→</i>
-          <span>Ringing</span>
-          <i>→</i>
-          <span>Answered</span>
-          <i>→</i>
-          <span>Awaiting response</span>
-          <i>→</i>
-          <strong>Success</strong>
+        <div className="heroGrid">
+          <div className="heroMain">
+            <div className="eyebrow">
+              <span className="pulse" />
+              Programmable phone verification
+            </div>
+            <h1>
+              One API.
+              <br />
+              Four ways to <em>verify.</em>
+            </h1>
+            <p className="heroCopy">
+              Orchestrate calls, spoken codes, listening challenges, and SMS from
+              one secure control plane—with real-time status callbacks at every step.
+            </p>
+            <div className="heroActions">
+              <a className="button" href="/register">
+                Start building <span>→</span>
+              </a>
+              <a className="textLink" href="#integration">
+                See the API flow
+              </a>
+            </div>
+            <div className="statusStrip">
+              <span>Request accepted</span>
+              <i>→</i>
+              <span>Calling</span>
+              <i>→</i>
+              <span>Ringing</span>
+              <i>→</i>
+              <span>Answered</span>
+              <i>→</i>
+              <span>Awaiting response</span>
+              <i>→</i>
+              <strong>Success</strong>
+            </div>
+          </div>
+          <TryItNow />
         </div>
       </section>
 

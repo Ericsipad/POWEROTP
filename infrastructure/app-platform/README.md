@@ -37,6 +37,15 @@ their values and do not create a repository `.env` file.
 - `EMAIL_FROM`: verified POWEROTP sender address
 - `PUBLIC_APP_URL`: final HTTPS web origin
 - `PUBLIC_API_URL`: final HTTPS API origin
+- `DEMO_PROJECT_SLUG`: optional; slug of the project backing the public "try it now"
+  widget on the marketing site. Committed as `demo`; after deploy, sign in at
+  `/admin` and click "Provision demo project" once to create it at that exact slug.
+  Leave the variable unset to keep the demo endpoints disabled.
+- `OUTBOUND1_URL` / `OUTBOUND1_USER` / `OUTBOUND1_PASS` through `OUTBOUND4_*`: optional
+  VoIP.ms trunk credentials, one dedicated outbound per verification method
+  (`OUTBOUND1`=`call_reachability`, `OUTBOUND2`=`voice_code`,
+  `OUTBOUND3`=`voice_challenge`, `OUTBOUND4`=`sms_code`) — see
+  `apps/api/src/outbound-trunks.ts`. Leave unset until Phase 4 telephony wiring.
 
 ### Web and MCP
 

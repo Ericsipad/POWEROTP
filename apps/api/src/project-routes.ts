@@ -6,6 +6,7 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
 
 import type { AuthService } from "./auth-service.js";
+import type { ProductionConfig } from "./config.js";
 import { ApiError, parseBody } from "./errors.js";
 import { clientIp, header } from "./http-helpers.js";
 import type { ProjectService } from "./project-service.js";
@@ -32,11 +33,22 @@ async function customerSession(request: FastifyRequest, auth: AuthService) {
   return authenticated;
 }
 
+async function adminSession(request: FastifyRequest, auth: AuthService) {
+  const authenticated = await auth.authenticate(
+    request.cookies[SESSION_COOKIE],
+  );
+  if (authenticated.user.accountClass !== "platform_admin") {
+    throw new ApiError("admin_access_required", 403);
+  }
+  return authenticated;
+}
+
 export function registerProjectRoutes(
   app: FastifyInstance,
   auth: AuthService,
   projects: ProjectService,
   verifications: VerificationService,
+  config: Pick<ProductionConfig, "PUBLIC_APP_URL" | "DEMO_PROJECT_SLUG">,
 ) {
   app.get("/v1/projects", async (request, reply) => {
     const authenticated = await customerSession(request, auth);
@@ -104,5 +116,18 @@ export function registerProjectRoutes(
     );
     reply.header("cache-control", "no-store");
     return { value };
+  });
+
+  app.post("/v1/admin/demo-project", async (request, reply) => {
+    const authenticated = await adminSession(request, auth);
+    auth.verifyCsrf(authenticated.session, header(request, "x-csrf-token"));
+    if (!config.DEMO_PROJECT_SLUG) throw new ApiError("demo_not_configured", 409);
+    const project = await projects.ensureDemoProject(
+      config.DEMO_PROJECT_SLUG,
+      new URL(config.PUBLIC_APP_URL).origin,
+      authenticated.user._id,
+    );
+    reply.header("cache-control", "no-store");
+    return { project };
   });
 }

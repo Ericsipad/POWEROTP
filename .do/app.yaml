@@ -68,6 +68,63 @@ services:
       - key: PUBLIC_API_URL
         scope: RUN_TIME
         value: https://api.powerotp.com
+      - key: DEMO_PROJECT_SLUG
+        scope: RUN_TIME
+        value: demo
+      # VoIP.ms trunk credentials, one dedicated outbound per verification
+      # method (never shared) so a limit, suspension, or compromise on one
+      # method's trunk cannot affect the others. OUTBOUND1=call_reachability,
+      # OUTBOUND2=voice_code, OUTBOUND3=voice_challenge, OUTBOUND4=sms_code.
+      # Leave unset until Phase 4 telephony wiring; the API starts fine
+      # without them.
+      - key: OUTBOUND1_URL
+        scope: RUN_TIME
+        type: SECRET
+        value: SET_IN_APP_PLATFORM
+      - key: OUTBOUND1_USER
+        scope: RUN_TIME
+        type: SECRET
+        value: SET_IN_APP_PLATFORM
+      - key: OUTBOUND1_PASS
+        scope: RUN_TIME
+        type: SECRET
+        value: SET_IN_APP_PLATFORM
+      - key: OUTBOUND2_URL
+        scope: RUN_TIME
+        type: SECRET
+        value: SET_IN_APP_PLATFORM
+      - key: OUTBOUND2_USER
+        scope: RUN_TIME
+        type: SECRET
+        value: SET_IN_APP_PLATFORM
+      - key: OUTBOUND2_PASS
+        scope: RUN_TIME
+        type: SECRET
+        value: SET_IN_APP_PLATFORM
+      - key: OUTBOUND3_URL
+        scope: RUN_TIME
+        type: SECRET
+        value: SET_IN_APP_PLATFORM
+      - key: OUTBOUND3_USER
+        scope: RUN_TIME
+        type: SECRET
+        value: SET_IN_APP_PLATFORM
+      - key: OUTBOUND3_PASS
+        scope: RUN_TIME
+        type: SECRET
+        value: SET_IN_APP_PLATFORM
+      - key: OUTBOUND4_URL
+        scope: RUN_TIME
+        type: SECRET
+        value: SET_IN_APP_PLATFORM
+      - key: OUTBOUND4_USER
+        scope: RUN_TIME
+        type: SECRET
+        value: SET_IN_APP_PLATFORM
+      - key: OUTBOUND4_PASS
+        scope: RUN_TIME
+        type: SECRET
+        value: SET_IN_APP_PLATFORM
 
   - name: mcp
     github:

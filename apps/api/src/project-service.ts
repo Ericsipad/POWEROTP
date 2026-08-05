@@ -194,6 +194,49 @@ export class ProjectService {
     await this.#ownedProject(customerId, projectId);
   }
 
+  /**
+   * Idempotently creates or refreshes the operator-owned project backing
+   * the public "try it now" demo widget, at a fixed, predictable slug so
+   * `DEMO_PROJECT_SLUG` can be committed as a stable value. Safe to call
+   * repeatedly (e.g. after a disaster-recovery restore) since it upserts
+   * on `slug` rather than minting a new project every time. Ownership is
+   * attributed to the platform administrator account, not a customer,
+   * because no customer should have visibility into anonymous demo
+   * traffic.
+   */
+  async ensureDemoProject(slug: string, allowedOrigin: string, actorId: string) {
+    const now = new Date();
+    await this.#projects.updateOne(
+      { slug },
+      {
+        $set: {
+          name: "Live demo",
+          enabledMethods: [
+            "call_reachability",
+            "voice_code",
+            "voice_challenge",
+            "sms_code",
+          ] as VerificationType[],
+          allowedOrigins: [allowedOrigin],
+          active: true,
+          updatedAt: now,
+        },
+        $setOnInsert: {
+          _id: createId("prj"),
+          customerId: "usr_platform_admin",
+          slug,
+          activatedAt: now,
+          createdAt: now,
+        },
+      },
+      { upsert: true },
+    );
+    const project = await this.#projects.findOne({ slug });
+    if (!project) throw new ProjectError("project_not_found", 404);
+    await this.#audit(actorId, "demo_project.ensured", "project", project._id);
+    return this.#toResponse(project);
+  }
+
   async #ownedProject(customerId: string, projectId: string) {
     const project = await this.#projects.findOne({ _id: projectId, customerId });
     if (!project) throw new ProjectError("project_not_found", 404);

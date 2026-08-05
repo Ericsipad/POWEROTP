@@ -34,10 +34,14 @@ export const VerificationTypeSchema = z.enum(verificationTypes);
 export const VerificationStateSchema = z.enum(verificationStates);
 export const AccountClassSchema = z.enum(accountClasses);
 
+export const TargetNumberSchema = z
+  .string()
+  .regex(/^\+[1-9]\d{7,14}$/, "Use E.164 format");
+
 export const CreateVerificationSchema = z
   .object({
     type: VerificationTypeSchema,
-    targetNumber: z.string().regex(/^\+[1-9]\d{7,14}$/, "Use E.164 format"),
+    targetNumber: TargetNumberSchema,
     code: z.string().regex(/^\d{5}$/).optional(),
     browserResponse: z.boolean().default(false),
   })
@@ -141,6 +145,16 @@ export const VerificationStatusSchema = z.object({
   challenge: ChallengeSchema.optional(),
 });
 
+/**
+ * A reduced request shape for the public, anonymous "try it now" demo
+ * endpoint: no idempotency key, code, or browser-response negotiation, and
+ * it is only ever accepted for the operator-configured demo project.
+ */
+export const DemoVerificationRequestSchema = z.object({
+  type: VerificationTypeSchema,
+  targetNumber: TargetNumberSchema,
+});
+
 export const InteractionSummarySchema = z.object({
   interactionId: z.string().min(16),
   occurredAt: z.string().datetime(),
@@ -164,3 +178,4 @@ export type VerificationEvent = z.infer<typeof VerificationEventSchema>;
 export type CallbackEnvelope = z.infer<typeof CallbackEnvelopeSchema>;
 export type VerificationStatus = z.infer<typeof VerificationStatusSchema>;
 export type InteractionSummary = z.infer<typeof InteractionSummarySchema>;
+export type DemoVerificationRequest = z.infer<typeof DemoVerificationRequestSchema>;

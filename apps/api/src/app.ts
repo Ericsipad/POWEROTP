@@ -16,6 +16,7 @@ import { ProjectError, type ProjectService } from "./project-service.js";
 import { registerProjectRoutes } from "./project-routes.js";
 import { VerificationError, type VerificationService } from "./verification-service.js";
 import { registerVerificationRoutes } from "./verification-routes.js";
+import { registerDemoRoutes } from "./demo-routes.js";
 
 export interface AppReadiness {
   rateLimitStore?: Redis;
@@ -30,7 +31,10 @@ export interface Phase2Services {
 
 export interface Phase3Services {
   db: Db;
-  config: Pick<ProductionConfig, "API_KEY_HASH_SECRET" | "INTERACTION_TOKEN_SECRET">;
+  config: Pick<
+    ProductionConfig,
+    "API_KEY_HASH_SECRET" | "INTERACTION_TOKEN_SECRET" | "DEMO_PROJECT_SLUG" | "PUBLIC_APP_URL"
+  >;
   verifications: VerificationService;
 }
 
@@ -137,8 +141,9 @@ export function buildApp(
 
   if (phase2 && phase3) {
     registerAuthRoutes(app, phase2.auth, phase2.config);
-    registerProjectRoutes(app, phase2.auth, phase2.projects, phase3.verifications);
+    registerProjectRoutes(app, phase2.auth, phase2.projects, phase3.verifications, phase3.config);
     registerVerificationRoutes(app, phase3.db, phase3.config, phase3.verifications);
+    registerDemoRoutes(app, phase3.db, phase3.config, phase3.verifications);
   }
 
   return app;

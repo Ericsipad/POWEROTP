@@ -11,3 +11,6 @@ coverage/
 Thumbs.db
 .idea/
 .vscode/
+
+# Local-only agent context with infra access details; never commit droplet/SSH info.
+.cursor/rules/droplet-ssh-access.mdc

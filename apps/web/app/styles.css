@@ -99,6 +99,17 @@ a {
   padding: 104px 0 60px;
 }
 
+.heroGrid {
+  align-items: start;
+  display: grid;
+  gap: 60px;
+  grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr);
+}
+
+.heroMain {
+  min-width: 0;
+}
+
 .eyebrow,
 .sectionLabel {
   align-items: center;
@@ -328,6 +339,79 @@ pre {
   padding: 18px 22px;
 }
 
+.tryItNow {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 26px;
+}
+
+.tryItNowCopy {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.55;
+  margin: 10px 0 20px;
+}
+
+.tryItNowForm {
+  display: grid;
+  gap: 14px;
+}
+
+.tryItNowHint {
+  color: var(--muted);
+  font-family: monospace;
+  font-size: 11px;
+  margin: -6px 0 0;
+}
+
+.tryItNowTypes {
+  display: grid;
+  gap: 8px;
+}
+
+.tryItNowType {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  cursor: pointer;
+  display: grid;
+  gap: 2px;
+  grid-template-columns: 16px 1fr;
+  padding: 10px 12px;
+}
+
+.tryItNowType input {
+  grid-row: 1 / span 2;
+  margin-top: 3px;
+}
+
+.tryItNowTypeName {
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.tryItNowTypeDescription {
+  color: var(--muted);
+  font-size: 11px;
+  grid-column: 2;
+  line-height: 1.4;
+}
+
+.tryItNowTypeActive {
+  background: #f4fbe8;
+  border-color: var(--green-dark);
+}
+
+.tryItNowCode {
+  margin-top: 20px;
+}
+
+.tryItNowCode pre {
+  font-size: 11px;
+  max-height: 260px;
+  padding: 20px 18px;
+}
+
 .footer {
   align-items: center;
   display: flex;
@@ -352,6 +436,11 @@ pre {
   .hero {
     min-height: auto;
     padding-top: 70px;
+  }
+
+  .heroGrid {
+    gap: 40px;
+    grid-template-columns: 1fr;
   }
 
   .statusStrip {
