@@ -10,9 +10,9 @@ five-digit voice codes, recording challenges, and SMS codes.
 - `apps/mcp` — anonymous read-only integration MCP server
 - `apps/worker` — background orchestration
 - `apps/telephony-agent` — Phase 4 Asterisk droplet agent
-- `packages/contracts` — shared runtime schemas
-- `packages/sdk-js` — server-side TypeScript client foundation
-- `packages/widget-loader` — hosted-widget loader foundation
+- `libraries/contracts` — shared runtime schemas
+- `libraries/sdk-js` — server-side TypeScript client foundation
+- `libraries/widget-loader` — hosted-widget loader foundation
 - `docs` — product plan, specification, threat model, and acceptance criteria
 
 ## DigitalOcean

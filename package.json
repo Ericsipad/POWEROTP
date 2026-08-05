@@ -7,7 +7,7 @@
   },
   "workspaces": [
     "apps/*",
-    "packages/*"
+    "libraries/*"
   ],
   "scripts": {
     "build": "npm run build -w @powerotp/contracts && npm run build -w @powerotp/server-sdk -w @powerotp/widget-loader && npm run build -w @powerotp/api -w @powerotp/mcp -w @powerotp/worker -w @powerotp/telephony-agent -w @powerotp/web",
