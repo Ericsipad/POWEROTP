@@ -20,10 +20,11 @@ assigns them to specific telephony nodes.
 
 ## DigitalOcean App Platform
 
-- Production app connected to this GitHub repository
+- Production app connected to this GitHub repository via the normal "Create App" flow
+  (Node.js auto-detected from `package.json`; no App Spec YAML involved), documented in
+  [`infrastructure/app-platform/README.md`](../infrastructure/app-platform/README.md)
 - Production branch and auto-deploy policy
-- The single `app` component configured from [`.do/app.yaml`](../.do/app.yaml)
-- App-level environment variables entered in App Platform
+- One component; environment variables entered directly in the App Platform UI
 - One public domain (`powerotp.com`) serving web, `/v1` API, and `/mcp`
 - Health checks, logs, alerts, and rollback access
 - Outbound network access to Atlas, Valkey, Spaces, callbacks, and telephony nodes

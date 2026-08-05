@@ -1,38 +1,44 @@
-# DigitalOcean App Platform connection
+# DigitalOcean App Platform setup
+
+Set this app up in DigitalOcean exactly the same way as every other app here: connect
+the GitHub repo through the normal "Create App" flow and let App Platform auto-detect
+the build/run commands. There is no App Spec YAML to paste in and nothing infrastructure-
+as-code about this — the root `package.json`'s `build`/`start` scripts already do the
+right thing for a plain Node.js app.
 
 ## Repository selection
 
 - Repository: `Ericsipad/POWEROTP`
 - Branch: `main`
-- Source directory: `/`
-- App specification: [`.do/app.yaml`](../../.do/app.yaml)
+- Source directory: `/` (not a subfolder — this is an npm workspace monorepo and the
+  build needs the root lockfile plus the shared library packages)
+- Auto-detected environment: Node.js
 
-The source directory must be `/`, not a subfolder. This is an npm workspace monorepo and
-the build needs the root lockfile plus shared contracts.
+App Platform should detect `npm run build` and `npm run start` from the root
+`package.json` automatically. If it asks you to confirm or override them, they should
+read exactly:
+
+- Build command: `npm run build`
+- Run command: `npm start`
+- HTTP port: whatever App Platform assigns via its `PORT` environment variable (the app
+  reads it automatically; you don't need to hardcode one)
 
 ## One component, one normal Next.js app
 
-There is exactly **one** App Platform component, `app`. It is built and run exactly like
-any other Next.js app — `npm run build`, `npm start` — with no custom server. Every
-API endpoint (`/v1/*`, `/mcp`, `/health`, `/ready`) is a standard Next.js Route Handler
-under `apps/web/app`, backed by library code imported from `apps/api` and `apps/mcp`
-(see `apps/web/lib/server-context.ts` for how the database connection, background
-workers, and services are initialized once via `apps/web/instrumentation.ts`).
-
-There is no separate `web`/`api`/`mcp` service split and no ingress path-routing
-configuration to keep in sync.
+Everything — the marketing/dashboard site, the customer and verification API under
+`/v1`, its durable background workers, and the public `/mcp` integration guide — is one
+Next.js app (`apps/web`), built and run like any other Next.js app. `apps/api` and
+`apps/mcp` are library code imported by it, not separate services. There is nothing else
+to create in App Platform: one app, one component.
 
 Do not deploy `apps/telephony-agent` to App Platform. It belongs on each Asterisk droplet
 in Phase 4.
 
 ## Required App Platform variables
 
-All variables are entered once as **app-level** environment variables in the App
-Platform UI (App → Settings → App-Level Environment Variables) — there being only one
-component, this is also the only place they need to exist. Do not commit their values
-and do not create a repository `.env` file. `.do/app.yaml`'s top-level `envs:` list
-documents what must exist; App Platform does not auto-sync it from the repo, so update
-both places when adding a variable.
+Enter these once as environment variables in the App Platform UI (your app's Settings →
+App-Level Environment Variables, same as your other apps). Do not commit their values
+and do not create a repository `.env` file.
 
 - `MONGODB_URI`: MongoDB Atlas TLS connection string
 - `VALKEY_URL`: authenticated `rediss://` connection string
@@ -45,17 +51,14 @@ both places when adding a variable.
 - `EMAIL_FROM`: verified POWEROTP sender address
 - `PUBLIC_APP_URL` / `PUBLIC_API_URL`: both `https://powerotp.com` (see Domains below)
 - `DEMO_PROJECT_SLUG`: optional; slug of the project backing the public "try it now"
-  widget on the marketing site. Committed as `demo`; after deploy, sign in at
-  `/admin` and click "Provision demo project" once to create it at that exact slug.
-  Leave the variable unset to keep the demo endpoints disabled.
+  widget on the marketing site — use `demo`. After deploy, sign in at `/admin` and click
+  "Provision demo project" once to create it at that exact slug. Leave the variable
+  unset to keep the demo endpoints disabled.
 - `OUTBOUND1_URL` / `OUTBOUND1_USER` / `OUTBOUND1_PASS` through `OUTBOUND4_*`: optional
   VoIP.ms trunk credentials, one dedicated outbound per verification method
   (`OUTBOUND1`=`call_reachability`, `OUTBOUND2`=`voice_code`,
   `OUTBOUND3`=`voice_challenge`, `OUTBOUND4`=`sms_code`) — see
   `apps/api/src/outbound-trunks.ts`. Leave unset until Phase 4 telephony wiring.
-
-The committed `SET_IN_APP_PLATFORM` values are deliberate invalid placeholders. Replace
-them in DigitalOcean before the first deployment.
 
 ## Domains
 
@@ -68,9 +71,7 @@ subdomains or point either URL at one; the app will build broken absolute URLs (
 
 ## Release checks
 
-App Platform should use Node 22. The build command runs `npm ci` from `/`, then builds
-contracts, mcp, web, and api in that dependency order (the API process embeds the
-already-built web app and mcp handler at runtime). A deployment is healthy only when:
+App Platform should use Node 22. A deployment is healthy only when:
 
 - `/health` returns `200`
 - `/ready` returns `200` once Atlas and Valkey are reachable

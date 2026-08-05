@@ -31,9 +31,10 @@ Phase 2 customer/admin setup and first-admin enrollment are documented in
 
 ## DigitalOcean
 
-Connect App Platform to repository `Ericsipad/POWEROTP`, branch `main`, using source
-directory `/`. The deployable specification is [`.do/app.yaml`](.do/app.yaml); setup and
-required encrypted variables are documented in
+Set up the same way as any other app: connect App Platform to repository
+`Ericsipad/POWEROTP`, branch `main`, source directory `/`, and let it auto-detect the
+Node.js build/run commands from `package.json`. No App Spec YAML to paste in. Setup
+details and required environment variables are documented in
 [`infrastructure/app-platform/README.md`](infrastructure/app-platform/README.md).
 
 ## Commands
