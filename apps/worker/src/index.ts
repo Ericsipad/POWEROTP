@@ -4,7 +4,6 @@ import { z } from "zod";
 
 const config = z
   .object({
-    NODE_ENV: z.literal("production"),
     MONGODB_URI: z.string().startsWith("mongodb"),
     VALKEY_URL: z.string().startsWith("rediss://"),
   })
@@ -39,7 +38,6 @@ console.info(
   JSON.stringify({
     service: "powerotp-worker",
     status: "ready",
-    production: config.NODE_ENV === "production",
   }),
 );
 

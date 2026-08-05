@@ -27,7 +27,6 @@ their values and do not create a repository `.env` file.
 
 ### API
 
-- `NODE_ENV=production`
 - `MONGODB_URI`: MongoDB Atlas TLS connection string
 - `VALKEY_URL`: authenticated `rediss://` connection string
 - `INTERACTION_TOKEN_SECRET`: at least 32 random bytes
@@ -36,13 +35,12 @@ their values and do not create a repository `.env` file.
 
 ### Worker
 
-- `NODE_ENV=production`
 - `MONGODB_URI`
 - `VALKEY_URL`
 
 ### Web and MCP
 
-- `NODE_ENV=production`
+No application environment variables are required during Phase 1.
 
 The committed `SET_IN_APP_PLATFORM` values are deliberate invalid placeholders. Replace
 them in DigitalOcean before the first deployment.

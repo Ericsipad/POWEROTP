@@ -2,7 +2,6 @@ import { z } from "zod";
 
 const config = z
   .object({
-    NODE_ENV: z.literal("production"),
     NODE_ID: z.string().uuid(),
     CONTROL_PLANE_URL: z.string().url().startsWith("https://"),
     MTLS_CERT_PATH: z.string().startsWith("/"),

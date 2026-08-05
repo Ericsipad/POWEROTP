@@ -21,7 +21,6 @@ import {
 
 const config = z
   .object({
-    NODE_ENV: z.literal("production"),
     PORT: z.coerce.number().int().positive().default(3002),
   })
   .parse(process.env);

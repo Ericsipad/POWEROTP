@@ -4,7 +4,6 @@
   "version": "0.1.0",
   "scripts": {
     "build": "next build",
-    "dev": "next dev",
     "lint": "tsc --noEmit",
     "start": "next start",
     "typecheck": "tsc --noEmit"

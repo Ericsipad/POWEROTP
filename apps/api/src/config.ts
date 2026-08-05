@@ -1,7 +1,6 @@
 import { z } from "zod";
 
 const ProductionConfigSchema = z.object({
-  NODE_ENV: z.literal("production"),
   PORT: z.coerce.number().int().positive().default(3001),
   MONGODB_URI: z.string().startsWith("mongodb"),
   VALKEY_URL: z.string().startsWith("rediss://"),

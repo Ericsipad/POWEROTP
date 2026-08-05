@@ -16,11 +16,6 @@ services:
     instance_size_slug: apps-s-1vcpu-1gb
     health_check:
       http_path: /api/health
-    envs:
-      - key: NODE_ENV
-        scope: RUN_AND_BUILD_TIME
-        value: production
-
   - name: api
     github:
       repo: Ericsipad/POWEROTP
@@ -36,9 +31,6 @@ services:
     health_check:
       http_path: /health
     envs:
-      - key: NODE_ENV
-        scope: RUN_AND_BUILD_TIME
-        value: production
       - key: MONGODB_URI
         scope: RUN_TIME
         type: SECRET
@@ -73,11 +65,6 @@ services:
     instance_size_slug: apps-s-1vcpu-1gb
     health_check:
       http_path: /health
-    envs:
-      - key: NODE_ENV
-        scope: RUN_AND_BUILD_TIME
-        value: production
-
 workers:
   - name: worker
     github:
@@ -91,9 +78,6 @@ workers:
     instance_count: 1
     instance_size_slug: apps-s-1vcpu-1gb
     envs:
-      - key: NODE_ENV
-        scope: RUN_AND_BUILD_TIME
-        value: production
       - key: MONGODB_URI
         scope: RUN_TIME
         type: SECRET
