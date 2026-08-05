@@ -1,0 +1,384 @@
+:root {
+  --ink: #10231d;
+  --muted: #5f6f69;
+  --paper: #f4f3ed;
+  --panel: #ffffff;
+  --line: #d9ded8;
+  --green: #b8f34a;
+  --green-dark: #2f6e49;
+  --night: #10231d;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.shell {
+  width: min(1180px, calc(100% - 48px));
+  margin-inline: auto;
+}
+
+.nav {
+  align-items: center;
+  display: flex;
+  height: 88px;
+  justify-content: space-between;
+}
+
+.brand {
+  align-items: center;
+  display: inline-flex;
+  font-size: 15px;
+  font-weight: 900;
+  gap: 10px;
+  letter-spacing: 0.08em;
+}
+
+.brandMark {
+  align-items: center;
+  background: var(--ink);
+  border-radius: 9px;
+  color: var(--green);
+  display: inline-flex;
+  font-size: 18px;
+  height: 34px;
+  justify-content: center;
+  letter-spacing: 0;
+  width: 34px;
+}
+
+.navLinks {
+  align-items: center;
+  display: flex;
+  font-size: 14px;
+  font-weight: 700;
+  gap: 28px;
+}
+
+.button {
+  align-items: center;
+  background: var(--ink);
+  border: 1px solid var(--ink);
+  border-radius: 9px;
+  color: white;
+  display: inline-flex;
+  font-size: 14px;
+  font-weight: 800;
+  gap: 28px;
+  justify-content: center;
+  padding: 16px 20px;
+}
+
+.buttonSmall {
+  padding: 10px 15px;
+}
+
+.buttonGhost {
+  background: transparent;
+  color: var(--ink);
+}
+
+.hero {
+  min-height: 690px;
+  padding: 104px 0 60px;
+}
+
+.eyebrow,
+.sectionLabel {
+  align-items: center;
+  color: var(--green-dark);
+  display: flex;
+  font-size: 12px;
+  font-weight: 900;
+  gap: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.pulse {
+  background: var(--green-dark);
+  border: 4px solid #dcebcf;
+  border-radius: 50%;
+  height: 12px;
+  width: 12px;
+}
+
+h1 {
+  font-size: clamp(66px, 9vw, 126px);
+  letter-spacing: -0.075em;
+  line-height: 0.82;
+  margin: 35px 0;
+  max-width: 980px;
+}
+
+h1 em {
+  color: var(--green-dark);
+  font-family: Georgia, "Times New Roman", serif;
+  font-weight: 400;
+}
+
+.heroCopy {
+  color: var(--muted);
+  font-size: 20px;
+  line-height: 1.6;
+  max-width: 660px;
+}
+
+.heroActions {
+  align-items: center;
+  display: flex;
+  gap: 28px;
+  margin-top: 35px;
+}
+
+.textLink {
+  border-bottom: 1px solid var(--ink);
+  font-size: 14px;
+  font-weight: 800;
+  padding-bottom: 3px;
+}
+
+.statusStrip {
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  display: flex;
+  font-family: monospace;
+  font-size: 12px;
+  gap: 13px;
+  margin-top: 90px;
+  overflow: hidden;
+  padding: 18px 0;
+  white-space: nowrap;
+}
+
+.statusStrip strong {
+  color: var(--green-dark);
+}
+
+.statusStrip i {
+  color: #a9b3af;
+}
+
+.section {
+  padding: 120px 0;
+}
+
+.sectionHeading {
+  display: grid;
+  grid-template-columns: 1fr 2fr;
+  margin-bottom: 58px;
+}
+
+.sectionHeading span {
+  color: var(--green-dark);
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+h2 {
+  font-size: clamp(38px, 5vw, 62px);
+  letter-spacing: -0.05em;
+  line-height: 1.02;
+  margin: 0;
+}
+
+.methodGrid {
+  display: grid;
+  gap: 1px;
+  grid-template-columns: repeat(4, 1fr);
+}
+
+.methodCard {
+  background: var(--panel);
+  border-top: 3px solid var(--ink);
+  min-height: 290px;
+  padding: 28px;
+}
+
+.methodCard:nth-child(3) {
+  background: var(--ink);
+  border-color: var(--green);
+  color: white;
+}
+
+.methodNumber {
+  color: var(--green-dark);
+  font-family: monospace;
+  font-size: 12px;
+}
+
+.methodCard:nth-child(3) .methodNumber {
+  color: var(--green);
+}
+
+.methodCard h3 {
+  font-size: 21px;
+  margin: 78px 0 16px;
+}
+
+.methodCard p {
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.65;
+  margin: 0;
+}
+
+.methodCard:nth-child(3) p {
+  color: #b8c5c0;
+}
+
+.integration {
+  background: var(--night);
+  color: white;
+  padding: 120px 0;
+}
+
+.integrationGrid {
+  display: grid;
+  gap: 100px;
+  grid-template-columns: 1fr 1fr;
+}
+
+.integration h2 {
+  margin: 24px 0 48px;
+}
+
+.steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.steps li {
+  align-items: center;
+  border-top: 1px solid #365048;
+  color: #c4cfca;
+  display: grid;
+  font-size: 14px;
+  gap: 18px;
+  grid-template-columns: 28px 1fr;
+  line-height: 1.5;
+  padding: 18px 0;
+}
+
+.steps b {
+  color: var(--green);
+  font-family: monospace;
+}
+
+.codePanel {
+  align-self: center;
+  background: #183129;
+  border: 1px solid #3b544b;
+  border-radius: 15px;
+  overflow: hidden;
+}
+
+.codeTop {
+  align-items: center;
+  border-bottom: 1px solid #3b544b;
+  display: flex;
+  font-size: 12px;
+  font-weight: 800;
+  justify-content: space-between;
+  padding: 18px 22px;
+}
+
+.readOnly {
+  color: var(--green);
+  font-family: monospace;
+  font-size: 10px;
+}
+
+pre {
+  color: #e8f7d0;
+  font-size: 14px;
+  line-height: 1.7;
+  margin: 0;
+  overflow: auto;
+  padding: 32px 24px;
+}
+
+.codePanel p {
+  border-top: 1px solid #3b544b;
+  color: #9db0a8;
+  font-size: 12px;
+  line-height: 1.6;
+  margin: 0;
+  padding: 18px 22px;
+}
+
+.footer {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  min-height: 160px;
+}
+
+.footer p {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+@media (max-width: 800px) {
+  .shell {
+    width: min(100% - 30px, 1180px);
+  }
+
+  .navLinks > a:not(.button) {
+    display: none;
+  }
+
+  .hero {
+    min-height: auto;
+    padding-top: 70px;
+  }
+
+  .statusStrip {
+    margin-top: 60px;
+  }
+
+  .sectionHeading,
+  .integrationGrid {
+    gap: 28px;
+    grid-template-columns: 1fr;
+  }
+
+  .methodGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .methodCard {
+    min-height: 230px;
+  }
+
+  .methodCard h3 {
+    margin-top: 45px;
+  }
+
+  .footer {
+    align-items: flex-start;
+    flex-direction: column;
+    justify-content: center;
+  }
+}

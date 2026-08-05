@@ -1,0 +1,122 @@
+name: powerotp
+region: nyc
+
+services:
+  - name: web
+    github:
+      repo: Ericsipad/POWEROTP
+      branch: main
+      deploy_on_push: true
+    source_dir: /
+    environment_slug: node-js
+    build_command: npm ci && npm run build -w @powerotp/contracts && npm run build -w @powerotp/web
+    run_command: npm run start -w @powerotp/web -- -p $PORT
+    http_port: 3000
+    instance_count: 1
+    instance_size_slug: apps-s-1vcpu-1gb
+    health_check:
+      http_path: /api/health
+    envs:
+      - key: NODE_ENV
+        scope: RUN_AND_BUILD_TIME
+        value: production
+
+  - name: api
+    github:
+      repo: Ericsipad/POWEROTP
+      branch: main
+      deploy_on_push: true
+    source_dir: /
+    environment_slug: node-js
+    build_command: npm ci && npm run build -w @powerotp/contracts && npm run build -w @powerotp/api
+    run_command: npm run start -w @powerotp/api
+    http_port: 3001
+    instance_count: 1
+    instance_size_slug: apps-s-1vcpu-1gb
+    health_check:
+      http_path: /health
+    envs:
+      - key: NODE_ENV
+        scope: RUN_AND_BUILD_TIME
+        value: production
+      - key: MONGODB_URI
+        scope: RUN_TIME
+        type: SECRET
+        value: SET_IN_APP_PLATFORM
+      - key: VALKEY_URL
+        scope: RUN_TIME
+        type: SECRET
+        value: SET_IN_APP_PLATFORM
+      - key: INTERACTION_TOKEN_SECRET
+        scope: RUN_TIME
+        type: SECRET
+        value: SET_IN_APP_PLATFORM
+      - key: CONFIG_ENCRYPTION_KEY
+        scope: RUN_TIME
+        type: SECRET
+        value: SET_IN_APP_PLATFORM
+      - key: PUBLIC_API_URL
+        scope: RUN_TIME
+        value: https://api.powerotp.com
+
+  - name: mcp
+    github:
+      repo: Ericsipad/POWEROTP
+      branch: main
+      deploy_on_push: true
+    source_dir: /
+    environment_slug: node-js
+    build_command: npm ci && npm run build -w @powerotp/contracts && npm run build -w @powerotp/mcp
+    run_command: npm run start -w @powerotp/mcp
+    http_port: 3002
+    instance_count: 1
+    instance_size_slug: apps-s-1vcpu-1gb
+    health_check:
+      http_path: /health
+    envs:
+      - key: NODE_ENV
+        scope: RUN_AND_BUILD_TIME
+        value: production
+
+workers:
+  - name: worker
+    github:
+      repo: Ericsipad/POWEROTP
+      branch: main
+      deploy_on_push: true
+    source_dir: /
+    environment_slug: node-js
+    build_command: npm ci && npm run build -w @powerotp/worker
+    run_command: npm run start -w @powerotp/worker
+    instance_count: 1
+    instance_size_slug: apps-s-1vcpu-1gb
+    envs:
+      - key: NODE_ENV
+        scope: RUN_AND_BUILD_TIME
+        value: production
+      - key: MONGODB_URI
+        scope: RUN_TIME
+        type: SECRET
+        value: SET_IN_APP_PLATFORM
+      - key: VALKEY_URL
+        scope: RUN_TIME
+        type: SECRET
+        value: SET_IN_APP_PLATFORM
+
+ingress:
+  rules:
+    - component:
+        name: api
+      match:
+        path:
+          prefix: /v1
+    - component:
+        name: mcp
+      match:
+        path:
+          prefix: /mcp
+    - component:
+        name: web
+      match:
+        path:
+          prefix: /
