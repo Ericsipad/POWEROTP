@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "engines": {
-    "node": ">=22.12.0"
+    "node": "22.x"
   },
   "workspaces": [
     "apps/*",
@@ -12,6 +12,7 @@
   "scripts": {
     "build": "npm run build -w @powerotp/contracts && npm run build -w @powerotp/server-sdk -w @powerotp/widget-loader && npm run build -w @powerotp/api -w @powerotp/mcp -w @powerotp/worker -w @powerotp/telephony-agent -w @powerotp/web",
     "lint": "npm run lint --workspaces --if-present",
+    "start": "npm run start -w @powerotp/web",
     "test": "npm run test --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "verify": "npm run build && npm run lint && npm run test"
