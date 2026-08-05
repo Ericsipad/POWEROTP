@@ -5,7 +5,7 @@ import {
 } from "@powerotp/contracts";
 
 export const integrationOverview = {
-  apiBaseUrl: "https://api.powerotp.com/v1",
+  apiBaseUrl: "https://powerotp.com/v1",
   authentication:
     "Send the project secret as Authorization: Bearer <secret> from your server only.",
   creation:
@@ -51,7 +51,7 @@ export function buildExample(type: VerificationType, language: "curl" | "typescr
   );
 
   if (language === "curl") {
-    return `curl -X POST "https://api.powerotp.com/v1/projects/PROJECT_SLUG/verifications" \\
+    return `curl -X POST "https://powerotp.com/v1/projects/PROJECT_SLUG/verifications" \\
   -H "Authorization: Bearer $POWEROTP_API_KEY" \\
   -H "Content-Type: application/json" \\
   -H "Idempotency-Key: $(uuidgen)" \\
@@ -59,7 +59,7 @@ export function buildExample(type: VerificationType, language: "curl" | "typescr
   }
 
   return `const response = await fetch(
-  "https://api.powerotp.com/v1/projects/PROJECT_SLUG/verifications",
+  "https://powerotp.com/v1/projects/PROJECT_SLUG/verifications",
   {
     method: "POST",
     headers: {

@@ -5,17 +5,18 @@
 - MongoDB Atlas production connection
 - DigitalOcean Managed Valkey TLS connection
 - Brevo transactional-email API key and verified sender
-- App Platform web and API components routed through the same public origin
+- The single App Platform component serving `powerotp.com` (web, `/v1` API, and `/mcp`
+  all handled in-process — no `app.`/`api.` subdomains, no ingress path-routing)
 
-Enter all values through App Platform encrypted variables. Generate each cryptographic
-secret independently with at least 32 random bytes.
+Enter all values once as app-level environment variables in App Platform. Generate each
+cryptographic secret independently with at least 32 random bytes.
 
 ### Provisioning Valkey
 
 Valkey is created as its own DigitalOcean **Managed Database** resource (Databases →
 Create Database Cluster → engine Valkey), separate from the App Platform app and from
 any telephony droplet. Once created, copy its `rediss://` connection string into the
-`api` component's `VALKEY_URL` environment variable in App Platform. Phase 2 uses it for
+app-level `VALKEY_URL` environment variable in App Platform. Phase 2 uses it for
 rate limiting; Phase 3 also uses it (via BullMQ) for the verification dispatch, timeout,
 and signed-callback-retry queues. No droplet ever needs direct access to Valkey.
 
@@ -25,7 +26,7 @@ The bootstrap endpoint works only while no platform administrator exists. Set a 
 high-entropy `ADMIN_BOOTSTRAP_TOKEN`, then make one server-side request:
 
 ```sh
-curl -X POST "https://api.powerotp.com/v1/admin/bootstrap" \
+curl -X POST "https://powerotp.com/v1/admin/bootstrap" \
   -H "Content-Type: application/json" \
   -H "X-Admin-Bootstrap-Token: $ADMIN_BOOTSTRAP_TOKEN" \
   --data '{"email":"ADMIN_EMAIL","password":"ADMIN_STRONG_PASSWORD"}'

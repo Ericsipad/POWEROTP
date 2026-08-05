@@ -13,7 +13,7 @@ export function mountPowerOtpWidget(
   options: PowerOtpWidgetOptions,
 ): PowerOtpWidgetHandle {
   const widgetUrl = new URL(
-    options.widgetUrl ?? "https://app.powerotp.com/widget",
+    options.widgetUrl ?? "https://powerotp.com/widget",
   );
   if (widgetUrl.protocol !== "https:") {
     throw new Error("POWEROTP widgetUrl must use HTTPS");

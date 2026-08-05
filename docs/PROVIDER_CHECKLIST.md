@@ -22,10 +22,9 @@ assigns them to specific telephony nodes.
 
 - Production app connected to this GitHub repository
 - Production branch and auto-deploy policy
-- Web, API, and MCP components configured from
-  [`infrastructure/app-platform/app.yaml`](../infrastructure/app-platform/app.yaml)
-- Encrypted environment variables entered in App Platform
-- Public domains for web, API, and MCP
+- The single `app` component configured from [`.do/app.yaml`](../.do/app.yaml)
+- App-level environment variables entered in App Platform
+- One public domain (`powerotp.com`) serving web, `/v1` API, and `/mcp`
 - Health checks, logs, alerts, and rollback access
 - Outbound network access to Atlas, Valkey, Spaces, callbacks, and telephony nodes
 

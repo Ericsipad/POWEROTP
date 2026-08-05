@@ -26,7 +26,7 @@ const methods = [
 const mcpConfig = `{
   "mcpServers": {
     "powerotp": {
-      "url": "https://mcp.powerotp.com/mcp"
+      "url": "https://powerotp.com/mcp"
     }
   }
 }`;

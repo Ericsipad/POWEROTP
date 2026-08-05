@@ -74,10 +74,11 @@ consumed after submission or a terminal result.
 
 ## MCP
 
-`https://mcp.powerotp.com/mcp` is a public, anonymous, read-only Streamable HTTP MCP
-server. It teaches Cursor, Claude, and other clients how to implement the API. It has no
-project access, credentials, customer data, or billable tools and cannot originate calls
-or SMS.
+`https://powerotp.com/mcp` is a public, anonymous, read-only Streamable HTTP MCP
+server (routed by path on the single shared domain; there is no separate `mcp.`
+subdomain today). It teaches Cursor, Claude, and other clients how to implement the
+API. It has no project access, credentials, customer data, or billable tools and cannot
+originate calls or SMS.
 
 ## Phases
 

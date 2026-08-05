@@ -4,27 +4,36 @@
 
 - Repository: `Ericsipad/POWEROTP`
 - Branch: `main`
-- Source directory for every component: `/`
+- Source directory: `/`
 - App specification: [`.do/app.yaml`](../../.do/app.yaml)
 
-The source directory must be `/`, not `/apps/web` or another subfolder. This is an npm
-workspace monorepo and each component needs the root lockfile plus shared contracts.
+The source directory must be `/`, not a subfolder. This is an npm workspace monorepo and
+the build needs the root lockfile plus shared contracts.
 
-## Components
+## One component
 
-- `web`: Next.js marketing and account application
-- `api`: Fastify control plane and durable background queue processing
-- `mcp`: public read-only integration MCP server
+There is exactly **one** App Platform component, `app`. It runs a single Node process
+(`apps/api/src/server.ts`) that serves:
+
+- The marketing/dashboard site (Next.js, embedded via its programmatic server API)
+- The customer and verification API under `/v1`, plus its durable background queue workers
+- The public, read-only MCP integration guide under `/mcp`
+
+There is no separate `web`/`api`/`mcp` service split and no ingress path-routing
+configuration to keep in sync — Fastify handles `/health`, `/ready`, `/v1/*`, and `/mcp`
+directly, and falls through to Next.js for every other path.
 
 Do not deploy `apps/telephony-agent` to App Platform. It belongs on each Asterisk droplet
 in Phase 4.
 
 ## Required App Platform variables
 
-Enter secrets in each component’s encrypted environment-variable panel. Do not commit
-their values and do not create a repository `.env` file.
-
-### API
+All variables are entered once as **app-level** environment variables in the App
+Platform UI (App → Settings → App-Level Environment Variables) — there being only one
+component, this is also the only place they need to exist. Do not commit their values
+and do not create a repository `.env` file. `.do/app.yaml`'s top-level `envs:` list
+documents what must exist; App Platform does not auto-sync it from the repo, so update
+both places when adding a variable.
 
 - `MONGODB_URI`: MongoDB Atlas TLS connection string
 - `VALKEY_URL`: authenticated `rediss://` connection string
@@ -35,8 +44,7 @@ their values and do not create a repository `.env` file.
 - `ADMIN_BOOTSTRAP_TOKEN`: at least 32 random bytes; remove after first admin setup
 - `BREVO_API_KEY`: production transactional-email API key
 - `EMAIL_FROM`: verified POWEROTP sender address
-- `PUBLIC_APP_URL`: final HTTPS web origin
-- `PUBLIC_API_URL`: final HTTPS API origin
+- `PUBLIC_APP_URL` / `PUBLIC_API_URL`: both `https://powerotp.com` (see Domains below)
 - `DEMO_PROJECT_SLUG`: optional; slug of the project backing the public "try it now"
   widget on the marketing site. Committed as `demo`; after deploy, sign in at
   `/admin` and click "Provision demo project" once to create it at that exact slug.
@@ -47,34 +55,29 @@ their values and do not create a repository `.env` file.
   `OUTBOUND3`=`voice_challenge`, `OUTBOUND4`=`sms_code`) — see
   `apps/api/src/outbound-trunks.ts`. Leave unset until Phase 4 telephony wiring.
 
-### Web and MCP
-
-No application environment variables are required during Phase 1.
-
 The committed `SET_IN_APP_PLATFORM` values are deliberate invalid placeholders. Replace
 them in DigitalOcean before the first deployment.
 
 ## Domains
 
-The initial app ingress supports the shared App Platform domain:
-
-- `/` → web
-- `/v1` → API
-- `/mcp` → MCP
-
-Add `app.powerotp.com`, `api.powerotp.com`, and `mcp.powerotp.com` after DNS is available,
-then update `PUBLIC_API_URL` and the published MCP snippets. Domain routing must be tested
-before removing the shared-domain paths.
+There is exactly one public web-facing domain, `powerotp.com` (plus `na1.powerotp.com`,
+which points directly at the first telephony droplet, not App Platform). One process
+serves every path on that single domain — `PUBLIC_APP_URL` and `PUBLIC_API_URL` are
+therefore both `https://powerotp.com`. Do not create separate `app.`/`api.`/`mcp.`
+subdomains or point either URL at one; the app will build broken absolute URLs (e.g.
+`statusUrl`) if it does.
 
 ## Release checks
 
-App Platform should use Node 22. The build commands run `npm ci` from `/` and compile only
-the component plus shared contracts. A deployment is healthy only when:
+App Platform should use Node 22. The build command runs `npm ci` from `/`, then builds
+contracts, mcp, web, and api in that dependency order (the API process embeds the
+already-built web app and mcp handler at runtime). A deployment is healthy only when:
 
-- Web returns `200` from `/api/health`
-- API returns `200` from `/health` and can reach Atlas/Valkey through `/ready`
-- MCP returns `200` from `/health`
-- API can reach Atlas and Valkey before accepting background work
+- `/health` returns `200`
+- `/ready` returns `200` once Atlas and Valkey are reachable
+- `/v1/capabilities` returns the verification types/states (proves the API routes are
+  actually being served, not falling through to the Next.js 404 page)
+- `/` returns the marketing site
 
-The API intentionally fails startup when required configuration is missing or data stores
-are unreachable.
+The app intentionally fails startup when required configuration is missing or data
+stores are unreachable.
