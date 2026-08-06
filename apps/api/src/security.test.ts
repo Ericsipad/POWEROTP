@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  createFiveDigitCode,
   decryptString,
   encryptString,
   hashPassword,
@@ -41,5 +42,12 @@ describe("security primitives", () => {
       ),
       true,
     );
+  });
+
+  it("generates a zero-padded five-digit code", () => {
+    for (let i = 0; i < 50; i += 1) {
+      const code = createFiveDigitCode();
+      assert.match(code, /^\d{5}$/);
+    }
   });
 });

@@ -3,6 +3,7 @@ import { EventEmitter } from "node:events";
 export interface AriChannelEvent {
   type: string;
   channel?: { id: string; state?: string };
+  playback?: { id: string };
   cause?: number;
 }
 
@@ -65,6 +66,23 @@ export class AriClient extends EventEmitter {
   async hangup(channelId: string): Promise<void> {
     const url = new URL(`/ari/channels/${channelId}`, this.baseUrl);
     await fetch(url, { method: "DELETE", headers: this.#authHeader() }).catch(() => undefined);
+  }
+
+  /**
+   * Plays `media` (e.g. `digits:12345`, repeatable via a comma-separated
+   * list like `digits:12345,digits:12345`) on an already-answered channel.
+   * `playbackId` is caller-generated, the same race-avoidance technique
+   * `originate`'s `channelId` uses: it lets the caller start filtering
+   * `PlaybackFinished` events before the HTTP response returns.
+   */
+  async play(channelId: string, media: string, playbackId: string): Promise<void> {
+    const url = new URL(`/ari/channels/${channelId}/play`, this.baseUrl);
+    url.searchParams.set("media", media);
+    url.searchParams.set("playbackId", playbackId);
+    const response = await fetch(url, { method: "POST", headers: this.#authHeader() });
+    if (!response.ok) {
+      throw new Error(`ARI play failed: ${response.status}`);
+    }
   }
 
   #connectOnce() {

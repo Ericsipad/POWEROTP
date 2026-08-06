@@ -4,6 +4,7 @@ import {
   createHash,
   createHmac,
   randomBytes,
+  randomInt,
   randomUUID,
   timingSafeEqual,
 } from "node:crypto";
@@ -34,6 +35,16 @@ export function createSortableId(prefix: string) {
 
 export function createSecret(bytes = 32) {
   return randomBytes(bytes).toString("base64url");
+}
+
+/**
+ * A cryptographically random five-digit code, generated server-side when
+ * a customer doesn't supply their own for `voice_code` (see
+ * `docs/PRODUCT_SPEC.md`: the client code is optional). Zero-padded so
+ * every value is exactly five digits, matching `CodeSubmissionSchema`.
+ */
+export function createFiveDigitCode() {
+  return String(randomInt(0, 100_000)).padStart(5, "0");
 }
 
 export function hashToken(value: string, secret: string) {

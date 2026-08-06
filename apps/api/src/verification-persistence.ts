@@ -12,7 +12,15 @@ export interface VerificationRequestDocument {
   sequence: number;
   correlationId: string;
   browserResponse: boolean;
-  expectedCode?: string;
+  /**
+   * Authenticated-encrypted with `CONFIG_ENCRYPTION_KEY` (same primitive as
+   * `ProjectDocument#callbackSecretEncrypted`), never plaintext — a
+   * five-digit code is short enough that a plaintext leak (logs, a DB
+   * snapshot, etc.) would be trivially guessable/replayable. Decrypted only
+   * transiently: once to compare against a submitted code, and once to
+   * hand to the telephony node that speaks it over the call.
+   */
+  expectedCodeEncrypted?: string;
   answerOptionId?: string;
   interactionTokenNonce?: string;
   interactionTokenConsumedAt?: Date;

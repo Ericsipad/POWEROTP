@@ -8,7 +8,13 @@ import { createHash } from "node:crypto";
 import type { Db } from "mongodb";
 
 import type { ProductionConfig } from "./config.js";
-import { createSortableId } from "./security.js";
+import {
+  createFiveDigitCode,
+  createSortableId,
+  decryptString,
+  encryptString,
+  safeEqual,
+} from "./security.js";
 import {
   initialVerificationState,
   isTerminalState,
@@ -52,7 +58,7 @@ export class VerificationService {
 
   constructor(
     db: Db,
-    private readonly config: Pick<ProductionConfig, "PUBLIC_API_URL">,
+    private readonly config: Pick<ProductionConfig, "PUBLIC_API_URL" | "CONFIG_ENCRYPTION_KEY">,
     private readonly enqueueDispatch: EnqueueDispatch,
     private readonly enqueueTimeout: EnqueueTimeout,
     private readonly enqueueCallback: EnqueueCallback,
@@ -83,6 +89,11 @@ export class VerificationService {
       if (verification) return this.#toAccepted(verification);
     }
 
+    // A client-supplied code is optional (docs/PRODUCT_SPEC.md); when absent
+    // for voice_code, the platform generates one itself rather than leaving
+    // nothing to actually speak over the call.
+    const code = input.type === "voice_code" ? input.code ?? createFiveDigitCode() : undefined;
+
     const now = new Date();
     const verification: VerificationRequestDocument = {
       _id: createSortableId("int"),
@@ -94,7 +105,9 @@ export class VerificationService {
       sequence: 0,
       correlationId,
       browserResponse: input.browserResponse,
-      expectedCode: input.code,
+      expectedCodeEncrypted: code
+        ? encryptString(code, this.config.CONFIG_ENCRYPTION_KEY)
+        : undefined,
       createdAt: now,
       updatedAt: now,
       expiresAt: new Date(now.getTime() + VERIFICATION_LIFETIME_MS),
@@ -250,7 +263,10 @@ export class VerificationService {
       throw new VerificationError("not_awaiting_response", 409);
     }
 
-    const correct = verification.expectedCode === code;
+    const expectedCode = verification.expectedCodeEncrypted
+      ? decryptString(verification.expectedCodeEncrypted, this.config.CONFIG_ENCRYPTION_KEY)
+      : undefined;
+    const correct = Boolean(expectedCode) && safeEqual(expectedCode!, code);
     const applied = await this.transition(
       interactionId,
       correct ? "succeeded" : "failed",
@@ -265,6 +281,16 @@ export class VerificationService {
     if (!verification) throw new VerificationError("verification_not_found", 404);
     const applied = await this.transition(interactionId, "canceled", "customer_canceled");
     if (!applied) throw new VerificationError("verification_not_cancelable", 409);
+  }
+
+  /**
+   * The one place a `voice_code` code is ever decrypted for a purpose other
+   * than validating a submission: handing it to the telephony node that
+   * claimed the job, so it has something to actually speak over the call.
+   */
+  codeForNodeJob(verification: VerificationRequestDocument): string | undefined {
+    if (!verification.expectedCodeEncrypted) return undefined;
+    return decryptString(verification.expectedCodeEncrypted, this.config.CONFIG_ENCRYPTION_KEY);
   }
 
   async projectStats(projectId: string) {

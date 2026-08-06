@@ -123,7 +123,9 @@ server at all. This is the one to keep building on.
 - **Public demo widget**: added ahead of Phase 4 (not in the original phase list) — a
   "try it now" widget on the marketing homepage hero, backed by the anonymous, tightly
   scoped `/v1/demo/verifications` endpoints and the `prj_demo` project above.
-- **Phase 4 (voice types 1 and 2 / telephony)**: **in progress.** Node identity (one
+- **Phase 4 (voice types 1 and 2 / telephony)**: **in progress, both types now have
+  real call-control logic** (`voice_code` added after `call_reachability` was proven
+  live — see "Phase 4 ARI call-control" below for both). Node identity (one
   shared `NODE_SECRET`, not mTLS or a per-node enrollment secret — see "Phase 4 node
   identity" below) is implemented and confirmed working end-to-end: `powerotpvoip1` is
   hardened, running Asterisk 20 + Node.js 22, and its `powerotp-agent` service
@@ -235,7 +237,7 @@ Platform and redeploying every node with the new value — identical in spirit t
   logs in to place or change it; the session doing the deployment writes it once as part
   of standing the node up.
 
-## Phase 4 ARI call-control (`call_reachability`, implemented)
+## Phase 4 ARI call-control (`call_reachability` and `voice_code`, implemented)
 
 The control plane never talks to Asterisk/ARI directly — only a droplet's
 `apps/telephony-agent` does, over ARI bound to `127.0.0.1`. Since a node only ever
@@ -291,6 +293,31 @@ a full minute:
   answered/busy/originate-failure/unrelated-channel-event paths) using a fake ARI client
   — no live Asterisk/VoIP.ms dependency in automated tests, consistent with the
   fake-transport-only-in-tests rule.
+- The origination/answer-detection logic (`apps/telephony-agent/src/originate-call.ts`)
+  and hangup-cause mapping (`hangup-causes.ts`) were extracted as shared modules once a
+  second method needed them, rather than duplicating: `voice_code`
+  (`apps/telephony-agent/src/voice-code-call.ts`) reuses the exact same
+  originate/wait-for-answer flow, then — once answered — plays the five-digit code as
+  ARI digit playback (`media=digits:12345,digits:12345`, repeated per
+  `CODE_REPEAT_COUNT`, currently 2) and hangs up once `PlaybackFinished` fires,
+  resolving at `awaiting_response` (not a terminal state — the code is graded later by
+  the existing, unchanged `submitCode` flow from Phase 3, not by anything the node
+  does). `apps/telephony-agent/src/job-poller.ts` now tries each type this node has a
+  trunk for in turn (currently `call_reachability` then `voice_code`) each poll cycle.
+- **Security fix made alongside this**: a `voice_code` interaction's expected code was
+  stored in plaintext (`VerificationRequestDocument#expectedCode`) since Phase 3, never
+  actually exercised until now — direct violation of `docs/MVP_ACCEPTANCE.md` Type 2
+  ("Codes never appear in ... stored plaintext"). Changed to
+  `expectedCodeEncrypted` (authenticated encryption with `CONFIG_ENCRYPTION_KEY`, the
+  same primitive already used for `ProjectDocument#callbackSecretEncrypted`), decrypted
+  only transiently: once to compare against a submitted code
+  (`VerificationService#submitCode`), and once to hand to the claiming node
+  (`VerificationService#codeForNodeJob`, called from the `jobs/next` route) — never
+  logged, never returned in any API response. Also: a customer-supplied code was always
+  optional per `docs/PRODUCT_SPEC.md`, but nothing generated one when omitted, so an
+  omitted code could never actually succeed a submission; `VerificationService#create`
+  now generates a cryptographically random five-digit code
+  (`apps/api/src/security.ts#createFiveDigitCode`) when one isn't supplied.
 
 ## Telephony droplet (`powerotpvoip1`) — hardening and base install done
 
@@ -393,15 +420,32 @@ comes after the socket is created.
    telephony)" above). Not yet observed live: a busy/no-answer/rejected/invalid
    outcome (the Q.850 cause-code mapping is only unit-tested so far), and there is no
    automated canary/synthetic-check running this periodically — a regression would
-   currently only be caught manually or by real customer traffic. `OUTBOUND2..4`
-   (voice_code, voice_challenge, sms_code) are still unset — get those from the user
-   when ready, and note their transports intentionally still return
-   `method_not_available` even once trunk credentials exist, until their own
-   dialplan/ARI logic is built the same way.
-2. The agent currently places one `call_reachability` call at a time, serially — there
-   is no concurrency limit to configure yet because there is no concurrency. Revisit
-   once real traffic needs more than one simultaneous call per node.
-3. Everything else in Phases 4–9 per `docs/PLAN.md`.
+   currently only be caught manually or by real customer traffic.
+2. `voice_code`'s call-control logic (speak the code, then defer to the existing
+   `submitCode` flow) is **built and unit-tested but not yet exercised against a real
+   live call** — `OUTBOUND2` has no real VoIP.ms credentials yet, so its transport
+   still fails immediately with `method_not_available` in production today, same as
+   before this session. **Deliberately deferred, per explicit instruction**: get
+   `OUTBOUND2`'s real VoIP.ms credentials from the user only once the rest of the
+   planned work is code-complete, then do one full pass validating every wired-up
+   method end-to-end together, rather than one live-credential round-trip per method.
+3. `voice_challenge` (Type 3) and `sms_code` (Type 4) remain on the
+   `unavailableTransport` stub — no call-control/provider-adapter logic built yet.
+   `voice_challenge` additionally needs Phase 5's recording/challenge administration
+   (there is no admin UI or media pipeline to author a challenge yet, so there's
+   nothing to play even once dial logic exists) — building its call-control ARI logic
+   alone, without that, wouldn't be end-to-end useful. `sms_code` doesn't need
+   Asterisk/ARI/a droplet at all — VoIP.ms's SMS API is a plain HTTPS call, so it can
+   likely be built as a provider adapter entirely inside `apps/api` (closer in shape to
+   `apps/api/src/email.ts`'s Brevo adapter than to the telephony-agent pattern) — note
+   this for whoever picks it up next, since `OUTBOUND4_URL/USER/PASS`'s SIP-trunk shape
+   (`outbound-trunks.ts`) doesn't actually fit an HTTP API credential; it may need its
+   own dedicated env vars instead of reusing the `OUTBOUND4_*` naming.
+4. The agent currently places one call at a time, serially (across every type it
+   handles), whichever type it tries first each poll cycle — there is no concurrency
+   limit to configure yet because there is no concurrency. Revisit once real traffic
+   needs more than one simultaneous call per node.
+5. Everything else in Phases 4–9 per `docs/PLAN.md`.
 
 ### Incident: a local ARI password was accidentally echoed to chat
 

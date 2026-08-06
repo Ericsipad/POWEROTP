@@ -3,7 +3,8 @@ import { EventEmitter } from "node:events";
 import { describe, it } from "node:test";
 
 import type { AriClient } from "./ari-client.js";
-import { placeReachabilityCall, reasonCodeForHangupCause } from "./reachability-call.js";
+import { reasonCodeForHangupCause } from "./hangup-causes.js";
+import { placeReachabilityCall } from "./reachability-call.js";
 
 describe("reasonCodeForHangupCause", () => {
   it("maps known Q.850 causes to the stable reason-code vocabulary", () => {

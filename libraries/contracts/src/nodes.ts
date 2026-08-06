@@ -49,6 +49,13 @@ export const NodeJobSchema = z.object({
   interactionId: z.string().min(16),
   type: VerificationTypeSchema,
   targetNumber: TargetNumberSchema,
+  /**
+   * Only present for `voice_code` jobs: the five-digit code to speak over
+   * the call. Never persisted in plaintext (see
+   * `apps/api/src/verification-service.ts`) — decrypted only for this one
+   * response, to this one authenticated node, for this one claim.
+   */
+  code: z.string().regex(/^\d{5}$/).optional(),
 });
 
 /**
@@ -59,6 +66,8 @@ export const NodeJobSchema = z.object({
 export const reportableNodeJobStates = [
   "ringing",
   "answered",
+  "playing",
+  "awaiting_response",
   "succeeded",
   "failed",
   "canceled",

@@ -73,14 +73,14 @@ function createNodeDispatchTransport(
 
 export function productionTransportRegistry(config: ProductionConfig): TransportRegistry {
   return {
-    // The only method with real dialplan/ARI call-control logic on the
+    // The two methods with real dialplan/ARI call-control logic on the
     // droplet so far (see apps/telephony-agent/src/job-poller.ts). The
-    // other three stay on the unavailable stub until their own
-    // call-control logic exists, even after their trunks are configured —
-    // otherwise their interactions would sit in `dispatching` for the full
+    // other two stay on the unavailable stub until their own call-control
+    // logic exists, even after their trunks are configured — otherwise
+    // their interactions would sit in `dispatching` for the full
     // interaction lifetime with no node ever able to execute them.
     call_reachability: createNodeDispatchTransport(config, "call_reachability"),
-    voice_code: unavailableTransport,
+    voice_code: createNodeDispatchTransport(config, "voice_code"),
     voice_challenge: unavailableTransport,
     sms_code: unavailableTransport,
   };
