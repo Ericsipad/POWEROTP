@@ -8,16 +8,19 @@ droplet" sections) for the ground truth of what is actually installed on
 - Localhost-only ARI (bound to `127.0.0.1`, never exposed) controlled by
   `apps/telephony-agent`, which is deployed as the hardened `systemd` unit in this
   directory (`powerotp-agent.service`).
-- Node identity is a **per-node hashed bearer secret** issued at enrollment
-  (`POST /v1/admin/nodes`), not mutual TLS — true mTLS termination is not
-  straightforward on DigitalOcean App Platform's shared ingress, so the agent
-  authenticates back to the control plane the same way a customer server authenticates
-  to the verification API (`Authorization: Bearer <secret>` over TLS). See
-  `libraries/contracts/src/nodes.ts` and `apps/api/src/node-service.ts`.
+- Node identity is **one shared secret, `NODE_SECRET`**, entered once in App Platform and
+  identical across every droplet — not a per-node value generated through an admin flow,
+  and not mutual TLS (true mTLS termination is not straightforward on DigitalOcean App
+  Platform's shared ingress). A droplet is never individually configured or edited after
+  it's deployed: `CONTROL_PLANE_URL` and `NODE_SECRET` are baked into its deployment once,
+  and every other setting (which trunks exist, their credentials) is pulled automatically
+  from `GET /v1/nodes/config` on every poll. See `libraries/contracts/src/nodes.ts` and
+  `apps/api/src/node-service.ts`.
 - No customer-facing API, public ARI/AMI, Docker, or Portainer.
 - Media synchronization from private Spaces is not built yet (Phase 5).
-- The node's own bearer secret and its assigned outbound trunk credentials are the only
-  configuration it ever holds; every other app secret stays in App Platform.
+- Adding a node is deploying the agent there with the current `NODE_SECRET`. Revoking
+  access is rotating `NODE_SECRET` in App Platform and redeploying every node with the
+  new value — there is no per-node enrollment or revocation.
 
 ## Deploying/updating the agent on a droplet
 
@@ -29,12 +32,16 @@ There is no CI/CD pipeline for the droplet yet; a session deploys it manually:
 3. `chown -R potp-agent:asterisk /opt/powerotp`.
 4. Copy `powerotp-agent.service` (this directory) to
    `/etc/systemd/system/powerotp-agent.service`, `systemctl daemon-reload`.
-5. `/etc/powerotp/agent.env` holds `CONTROL_PLANE_URL`, `ASTERISK_PJSIP_TRUNKS_PATH`,
-   `POLL_INTERVAL_MS`, and `NODE_SECRET` (filled in once from `/admin`'s "Telephony
-   nodes" panel — shown exactly once). `/etc/powerotp/ari.env` holds the local-only ARI
-   user credential generated directly on the droplet at install time. Both files are
-   `640 root:asterisk`, readable only by `potp-agent`.
+5. Write `/etc/powerotp/agent.env` with `CONTROL_PLANE_URL=https://powerotp.com`,
+   `ASTERISK_PJSIP_TRUNKS_PATH=/etc/asterisk/pjsip_trunks.conf`, `POLL_INTERVAL_MS=60000`,
+   and `NODE_SECRET` set to the exact same value as App Platform's `NODE_SECRET` — the
+   deploying session writes this once as part of standing the node up; it is never edited
+   on the node again afterward, including when trunk credentials change (those flow
+   automatically through `/v1/nodes/config` instead). `/etc/powerotp/ari.env` holds the
+   local-only ARI user credential generated directly on the droplet at install time. Both
+   files are `640 root:asterisk`, readable only by `potp-agent`.
 6. `systemctl enable --now powerotp-agent`.
 
-Do not add real SIP, ARI, enrollment, SSH, or Spaces credentials to the repository —
-`agent.env`/`ari.env` exist only on the droplet, never here.
+Do not add real SIP, ARI, or SSH credentials to the repository — `agent.env`/`ari.env`
+exist only on the droplet, never here. `NODE_SECRET` itself is entered in App Platform,
+same as every other production secret.

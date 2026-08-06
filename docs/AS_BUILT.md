@@ -240,24 +240,27 @@ Real changes made directly on the droplet via `ssh powerotp` (see
 - The same session generated the real `NODE_SECRET` value and wrote it directly into
   `/etc/powerotp/agent.env` over SSH — this is the one and only value that ever needs to
   reach the droplet, and the agent's deploying session does it as part of standing the
-  node up, never the platform operator by hand. The identical value must also be pasted
-  into `NODE_SECRET` in the App Platform UI (see "Immediate next step" below) — until
-  that happens, the control plane has no `NODE_SECRET` configured, so
-  `NodeService.authenticate` fails closed for every request (the same behavior as an
-  unset `ADMIN_PASSWORD`), and the agent will log `NODE_SECRET rejected by the control
-  plane` every poll. That is expected and resolves itself the moment the App Platform
-  value is set and deployed — no further droplet-side action needed.
+  node up, never the platform operator by hand. The identical value still needs to be
+  pasted into `NODE_SECRET` in the App Platform UI and deployed. The `powerotp-agent`
+  service is enabled and running on `powerotpvoip1` right now, cleanly retrying every
+  `POLL_INTERVAL_MS` (currently `Control plane returned 404`, because this code hasn't
+  been pushed to `main`/deployed to production yet — `/v1/nodes/config` doesn't exist in
+  production until it is). Once pushed, deployed, and `NODE_SECRET` is set, the node
+  starts succeeding on its own with zero further droplet-side action.
 
 ## Known gaps / next steps
 
-1. Set `NODE_SECRET` in App Platform (see chat history for the generated value — it is
-   deliberately not written in this file — or generate a new one and rewrite
-   `/etc/powerotp/agent.env` on `powerotpvoip1` to match) and deploy.
-2. Get real VoIP.ms trunk credentials from the user and enter them as `OUTBOUND1..4_*` in
+1. Push this branch to `main` and deploy — production does not have `/v1/nodes/config`
+   (or any of the other node-identity code in this section) until it does.
+2. Set `NODE_SECRET` in App Platform to the same value already written into
+   `/etc/powerotp/agent.env` on `powerotpvoip1` (see chat history for the generated
+   value — it is deliberately not written in this file — or generate a new one and
+   rewrite the droplet's env file to match) and deploy.
+3. Get real VoIP.ms trunk credentials from the user and enter them as `OUTBOUND1..4_*` in
    the App Platform UI — the schema already exists in `apps/api/src/config.ts`; the agent
    will pick them up automatically on its next poll (≤60s) and render them into
    `pjsip_trunks.conf` with no further action needed anywhere.
-3. Once a trunk is live end-to-end (agent renders it into `pjsip_trunks.conf`, Asterisk
+4. Once a trunk is live end-to-end (agent renders it into `pjsip_trunks.conf`, Asterisk
    registers to VoIP.ms), build the actual dialplan/ARI call-control logic — currently
    `[powerotp-outbound]` is a placeholder that just hangs up.
-4. Everything else in Phases 4–9 per `docs/PLAN.md`.
+5. Everything else in Phases 4–9 per `docs/PLAN.md`.
