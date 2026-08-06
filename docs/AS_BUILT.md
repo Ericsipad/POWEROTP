@@ -208,23 +208,32 @@ Real changes made directly on the droplet via `ssh powerotp` (see
   somewhere to point until real dialplan/ARI call-control logic is built against a live
   trunk.
 - **Node.js 22** installed from NodeSource for running the agent.
-- **Not yet done**: deploying `apps/telephony-agent` itself onto the droplet as a
-  systemd-managed service (needs a decision on transfer mechanism — see next steps),
-  enrolling the node from `/admin`, and writing the real `NODE_SECRET` into
-  `/etc/powerotp/agent.env`.
+- **`apps/telephony-agent` is deployed and enabled, but not yet enrolled.** Transfer
+  mechanism: `git archive` at a committed `main` commit → `scp` → extract to
+  `/opt/powerotp` → `npm ci` → `npm run build -w @powerotp/contracts -w
+  @powerotp/telephony-agent`, owned by a new non-login system user `potp-agent` (member
+  of the `asterisk` group so it can read/write `pjsip_trunks.conf` and reach the Asterisk
+  control socket). Runs under the hardened systemd unit
+  `infrastructure/asterisk/powerotp-agent.service` (also installed at
+  `/etc/systemd/system/powerotp-agent.service` on the droplet) — see that file's comment
+  for one hardening option that must **not** be set: `MemoryDenyWriteExecute=true` made
+  the process crash immediately with `SIGTRAP` because it blocks the W^X page mappings
+  Node's V8 JIT needs at startup. The service is currently **stopped** (not crash-looping)
+  because `/etc/powerotp/agent.env` still has the placeholder
+  `NODE_SECRET=REPLACE_ME_AFTER_ENROLLMENT`, which correctly fails config validation
+  (`loadAgentConfig`) rather than starting with an invalid secret — `systemctl start
+  powerotp-agent` once the real secret is in place.
 
 ## Known gaps / next steps
 
-1. Deploy `apps/telephony-agent` onto `powerotpvoip1` as a hardened, non-root systemd
-   service (own service user, `ProtectSystem=strict`, `NoNewPrivileges`), pointed at
-   `CONTROL_PLANE_URL=https://powerotp.com` and `ASTERISK_PJSIP_TRUNKS_PATH=/etc/asterisk/pjsip_trunks.conf`.
-2. Sign in at `/admin`, enroll `powerotpvoip1` under "Telephony nodes", and copy the
-   returned secret into `/etc/powerotp/agent.env` on the droplet (`NODE_SECRET=...`) —
-   it is shown exactly once.
-3. Get real VoIP.ms trunk credentials from the user and enter them as `OUTBOUND1..4_*` in
+1. Sign in at `/admin`, enroll `powerotpvoip1` under "Telephony nodes", and run (on the
+   droplet) `systemctl edit --full powerotp-agent` or edit `/etc/powerotp/agent.env`
+   directly to replace `NODE_SECRET=REPLACE_ME_AFTER_ENROLLMENT` with the real secret
+   shown exactly once at enrollment, then `systemctl start powerotp-agent`.
+2. Get real VoIP.ms trunk credentials from the user and enter them as `OUTBOUND1..4_*` in
    the App Platform UI (the user has said they will enter these directly; no code change
    needed — the schema already exists in `apps/api/src/config.ts`).
-4. Once a trunk is live end-to-end (agent renders it into `pjsip_trunks.conf`, Asterisk
+3. Once a trunk is live end-to-end (agent renders it into `pjsip_trunks.conf`, Asterisk
    registers to VoIP.ms), build the actual dialplan/ARI call-control logic — currently
    `[powerotp-outbound]` is a placeholder that just hangs up.
-5. Everything else in Phases 4–9 per `docs/PLAN.md`.
+4. Everything else in Phases 4–9 per `docs/PLAN.md`.

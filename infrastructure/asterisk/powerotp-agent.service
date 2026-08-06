@@ -1,0 +1,32 @@
+[Unit]
+Description=POWEROTP telephony agent
+After=network-online.target asterisk.service
+Wants=network-online.target
+Requires=asterisk.service
+
+[Service]
+Type=simple
+User=potp-agent
+Group=asterisk
+EnvironmentFile=/etc/powerotp/agent.env
+EnvironmentFile=/etc/powerotp/ari.env
+ExecStart=/usr/bin/node /opt/powerotp/apps/telephony-agent/dist/index.js
+Restart=always
+RestartSec=5
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/etc/asterisk/pjsip_trunks.conf
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+# Deliberately NOT setting MemoryDenyWriteExecute=true: it blocks the
+# W^X page mappings Node's V8 JIT needs at startup and crashes the
+# process with SIGTRAP/SIGSYS before it can log anything useful.
+
+[Install]
+WantedBy=multi-user.target
