@@ -46,7 +46,9 @@ and do not create a repository `.env` file.
 - `CONFIG_ENCRYPTION_KEY`: at least 32 random bytes, independent from the token secret
 - `SESSION_HASH_SECRET`: at least 32 random bytes, independent from other secrets
 - `API_KEY_HASH_SECRET`: at least 32 random bytes, independent from other secrets
-- `ADMIN_BOOTSTRAP_TOKEN`: at least 32 random bytes; remove after first admin setup
+- `ADMIN_EMAIL` / `ADMIN_PASSWORD`: the single platform admin's login credentials
+- `ADMIN_ALLOWED_IPS`: comma-separated exact IP addresses allowed to sign in at
+  `/admin/login` — no other IP can log in regardless of password
 - `BREVO_API_KEY`: production transactional-email API key
 - `EMAIL_FROM`: verified POWEROTP sender address
 - `PUBLIC_APP_URL` / `PUBLIC_API_URL`: both `https://powerotp.com` (see Domains below)

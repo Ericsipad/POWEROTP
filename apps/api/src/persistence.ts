@@ -9,7 +9,6 @@ export interface UserDocument {
   passwordHash: string;
   accountClass: AccountClass;
   emailVerifiedAt?: Date;
-  totpSecretEncrypted?: string;
   createdAt: Date;
   updatedAt: Date;
 }

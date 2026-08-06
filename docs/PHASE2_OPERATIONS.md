@@ -20,24 +20,24 @@ app-level `VALKEY_URL` environment variable in App Platform. Phase 2 uses it for
 rate limiting; Phase 3 also uses it (via BullMQ) for the verification dispatch, timeout,
 and signed-callback-retry queues. No droplet ever needs direct access to Valkey.
 
-## First platform administrator
+## Platform administrator
 
-The bootstrap endpoint works only while no platform administrator exists. Set a temporary
-high-entropy `ADMIN_BOOTSTRAP_TOKEN`, then make one server-side request:
+There is exactly one platform admin, and its identity lives entirely in App Platform
+environment variables — not a database account created through any endpoint:
 
-```sh
-curl -X POST "https://powerotp.com/v1/admin/bootstrap" \
-  -H "Content-Type: application/json" \
-  -H "X-Admin-Bootstrap-Token: $ADMIN_BOOTSTRAP_TOKEN" \
-  --data '{"email":"ADMIN_EMAIL","password":"ADMIN_STRONG_PASSWORD"}'
-```
+- `ADMIN_EMAIL`: the admin's login email
+- `ADMIN_PASSWORD`: the admin's login password (plain value in the encrypted env var, not
+  hashed — there's nothing to hash against since it's compared directly at login time)
+- `ADMIN_ALLOWED_IPS`: comma-separated exact IP addresses permitted to sign in at
+  `/admin/login`; no CIDR ranges, no login is possible from any other IP regardless of
+  whether the password is correct
 
-The response contains one `otpauth://` URI. Add it to the administrator’s authenticator,
-confirm login through `/admin/login`, then remove `ADMIN_BOOTSTRAP_TOKEN` from App Platform.
-The endpoint remains disabled after the first administrator record exists.
+Set all three, then sign in at `/admin/login`. Changing the admin password or the
+allowlist is just editing these variables and redeploying — there is no reset flow,
+recovery email, or database record to update.
 
-Never place the bootstrap token, password, TOTP URI, API keys, or callback secrets in the
-repository, deployment logs, support tickets, or AI prompts.
+Never place these values in the repository, deployment logs, support tickets, or AI
+prompts.
 
 ## Customer registration
 

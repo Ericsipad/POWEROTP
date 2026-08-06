@@ -16,8 +16,9 @@
 - A customer can register, verify email, sign in, create a project, and sign out.
 - A customer can create, copy once, rotate, and revoke a project API key.
 - A customer can set and verify an HTTPS callback and allowed UI origins.
-- A platform admin uses a separate login route with mandatory MFA and cannot be created
-  through public registration.
+- A platform admin uses a separate login route, restricted to an allowlisted IP address,
+  and cannot be created through public registration; admin identity is environment
+  configuration, not a database account a customer could ever be promoted into.
 - Customer and admin authorization tests prove that data cannot cross customer boundaries.
 
 ## Verification API

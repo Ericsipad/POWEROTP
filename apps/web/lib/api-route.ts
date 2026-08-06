@@ -27,6 +27,11 @@ export function apiRoute<Context = unknown>(
 }
 
 export function clientIp(request: NextRequest): string | undefined {
+  // Cloudflare sits in front of App Platform and sets this reliably to
+  // the true client IP; x-forwarded-for can be a longer, less trustworthy
+  // proxy chain, so prefer the Cloudflare header when present.
+  const cfConnectingIp = request.headers.get("cf-connecting-ip");
+  if (cfConnectingIp) return cfConnectingIp.trim();
   const forwarded = request.headers.get("x-forwarded-for");
   return forwarded?.split(",")[0]?.trim();
 }

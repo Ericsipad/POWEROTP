@@ -21,12 +21,11 @@ export default function AdminLoginPage() {
       body: JSON.stringify({
         email: form.get("email"),
         password: form.get("password"),
-        totpCode: form.get("totpCode"),
       }),
     });
 
     if (!response.ok) {
-      setError("Invalid administrator credentials or authenticator code.");
+      setError("Invalid administrator credentials.");
       setLoading(false);
       return;
     }
@@ -52,16 +51,6 @@ export default function AdminLoginPage() {
               name="password"
               type="password"
               autoComplete="current-password"
-              required
-            />
-          </label>
-          <label className="field">
-            Authenticator code
-            <input
-              name="totpCode"
-              inputMode="numeric"
-              autoComplete="one-time-code"
-              pattern="[0-9]{6}"
               required
             />
           </label>

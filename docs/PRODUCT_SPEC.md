@@ -6,8 +6,10 @@ The initial release has two account classes:
 
 - `customer`: registers, signs in, owns projects, manages credentials and callbacks, and
   views only its interactions.
-- `platform_admin`: provisioned privately, signs in through a separate route with mandatory
-  MFA, and manages customers, telephony, recordings, challenges, abuse controls, and support.
+- `platform_admin`: identity configured privately via environment variables (not a
+  self-service or database-registered account), signs in through a separate route
+  restricted to an allowlisted IP address, and manages customers, telephony, recordings,
+  challenges, abuse controls, and support.
 
 Developer, viewer, and custom organization roles are outside the initial release.
 

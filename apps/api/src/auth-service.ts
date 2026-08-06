@@ -1,9 +1,9 @@
 import type { AdminLogin, CustomerLogin, CustomerRegistration } from "@powerotp/contracts";
 import type { Db } from "mongodb";
-import { Secret, TOTP } from "otpauth";
 
 import type { ProductionConfig } from "./config.js";
 import type { EmailService } from "./email.js";
+import { isIpAllowed } from "./ip-allowlist.js";
 import type {
   EmailVerificationDocument,
   SessionDocument,
@@ -12,8 +12,6 @@ import type {
 import {
   createId,
   createSecret,
-  decryptString,
-  encryptString,
   hashPassword,
   hashToken,
   safeEqual,
@@ -135,69 +133,54 @@ export class AuthService {
     return this.#createSession(user, 12 * 60 * 60 * 1_000);
   }
 
-  async loginAdmin(input: AdminLogin) {
-    const user = await this.#users.findOne({
-      email: input.email,
-      accountClass: "platform_admin",
-    });
-    await this.#verifyCredentials(user, input.password);
-    if (!user?.totpSecretEncrypted) throw new AuthError("invalid_credentials", 401);
-
-    const totp = new TOTP({
-      issuer: "POWEROTP",
-      label: user.email,
-      secret: Secret.fromBase32(
-        decryptString(user.totpSecretEncrypted, this.config.CONFIG_ENCRYPTION_KEY),
-      ),
-    });
-    if (totp.validate({ token: input.totpCode, window: 1 }) === null) {
+  /**
+   * The platform admin identity lives entirely in environment variables
+   * (`ADMIN_EMAIL`, `ADMIN_PASSWORD`, `ADMIN_ALLOWED_IPS`), not a
+   * registered database account — there is exactly one admin, matching
+   * how this operator configures admin access on other projects. All
+   * three checks fail with the same generic error so a caller cannot
+   * distinguish "wrong IP" from "wrong password".
+   */
+  async loginAdmin(input: AdminLogin, clientIp: string | undefined) {
+    if (!this.config.ADMIN_EMAIL || !this.config.ADMIN_PASSWORD) {
+      throw new AuthError("invalid_credentials", 401);
+    }
+    if (!isIpAllowed(clientIp, this.config.ADMIN_ALLOWED_IPS)) {
+      throw new AuthError("invalid_credentials", 401);
+    }
+    if (
+      input.email !== this.config.ADMIN_EMAIL.toLowerCase() ||
+      !safeEqual(input.password, this.config.ADMIN_PASSWORD)
+    ) {
       throw new AuthError("invalid_credentials", 401);
     }
 
-    return this.#createSession(user, 2 * 60 * 60 * 1_000);
-  }
-
-  async bootstrapAdmin(input: CustomerRegistration, bootstrapToken: string) {
-    if (
-      !this.config.ADMIN_BOOTSTRAP_TOKEN ||
-      !safeEqual(bootstrapToken, this.config.ADMIN_BOOTSTRAP_TOKEN)
-    ) {
-      throw new AuthError("not_found", 404);
-    }
-    if (await this.#users.countDocuments({ accountClass: "platform_admin" })) {
-      throw new AuthError("bootstrap_disabled", 404);
-    }
-
-    const secret = new Secret();
     const now = new Date();
     const user: UserDocument = {
       _id: "usr_platform_admin",
-      email: input.email,
-      passwordHash: await hashPassword(input.password),
+      email: this.config.ADMIN_EMAIL.toLowerCase(),
+      passwordHash: "",
       accountClass: "platform_admin",
       emailVerifiedAt: now,
-      totpSecretEncrypted: encryptString(
-        secret.base32,
-        this.config.CONFIG_ENCRYPTION_KEY,
-      ),
       createdAt: now,
       updatedAt: now,
     };
+    await this.#users.updateOne(
+      { _id: user._id },
+      {
+        $set: {
+          email: user.email,
+          passwordHash: user.passwordHash,
+          accountClass: user.accountClass,
+          emailVerifiedAt: user.emailVerifiedAt,
+          updatedAt: now,
+        },
+        $setOnInsert: { _id: user._id, createdAt: now },
+      },
+      { upsert: true },
+    );
 
-    try {
-      await this.#users.insertOne(user);
-    } catch {
-      throw new AuthError("bootstrap_disabled", 404);
-    }
-
-    return {
-      user,
-      totpUri: new TOTP({
-        issuer: "POWEROTP",
-        label: user.email,
-        secret,
-      }).toString(),
-    };
+    return this.#createSession(user, 2 * 60 * 60 * 1_000);
   }
 
   async authenticate(sessionToken: string | undefined) {

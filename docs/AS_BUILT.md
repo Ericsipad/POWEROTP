@@ -10,7 +10,7 @@ doesn't have to reverse-engineer it from the commit history.
 or deployment shape** — not for every code change, only for things a future session
 would otherwise have to rediscover the hard way.
 
-## Current architecture (as of `d57526a`)
+## Current architecture
 
 One app, one DigitalOcean App Platform component, no App Spec YAML:
 
@@ -115,6 +115,35 @@ server at all. This is the one to keep building on.
   in `apps/telephony-agent` (it's still the Phase-1 stub). The droplet is live and
   reachable over SSH, but that's the only piece in place.
 - **Phases 5–9**: not started.
+
+## Platform admin auth (changed from the original TOTP design)
+
+The original Phase 2 design (and `PLAN.md`/`THREAT_MODEL.md` at the time) required a
+database-registered admin account with mandatory TOTP, created via a one-time
+`/v1/admin/bootstrap` endpoint gated by `ADMIN_BOOTSTRAP_TOKEN`. The user explicitly
+asked to simplify this to match how they configure admin access on their other
+projects: **no TOTP, no bootstrap endpoint, no self-service admin account at all.**
+
+Current model: there is exactly one platform admin, and its entire identity lives in
+environment variables — `ADMIN_EMAIL`, `ADMIN_PASSWORD` (plain value, compared directly
+at login, not hashed), and `ADMIN_ALLOWED_IPS` (comma-separated exact IPs; no CIDR).
+Login requires all three to match — email, password, and client IP — with a single
+generic `invalid_credentials` error regardless of which check failed, so a caller can't
+tell which part was wrong. `apps/api/src/auth-service.ts#loginAdmin` upserts a minimal
+`usr_platform_admin` database record on successful login purely so the existing
+session/cookie machinery (built for customer accounts) keeps working unchanged — that
+record is not itself a credential; the env vars are the only real credential. There is
+no recovery flow: changing the password or IP allowlist is editing env vars and
+redeploying.
+
+`isIpAllowed()` in `apps/api/src/ip-allowlist.ts` reads the client IP from
+`clientIp()` in `apps/web/lib/api-route.ts`, which prefers Cloudflare's
+`cf-connecting-ip` header (Cloudflare sits in front of App Platform) over
+`x-forwarded-for`.
+
+If a future session is asked to "add MFA back" or "let customers become admins" — don't,
+without re-confirming with the user first; this was a deliberate simplification, not an
+oversight.
 
 ## Known gaps / next steps
 

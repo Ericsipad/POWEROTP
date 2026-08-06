@@ -26,7 +26,8 @@
 - Encrypt provider credentials with a master key held in App Platform.
 - Use unique node certificates, short-lived enrollment tokens, and central revocation.
 - Redact authorization, cookies, codes, tokens, SIP secrets, and answers from logs.
-- Require MFA and shorter sessions for platform admins.
+- Restrict platform admin login to an IP allowlist and shorter sessions; admin identity
+  (email/password) lives in environment variables, not a self-service registered account.
 
 ### Unauthorized or abusive calling
 

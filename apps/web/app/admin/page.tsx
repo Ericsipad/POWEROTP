@@ -81,7 +81,7 @@ export default function AdminPage() {
           <p>
             Customer, provider, node, media, and abuse-management controls are added
             in their implementation phases. This route already requires an administrator
-            session and TOTP authentication.
+            session, restricted to an allowlisted IP address.
           </p>
         </article>
         <article className="projectCard">

@@ -8,7 +8,16 @@ const ProductionConfigSchema = z.object({
   CONFIG_ENCRYPTION_KEY: z.string().min(32),
   SESSION_HASH_SECRET: z.string().min(32),
   API_KEY_HASH_SECRET: z.string().min(32),
-  ADMIN_BOOTSTRAP_TOKEN: z.string().min(32).optional(),
+  /**
+   * Platform admin identity lives entirely in environment variables, not
+   * the database: a single email/password pair plus an IP allowlist,
+   * instead of a registered account with TOTP. All optional so the app
+   * starts fine before an operator configures admin access; until then
+   * admin login simply always fails.
+   */
+  ADMIN_EMAIL: z.string().email().optional(),
+  ADMIN_PASSWORD: z.string().min(1).optional(),
+  ADMIN_ALLOWED_IPS: z.string().min(1).optional(),
   BREVO_API_KEY: z.string().min(1),
   EMAIL_FROM: z.string().email(),
   PUBLIC_APP_URL: z.string().url(),

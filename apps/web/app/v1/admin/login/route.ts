@@ -17,7 +17,10 @@ export const POST = apiRoute(async (request) => {
     5 * 60,
   );
 
-  const session = await auth.loginAdmin(parseBody(AdminLoginSchema, await request.json()));
+  const session = await auth.loginAdmin(
+    parseBody(AdminLoginSchema, await request.json()),
+    clientIp(request),
+  );
   const response = NextResponse.json({
     user: sessionUser(session.user),
     csrfToken: session.csrfToken,

@@ -19,9 +19,7 @@ export const CustomerLoginSchema = z.object({
   password: z.string().min(1).max(128),
 });
 
-export const AdminLoginSchema = CustomerLoginSchema.extend({
-  totpCode: z.string().regex(/^\d{6}$/),
-});
+export const AdminLoginSchema = CustomerLoginSchema;
 
 export const VerifyEmailSchema = z.object({
   token: z.string().min(32).max(512),
@@ -37,11 +35,6 @@ export const SessionUserSchema = z.object({
 export const SessionResponseSchema = z.object({
   user: SessionUserSchema,
   csrfToken: z.string().min(32),
-});
-
-export const AdminBootstrapResponseSchema = z.object({
-  user: SessionUserSchema,
-  totpUri: z.string().startsWith("otpauth://"),
 });
 
 export type CustomerRegistration = z.infer<typeof CustomerRegistrationSchema>;
