@@ -156,6 +156,10 @@ export function TryItNow() {
           />
         </label>
         <p className="tryItNowHint">e.g. {hintNumbers[hintIndex]}</p>
+        <p className="tryItNowHint">
+          Always include your country code — e.g. <strong>+1</strong> for the US/Canada.
+          Omitting it silently sends a different, invalid number to a different country.
+        </p>
 
         <div className="tryItNowTypes">
           {demoMethods.map((method) => (
