@@ -129,9 +129,30 @@ server at all. This is the one to keep building on.
   hardened, running Asterisk 20 + Node.js 22, and its `powerotp-agent` service
   authenticates to the control plane, pulls configuration, and reloads Asterisk on
   every change. `call_reachability` now has real ARI call-control logic (see "Phase 4
-  ARI call-control" below) — built and unit-tested, not yet exercised against a real
-  live call. Not yet done: real VoIP.ms trunk credentials for the other three methods
-  and their dialplan/ARI logic.
+  ARI call-control" below) — **confirmed working end-to-end against a real live call**:
+  a demo-widget request against a real destination number went
+  `queued -> dispatching -> calling -> succeeded` (`reasonCode: "answered"`) after the
+  droplet actually originated the call over VoIP.ms, detected the answer via ARI's
+  `StasisStart`, and reported it back through the control plane's real transition/event
+  machinery. Not yet done: real VoIP.ms trunk credentials for the other three methods
+  and their dialplan/ARI logic; a busy/no-answer/rejected outcome hasn't been observed
+  live yet (only the cause-code mapping is unit-tested), and there is no automated
+  canary test for this — it was exercised manually once.
+  **Observed nuance, not a bug**: on that canary call the callee's phone was never
+  tapped to answer (recipient hit "Ignore" on an Apple Watch, which only silences the
+  local ring, not a SIP-level decline) — the call rang for ~20s and the carrier's
+  *voicemail system* sent the real SIP `200 OK`, which is genuinely indistinguishable
+  from a human answering at the SIP signaling level (confirmed via the Asterisk CDR:
+  `disposition=ANSWERED`, ~20s ring before answer, matching typical carrier
+  no-answer-to-voicemail timing, not typical human reaction time). This is exactly the
+  documented scope of Type 1 (`docs/PRODUCT_SPEC.md`: "Reports whether the destination
+  answered; it does not prove ownership") — voicemail pickup correctly counts as
+  "reachable", just not as "a person engaged". If voicemail-as-answered false positives
+  ever need to be reduced, options for a future session: shorten
+  `CALL_RING_TIMEOUT_SECONDS` below typical carrier voicemail timeouts (lossy — real
+  people vary in answer speed too), or add Asterisk's AMD (answering-machine detection)
+  app before treating a `StasisStart` as a true reachability success (Phase 9-level
+  hardening, not urgent for the current product contract).
 - **Phases 5–9**: not started.
 
 ## Platform admin auth (changed from the original TOTP design)
@@ -366,15 +387,17 @@ comes after the socket is created.
 
 ## Known gaps / next steps
 
-1. `OUTBOUND1` (call_reachability) has real VoIP.ms credentials and is confirmed
-   `Registered`, and now has real ARI call-control logic (see "Phase 4 ARI
-   call-control" above) — built and unit-tested, but **not yet exercised against a real
-   live call**; the next session picking this up should place one real canary call
-   end-to-end and confirm the dashboard timeline and callback show `succeeded`/`failed`
-   correctly before considering this fully proven. `OUTBOUND2..4` (voice_code,
-   voice_challenge, sms_code) are still unset — get those from the user when ready, and
-   note their transports intentionally still return `method_not_available` even once
-   trunk credentials exist, until their own dialplan/ARI logic is built the same way.
+1. `OUTBOUND1` (call_reachability) has real VoIP.ms credentials, is confirmed
+   `Registered`, and its ARI call-control logic is **confirmed working end-to-end**
+   against one real live answered call (see "Phase 4 (voice types 1 and 2 /
+   telephony)" above). Not yet observed live: a busy/no-answer/rejected/invalid
+   outcome (the Q.850 cause-code mapping is only unit-tested so far), and there is no
+   automated canary/synthetic-check running this periodically — a regression would
+   currently only be caught manually or by real customer traffic. `OUTBOUND2..4`
+   (voice_code, voice_challenge, sms_code) are still unset — get those from the user
+   when ready, and note their transports intentionally still return
+   `method_not_available` even once trunk credentials exist, until their own
+   dialplan/ARI logic is built the same way.
 2. The agent currently places one `call_reachability` call at a time, serially — there
    is no concurrency limit to configure yet because there is no concurrency. Revisit
    once real traffic needs more than one simultaneous call per node.
