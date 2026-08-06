@@ -67,5 +67,15 @@ export type ProductionConfig = z.infer<typeof ProductionConfigSchema>;
 export function loadConfig(
   environment: NodeJS.ProcessEnv = process.env,
 ): ProductionConfig {
-  return ProductionConfigSchema.parse(environment);
+  // DigitalOcean App Platform (and most cloud consoles) let an operator
+  // create an env var with an empty value rather than omitting it
+  // entirely, which is indistinguishable from "set to an empty string" to
+  // this process. Every optional field above requires a non-empty string
+  // when present, so treating "" the same as unset here — instead of
+  // letting it fail schema validation and crash the whole app at boot —
+  // is what "optional" actually needs to mean in this deployment target.
+  const sanitized = Object.fromEntries(
+    Object.entries(environment).filter(([, value]) => value !== ""),
+  );
+  return ProductionConfigSchema.parse(sanitized);
 }
