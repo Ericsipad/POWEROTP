@@ -112,12 +112,13 @@ server at all. This is the one to keep building on.
 - **Public demo widget**: added ahead of Phase 4 (not in the original phase list) — a
   "try it now" widget on the marketing homepage hero, backed by the anonymous, tightly
   scoped `/v1/demo/verifications` endpoints and the `prj_demo` project above.
-- **Phase 4 (voice types 1 and 2 / telephony)**: **in progress.** Node identity/enrollment
-  (bearer secret, not mTLS — see "Phase 4 node identity" below) is implemented end-to-end
-  in the control plane. The droplet is hardened, and Asterisk 20 + Node.js 22 are
-  installed and running. Not yet done: deploying the agent itself onto the droplet,
-  enrolling that node, real VoIP.ms trunk credentials, and all dialplan/ARI call-control
-  logic.
+- **Phase 4 (voice types 1 and 2 / telephony)**: **in progress.** Node identity (one
+  shared `NODE_SECRET`, not mTLS or a per-node enrollment secret — see "Phase 4 node
+  identity" below) is implemented and confirmed working end-to-end: `powerotpvoip1` is
+  hardened, running Asterisk 20 + Node.js 22, and its `powerotp-agent` service
+  authenticates to the control plane, pulls configuration, and reloads Asterisk on
+  every change. Not yet done: real VoIP.ms trunk credentials and all dialplan/ARI
+  call-control logic.
 - **Phases 5–9**: not started.
 
 ## Platform admin auth (changed from the original TOTP design)
@@ -237,30 +238,55 @@ Real changes made directly on the droplet via `ssh powerotp` (see
   for one hardening option that must **not** be set: `MemoryDenyWriteExecute=true` made
   the process crash immediately with `SIGTRAP` because it blocks the W^X page mappings
   Node's V8 JIT needs at startup.
-- The same session generated the real `NODE_SECRET` value and wrote it directly into
+- The deploying session generated the real `NODE_SECRET` value and wrote it directly into
   `/etc/powerotp/agent.env` over SSH — this is the one and only value that ever needs to
-  reach the droplet, and the agent's deploying session does it as part of standing the
-  node up, never the platform operator by hand. The identical value still needs to be
-  pasted into `NODE_SECRET` in the App Platform UI and deployed. The `powerotp-agent`
-  service is enabled and running on `powerotpvoip1` right now, cleanly retrying every
-  `POLL_INTERVAL_MS` (currently `Control plane returned 404`, because this code hasn't
-  been pushed to `main`/deployed to production yet — `/v1/nodes/config` doesn't exist in
-  production until it is). Once pushed, deployed, and `NODE_SECRET` is set, the node
-  starts succeeding on its own with zero further droplet-side action.
+  reach the droplet, and the session standing the node up does it, never the platform
+  operator by hand. The identical value is set as `NODE_SECRET` in App Platform.
+  **Confirmed working end-to-end**: `powerotp-agent` on `powerotpvoip1` authenticates,
+  fetches config, and reloads Asterisk on every change (see the "Incident" notes below
+  for two issues hit and fixed along the way).
+
+**Status as of the last session: fully working end-to-end.** `NODE_SECRET` and the
+`OUTBOUND1..4_*` placeholders are set in App Platform and deployed; `powerotp-agent` on
+`powerotpvoip1` authenticates, fetches config, renders `pjsip_trunks.conf`, and
+successfully reloads Asterisk (`"trunk configuration changed; reloaded pjsip"` in its
+logs). One deploy-time incident and its fix are recorded below so they aren't
+re-discovered the hard way.
+
+### Incident: empty-string optional env vars crashed the whole app
+
+Setting `NODE_SECRET` in App Platform briefly took the entire site down (`/health`,
+`/`, everything — 500 from three independent network paths, not just the new node
+route), even though DigitalOcean's own dashboard reported the deploy as healthy. Root
+cause: App Platform lets an operator create an env var with a blank value instead of
+omitting it, which `ProductionConfigSchema` treated as invalid for optional fields — and
+because `instrumentation.ts` calls `loadConfig()` eagerly at boot to fail fast on bad
+config (by design), one blank optional variable crashed the entire process, not just the
+feature it was for. Fixed in `apps/api/src/config.ts#loadConfig`: empty-string values are
+now filtered out before parsing, so "unset" and "set to blank" are equivalent for
+optional fields, while a required field left empty still correctly fails fast. Covered by
+`apps/api/src/config.test.ts`. If a future deploy goes fully dark again (every route,
+including `/health`), suspect a config validation crash first and check for this pattern
+before anything else.
+
+### Incident: agent couldn't reload Asterisk (control socket permissions)
+
+Asterisk's packaged `systemd` unit doesn't reliably honor `asterisk.conf`'s
+`astctlpermissions`/`astctlgroup` settings on this build — the control socket
+(`/var/run/asterisk/asterisk.ctl`) kept coming back owner-only-write
+(`srwxr-xr-x asterisk:asterisk`) on every restart, so `potp-agent` (member of group
+`asterisk`) could connect but not issue `pjsip reload`. Fixed with a `systemd` drop-in
+(the exact mechanism the packaged unit's own comments recommend, not a one-off `chmod`
+the next restart would silently undo): `infrastructure/asterisk/asterisk.service.d-override.conf`,
+installed at `/etc/systemd/system/asterisk.service.d/override.conf` on the droplet, adds
+`ExecStartPost=/bin/chmod 660 /var/run/asterisk/asterisk.ctl` — reliable because the unit
+is `Type=notify`, so `ExecStartPost` only runs after Asterisk's ready notification, which
+comes after the socket is created.
 
 ## Known gaps / next steps
 
-1. Push this branch to `main` and deploy — production does not have `/v1/nodes/config`
-   (or any of the other node-identity code in this section) until it does.
-2. Set `NODE_SECRET` in App Platform to the same value already written into
-   `/etc/powerotp/agent.env` on `powerotpvoip1` (see chat history for the generated
-   value — it is deliberately not written in this file — or generate a new one and
-   rewrite the droplet's env file to match) and deploy.
-3. Get real VoIP.ms trunk credentials from the user and enter them as `OUTBOUND1..4_*` in
-   the App Platform UI — the schema already exists in `apps/api/src/config.ts`; the agent
-   will pick them up automatically on its next poll (≤60s) and render them into
-   `pjsip_trunks.conf` with no further action needed anywhere.
-4. Once a trunk is live end-to-end (agent renders it into `pjsip_trunks.conf`, Asterisk
-   registers to VoIP.ms), build the actual dialplan/ARI call-control logic — currently
-   `[powerotp-outbound]` is a placeholder that just hangs up.
-5. Everything else in Phases 4–9 per `docs/PLAN.md`.
+1. Build the actual dialplan/ARI call-control logic once VoIP.ms trunk credentials are
+   real and a trunk registers successfully — currently `[powerotp-outbound]` is a
+   placeholder that just hangs up, and `configuredTypes` in the agent's logs is `[]`
+   until real `OUTBOUND1..4_*` values are entered.
+2. Everything else in Phases 4–9 per `docs/PLAN.md`.

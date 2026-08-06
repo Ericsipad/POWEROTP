@@ -40,7 +40,18 @@ There is no CI/CD pipeline for the droplet yet; a session deploys it manually:
    automatically through `/v1/nodes/config` instead). `/etc/powerotp/ari.env` holds the
    local-only ARI user credential generated directly on the droplet at install time. Both
    files are `640 root:asterisk`, readable only by `potp-agent`.
-6. `systemctl enable --now powerotp-agent`.
+6. Asterisk's packaged `asterisk.service` doesn't apply `asterisk.conf`'s
+   `astctlpermissions`/`astctlgroup` settings reliably on this build, so
+   `/var/run/asterisk/asterisk.ctl` is recreated `srwxr-xr-x` (owner-only write) on every
+   restart — `potp-agent` (group `asterisk`) could connect but not issue commands like
+   `pjsip reload`. Fixed with a systemd drop-in, not a one-off `chmod` (which the next
+   Asterisk restart would silently undo): `/etc/systemd/system/asterisk.service.d/override.conf`
+   contains `ExecStartPost=/bin/chmod 660 /var/run/asterisk/asterisk.ctl` — this is the
+   exact drop-in mechanism the packaged unit's own comments recommend, and it reliably
+   runs after the socket exists because the unit is `Type=notify` (systemd waits for
+   Asterisk's ready notification, which comes after socket creation, before running
+   `ExecStartPost`).
+7. `systemctl enable --now powerotp-agent`.
 
 Do not add real SIP, ARI, or SSH credentials to the repository — `agent.env`/`ari.env`
 exist only on the droplet, never here. `NODE_SECRET` itself is entered in App Platform,
