@@ -5,10 +5,10 @@ import type { AgentConfig } from "./config.js";
 export class ControlPlaneAuthError extends Error {}
 
 /**
- * Fetches this node's assigned outbound trunk configuration. A 401 means
- * the secret was rejected (never enrolled, or revoked from `/admin`) and
- * is treated as a distinct, non-retryable-forever condition so the agent
- * can log it clearly instead of retrying an authentication failure
+ * Fetches this node's outbound trunk configuration. A 401 means
+ * `NODE_SECRET` doesn't match what App Platform currently has configured
+ * (never set, or rotated) and is treated as a distinct condition so the
+ * agent can log it clearly instead of retrying an authentication failure
  * indefinitely with the same noisy error.
  */
 export async function fetchNodeConfig(config: AgentConfig): Promise<NodeConfig> {

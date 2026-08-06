@@ -1,12 +1,13 @@
 import { z } from "zod";
 
 /**
- * Node identity is a single hashed-at-rest bearer secret issued by
- * `POST /v1/admin/nodes` (see `docs/AS_BUILT.md`), not a client
- * certificate: true mutual TLS is not straightforward to terminate on
- * DigitalOcean App Platform's shared ingress, so the droplet
- * authenticates back to the control plane the same way a customer server
- * authenticates to the verification API.
+ * Node identity is one shared secret, `NODE_SECRET`, entered once in App
+ * Platform (see `docs/AS_BUILT.md`) and identical across every droplet —
+ * not a per-node value generated through an admin flow, and not a client
+ * certificate (true mutual TLS is not straightforward to terminate on
+ * DigitalOcean App Platform's shared ingress). This value is baked into a
+ * droplet's deployment once and never edited on the node afterward;
+ * rotating it is an App Platform env var edit plus redeploying every node.
  */
 const ConfigSchema = z.object({
   NODE_SECRET: z.string().min(32),

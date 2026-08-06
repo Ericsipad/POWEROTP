@@ -61,6 +61,12 @@ and do not create a repository `.env` file.
   (`OUTBOUND1`=`call_reachability`, `OUTBOUND2`=`voice_code`,
   `OUTBOUND3`=`voice_challenge`, `OUTBOUND4`=`sms_code`) — see
   `apps/api/src/outbound-trunks.ts`. Leave unset until Phase 4 telephony wiring.
+- `NODE_SECRET`: at least 32 random bytes, the single shared secret every telephony
+  droplet uses to authenticate to `/v1/nodes/config` (see `apps/api/src/node-service.ts`
+  and `docs/AS_BUILT.md`'s "Phase 4 node identity" section). Not a per-node value and
+  never edited on a droplet — it is baked into a node's deployment once, and rotating it
+  is only ever an App Platform env var edit plus redeploying every node with the new
+  value.
 
 ## Domains
 

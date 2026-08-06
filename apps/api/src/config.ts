@@ -18,6 +18,19 @@ const ProductionConfigSchema = z.object({
   ADMIN_EMAIL: z.string().email().optional(),
   ADMIN_PASSWORD: z.string().min(1).optional(),
   ADMIN_ALLOWED_IPS: z.string().min(1).optional(),
+  /**
+   * A single shared secret every telephony droplet uses to authenticate
+   * to `/v1/nodes/config`, entered once in App Platform — deliberately
+   * not a per-node enrollment secret. Every droplet currently receives
+   * identical configuration (see `apps/api/src/node-service.ts`), so one
+   * shared value that is only ever edited in App Platform (never on a
+   * node) is enough; a new droplet just needs `CONTROL_PLANE_URL` and
+   * this same secret baked into its deployment, no admin action required.
+   * Optional so the app starts fine before an operator sets it, in which
+   * case node authentication always fails closed, the same convention as
+   * `ADMIN_PASSWORD`.
+   */
+  NODE_SECRET: z.string().min(32).optional(),
   BREVO_API_KEY: z.string().min(1),
   EMAIL_FROM: z.string().email(),
   PUBLIC_APP_URL: z.string().url(),

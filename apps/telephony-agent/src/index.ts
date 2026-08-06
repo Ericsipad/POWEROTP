@@ -8,33 +8,40 @@ import { renderPjsipTrunks } from "./pjsip-config.js";
 
 const run = promisify(execFile);
 const config = loadAgentConfig();
+let lastRenderedConfig: string | undefined;
 
 function log(msg: string, extra: Record<string, unknown> = {}) {
   console.info(JSON.stringify({ service: "powerotp-telephony-agent", msg, ...extra }));
 }
 
 /**
- * Node enrollment/identity, local ARI control, and VoIP.ms trunk routing
- * are Phase 4 (see `docs/PLAN.md`). This process currently: authenticates
- * to the control plane, renders any configured outbound trunks into a
- * local PJSIP include file, and asks a running Asterisk to reload PJSIP
- * so new or changed trunk credentials take effect without a restart.
- * Dialplan/ARI call-control logic is added once at least one real trunk
- * is live to test against.
+ * Local ARI control and VoIP.ms dialplan/call-control logic are still
+ * ahead (Phase 4, see `docs/PLAN.md`). This process currently:
+ * authenticates to the control plane with the shared `NODE_SECRET`,
+ * renders any configured outbound trunks into a local PJSIP include
+ * file, and asks a running Asterisk to reload PJSIP so new or changed
+ * trunk credentials take effect on the next poll — including the very
+ * first one, right after the process starts. It only writes the file and
+ * reloads when the rendered config actually changed, so an unattended
+ * node doesn't reload Asterisk every poll interval for no reason.
  */
 async function syncOnce() {
   const nodeConfig = await fetchNodeConfig(config);
   const configuredTypes = Object.entries(nodeConfig.trunks)
     .filter(([, trunk]) => Boolean(trunk))
     .map(([type]) => type);
-  log("fetched node config", { nodeId: nodeConfig.nodeId, configuredTypes });
+  log("fetched node config", { configuredTypes });
 
   if (!config.ASTERISK_PJSIP_TRUNKS_PATH) return;
 
-  await writeFile(config.ASTERISK_PJSIP_TRUNKS_PATH, renderPjsipTrunks(nodeConfig), "utf8");
+  const rendered = renderPjsipTrunks(nodeConfig);
+  if (rendered === lastRenderedConfig) return;
+
+  await writeFile(config.ASTERISK_PJSIP_TRUNKS_PATH, rendered, "utf8");
   try {
     await run("asterisk", ["-rx", "pjsip reload"]);
-    log("reloaded pjsip");
+    lastRenderedConfig = rendered;
+    log("trunk configuration changed; reloaded pjsip");
   } catch (error) {
     log("pjsip reload failed", { error: error instanceof Error ? error.message : "unknown" });
   }
@@ -46,7 +53,7 @@ async function loop() {
       await syncOnce();
     } catch (error) {
       if (error instanceof ControlPlaneAuthError) {
-        log("node secret rejected; check /admin for revocation");
+        log("NODE_SECRET rejected by the control plane; check it matches App Platform");
       } else {
         log("config sync failed", { error: error instanceof Error ? error.message : "unknown" });
       }

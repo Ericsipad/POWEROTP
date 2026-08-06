@@ -6,7 +6,6 @@ import { renderPjsipTrunks } from "./pjsip-config.js";
 describe("renderPjsipTrunks", () => {
   it("renders a registration/auth/aor/endpoint/identify block per configured trunk", () => {
     const rendered = renderPjsipTrunks({
-      nodeId: "node_123456789",
       trunks: {
         call_reachability: { url: "sip.voip.ms", user: "sub1", pass: "secret1" },
         voice_code: undefined,
@@ -27,7 +26,6 @@ describe("renderPjsipTrunks", () => {
 
   it("never leaks a trunk password for a method that has no configured trunk", () => {
     const rendered = renderPjsipTrunks({
-      nodeId: "node_123456789",
       trunks: {
         call_reachability: undefined,
         voice_code: undefined,

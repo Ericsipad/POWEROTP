@@ -149,37 +149,56 @@ If a future session is asked to "add MFA back" or "let customers become admins" 
 without re-confirming with the user first; this was a deliberate simplification, not an
 oversight.
 
-## Phase 4 node identity (implemented; not yet enrolled)
+## Phase 4 node identity (implemented, corrected design)
 
-Confirmed with the user: true mutual TLS is not pursued (not straightforward to terminate
-on App Platform's shared ingress). Node identity is a **per-node hashed bearer secret**,
-issued once at enrollment and sent as `Authorization: Bearer <secret>` — structurally the
-same pattern as a project API key, deliberately reusing `API_KEY_HASH_SECRET` for hashing
-rather than adding a second near-identical secret.
+Confirmed with the user, in two steps:
 
-- Contracts: `libraries/contracts/src/nodes.ts` (`CreateNodeSchema`, `NodeSchema`,
-  `NodeEnrolledSchema`, `NodeConfigSchema`).
-- `apps/api/src/node-service.ts` (`NodeService`): `enroll` (admin-only, returns the secret
-  exactly once), `list`, `revoke`, `authenticate` (bearer secret → active `NodeDocument`,
-  also stamps `lastSeenAt` as a liveness heartbeat), `configFor` (returns whichever
-  `OUTBOUND1..4_*` trunks are currently configured in App Platform — never any other app
-  secret).
-- Routes: `POST/GET /v1/admin/nodes` and `POST /v1/admin/nodes/[nodeId]/revoke` (admin
-  session + CSRF), `GET /v1/nodes/config` (node bearer secret, no admin session — this is
-  the droplet-facing endpoint).
-- `/admin` has a "Telephony nodes" panel: enroll a node (name + region), see the secret
-  once, list nodes with last-seen time, revoke.
-- **Config flows one direction only, on demand**: App Platform env vars
-  (`OUTBOUND1..4_*`) are the source of truth; a droplet never receives or stores any other
-  app secret. A node polls `/v1/nodes/config` (see `apps/telephony-agent/src/index.ts`)
-  and, when `ASTERISK_PJSIP_TRUNKS_PATH` is set, renders the trunks it received into a
-  local PJSIP include file (`apps/telephony-agent/src/pjsip-config.ts`) and asks the local
-  Asterisk to `pjsip reload`. Dialplan/ARI call-control logic is intentionally not built
-  yet — there is no real trunk to test it against until VoIP.ms credentials are entered.
-- **No node has been enrolled yet.** The droplet's agent is installed and running (see
-  below) but is not yet authenticated — it will log `node secret rejected` until an
-  operator enrolls it at `/admin` and copies the resulting secret into
-  `/etc/powerotp/agent.env` on the droplet.
+1. True mutual TLS is not pursued (not straightforward to terminate on App Platform's
+   shared ingress).
+2. **The first replacement (a per-node hashed secret generated through an admin "enroll"
+   flow and hand-copied onto the droplet) was explicitly rejected by the user** — the
+   requirement is that a droplet is *never* individually configured or edited after
+   deployment. All configuration, without exception, is entered once in App Platform and
+   distributed to every node automatically.
+
+The actual design: **one shared secret, `NODE_SECRET`**, entered once in App Platform —
+the same "single env var, compared directly, no database record" convention this app
+already uses for `ADMIN_PASSWORD`. Every droplet is deployed with the same
+`CONTROL_PLANE_URL` and the same `NODE_SECRET` baked in at deployment time; there is no
+per-node enrollment step, nothing to individually revoke, and nothing an operator ever
+edits on a running node. A new droplet just needs those same two constants to start
+pulling full configuration immediately. Rotating access is changing `NODE_SECRET` in App
+Platform and redeploying every node with the new value — identical in spirit to how
+`ADMIN_PASSWORD`/`ADMIN_ALLOWED_IPS` already work.
+
+- Contracts: `libraries/contracts/src/nodes.ts` — just `NodeSchema` (a connection-log
+  entry: id/ip/firstSeenAt/lastSeenAt, for `/admin` visibility only, not access control)
+  and `NodeConfigSchema` (trunks).
+- `apps/api/src/node-service.ts` (`NodeService`): `list` (admin visibility),
+  `authenticate` (constant-time compare of the `Authorization: Bearer` header against
+  `config.NODE_SECRET`; on success, upserts a connection-log row keyed by source IP as a
+  liveness heartbeat), `configFor` (returns whichever `OUTBOUND1..4_*` trunks are
+  currently configured — identical response for every node, never any other app secret).
+- Routes: `GET /v1/admin/nodes` (admin session, read-only — nothing to create or revoke),
+  `GET /v1/nodes/config` (shared secret, no admin session — the droplet-facing endpoint).
+- `/admin`'s "Telephony nodes" panel is now read-only: it lists whichever source IPs have
+  successfully authenticated with `NODE_SECRET`, with first/last-seen times. A node
+  appears automatically the first time it polls; there is no enroll button.
+- **Config flows one direction only, on demand**: App Platform env vars are the only
+  source of truth; a droplet never receives, stores, or has anyone edit any other app
+  secret. A node polls `/v1/nodes/config` (see `apps/telephony-agent/src/index.ts`) and,
+  when `ASTERISK_PJSIP_TRUNKS_PATH` is set, renders the trunks it received into a local
+  PJSIP include file (`apps/telephony-agent/src/pjsip-config.ts`) and asks the local
+  Asterisk to `pjsip reload` — but only when the rendered config actually changed since
+  the last poll (including the very first poll right after the process starts), so an
+  idle node doesn't reload Asterisk every interval for no reason. Dialplan/ARI
+  call-control logic is intentionally not built yet — there is no real trunk to test it
+  against until VoIP.ms credentials are entered.
+- The droplet's `/etc/powerotp/agent.env` holds only non-secret, unchanging deployment
+  constants (`CONTROL_PLANE_URL`, `ASTERISK_PJSIP_TRUNKS_PATH`, `POLL_INTERVAL_MS`) plus
+  `NODE_SECRET` itself, which the agent was deployed with directly — the operator never
+  logs in to place or change it; the session doing the deployment writes it once as part
+  of standing the node up.
 
 ## Telephony droplet (`powerotpvoip1`) — hardening and base install done
 
@@ -208,31 +227,36 @@ Real changes made directly on the droplet via `ssh powerotp` (see
   somewhere to point until real dialplan/ARI call-control logic is built against a live
   trunk.
 - **Node.js 22** installed from NodeSource for running the agent.
-- **`apps/telephony-agent` is deployed and enabled, but not yet enrolled.** Transfer
-  mechanism: `git archive` at a committed `main` commit → `scp` → extract to
-  `/opt/powerotp` → `npm ci` → `npm run build -w @powerotp/contracts -w
-  @powerotp/telephony-agent`, owned by a new non-login system user `potp-agent` (member
-  of the `asterisk` group so it can read/write `pjsip_trunks.conf` and reach the Asterisk
-  control socket). Runs under the hardened systemd unit
-  `infrastructure/asterisk/powerotp-agent.service` (also installed at
+- **`apps/telephony-agent` is deployed and running.** Transfer mechanism: `git archive`
+  at a committed `main` commit → `scp` → extract to `/opt/powerotp` → `npm ci` → `npm run
+  build -w @powerotp/contracts -w @powerotp/telephony-agent`, owned by a new non-login
+  system user `potp-agent` (member of the `asterisk` group so it can read/write
+  `pjsip_trunks.conf` and reach the Asterisk control socket). Runs under the hardened
+  systemd unit `infrastructure/asterisk/powerotp-agent.service` (also installed at
   `/etc/systemd/system/powerotp-agent.service` on the droplet) — see that file's comment
   for one hardening option that must **not** be set: `MemoryDenyWriteExecute=true` made
   the process crash immediately with `SIGTRAP` because it blocks the W^X page mappings
-  Node's V8 JIT needs at startup. The service is currently **stopped** (not crash-looping)
-  because `/etc/powerotp/agent.env` still has the placeholder
-  `NODE_SECRET=REPLACE_ME_AFTER_ENROLLMENT`, which correctly fails config validation
-  (`loadAgentConfig`) rather than starting with an invalid secret — `systemctl start
-  powerotp-agent` once the real secret is in place.
+  Node's V8 JIT needs at startup.
+- The same session generated the real `NODE_SECRET` value and wrote it directly into
+  `/etc/powerotp/agent.env` over SSH — this is the one and only value that ever needs to
+  reach the droplet, and the agent's deploying session does it as part of standing the
+  node up, never the platform operator by hand. The identical value must also be pasted
+  into `NODE_SECRET` in the App Platform UI (see "Immediate next step" below) — until
+  that happens, the control plane has no `NODE_SECRET` configured, so
+  `NodeService.authenticate` fails closed for every request (the same behavior as an
+  unset `ADMIN_PASSWORD`), and the agent will log `NODE_SECRET rejected by the control
+  plane` every poll. That is expected and resolves itself the moment the App Platform
+  value is set and deployed — no further droplet-side action needed.
 
 ## Known gaps / next steps
 
-1. Sign in at `/admin`, enroll `powerotpvoip1` under "Telephony nodes", and run (on the
-   droplet) `systemctl edit --full powerotp-agent` or edit `/etc/powerotp/agent.env`
-   directly to replace `NODE_SECRET=REPLACE_ME_AFTER_ENROLLMENT` with the real secret
-   shown exactly once at enrollment, then `systemctl start powerotp-agent`.
+1. Set `NODE_SECRET` in App Platform (see chat history for the generated value — it is
+   deliberately not written in this file — or generate a new one and rewrite
+   `/etc/powerotp/agent.env` on `powerotpvoip1` to match) and deploy.
 2. Get real VoIP.ms trunk credentials from the user and enter them as `OUTBOUND1..4_*` in
-   the App Platform UI (the user has said they will enter these directly; no code change
-   needed — the schema already exists in `apps/api/src/config.ts`).
+   the App Platform UI — the schema already exists in `apps/api/src/config.ts`; the agent
+   will pick them up automatically on its next poll (≤60s) and render them into
+   `pjsip_trunks.conf` with no further action needed anywhere.
 3. Once a trunk is live end-to-end (agent renders it into `pjsip_trunks.conf`, Asterisk
    registers to VoIP.ms), build the actual dialplan/ARI call-control logic — currently
    `[powerotp-outbound]` is a placeholder that just hangs up.

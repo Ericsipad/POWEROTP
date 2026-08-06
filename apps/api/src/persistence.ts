@@ -54,18 +54,17 @@ export interface ApiKeyDocument {
   revokedAt?: Date;
 }
 
+/**
+ * A node's identity is its source IP, checked against `NODE_ALLOWED_IPS`
+ * (see `NodeService`) — this document is purely a visibility record of
+ * which allowlisted IPs have actually connected, not an access-control
+ * record itself.
+ */
 export interface NodeDocument {
   _id: string;
-  name: string;
-  region: string;
-  secretHash: string;
-  secretPrefix: string;
-  secretLastFour: string;
-  status: "active" | "revoked";
-  enrolledAt: Date;
-  lastSeenAt?: Date;
-  revokedAt?: Date;
-  createdBy: string;
+  ip: string;
+  firstSeenAt: Date;
+  lastSeenAt: Date;
 }
 
 export interface AuditDocument {
@@ -106,10 +105,7 @@ export async function ensureIndexes(db: Db) {
     db
       .collection<AuditDocument>("auditEvents")
       .createIndex({ actorId: 1, occurredAt: -1 }),
-    db
-      .collection<NodeDocument>("nodes")
-      .createIndex({ secretHash: 1 }, { unique: true }),
-    db.collection<NodeDocument>("nodes").createIndex({ status: 1 }),
+    db.collection<NodeDocument>("nodes").createIndex({ ip: 1 }, { unique: true }),
   ]);
   await ensureVerificationIndexes(db);
 }
