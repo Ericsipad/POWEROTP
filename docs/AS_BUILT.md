@@ -91,13 +91,16 @@ server at all. This is the one to keep building on.
   committed. If that alias ever fails on a fresh machine, it needs to be re-created
   there (ask the user, don't ask them to re-paste raw credentials into chat if avoidable).
   Hardened (key-only SSH via a new sudo user `opsadmin`, `ufw` default-deny inbound except
-  22, `fail2ban`) and has Asterisk 20 + Node.js 22 installed and running — see "Telephony
-  droplet" below for the full detail. The telephony-agent itself is not deployed there
-  yet and no node has been enrolled, so no real call/SMS traffic is possible yet.
-- **VoIP.ms**: account exists per the user, but no trunk credentials have been provided
-  or configured yet. `OUTBOUND1_URL/USER/PASS` through `OUTBOUND4_*` are declared as
-  optional env vars (one dedicated trunk per verification method — see
-  `apps/api/src/outbound-trunks.ts`) but are unset placeholders in production.
+  22, `fail2ban`), running Asterisk 20 + Node.js 22, and `apps/telephony-agent` is
+  deployed and running there as the hardened systemd service `powerotp-agent` — see
+  "Phase 4 node identity" and "Telephony droplet" below for full detail. **Confirmed
+  live**: it authenticates to the control plane with the shared `NODE_SECRET`, pulls its
+  outbound trunk config, and the `call_reachability` trunk is `Registered` against
+  VoIP.ms.
+- **VoIP.ms**: account exists; `OUTBOUND1_URL/USER/PASS` (call_reachability) has real
+  credentials set in App Platform and is confirmed registering successfully.
+  `OUTBOUND2..4_*` (voice_code, voice_challenge, sms_code) are still unset placeholders —
+  see `apps/api/src/outbound-trunks.ts` for the mapping.
 
 ## Phase status vs. `PLAN.md`
 
