@@ -226,7 +226,18 @@ Real changes made directly on the droplet via `ssh powerotp` (see
   owns and rewrites on every successful config poll. `extensions.conf` has a placeholder
   `[powerotp-outbound]` context (just logs and hangs up) so the endpoint config has
   somewhere to point until real dialplan/ARI call-control logic is built against a live
-  trunk.
+  trunk. **Also added a `[transport-udp]` PJSIP transport directly to `pjsip.conf`** —
+  every transport in the packaged sample config ships commented out, and with zero active
+  transports `res_pjsip_outbound_registration` silently fails to create any registration
+  object at all (`res_sorcery_config.c: Could not create an object of type 'registration'
+  with id '...'` in `/var/log/asterisk/messages.log`, with no other symptom — the
+  endpoint/aor/auth/identify objects from the same file load fine, which is what made this
+  confusing). This is droplet-level infrastructure, not something the agent renders,
+  because it doesn't vary per trunk.
+- **Confirmed live**: with real `OUTBOUND1_URL/USER/PASS` (San Jose VoIP.ms server) set in
+  App Platform, the agent rendered the trunk and `pjsip show registrations` shows
+  `trunk-call-reachability` as `Registered` against VoIP.ms — outbound SIP registration
+  works end-to-end. Actual call dialplan/ARI logic is still not built (next step).
 - **Node.js 22** installed from NodeSource for running the agent.
 - **`apps/telephony-agent` is deployed and running.** Transfer mechanism: `git archive`
   at a committed `main` commit → `scp` → extract to `/opt/powerotp` → `npm ci` → `npm run
@@ -285,8 +296,10 @@ comes after the socket is created.
 
 ## Known gaps / next steps
 
-1. Build the actual dialplan/ARI call-control logic once VoIP.ms trunk credentials are
-   real and a trunk registers successfully — currently `[powerotp-outbound]` is a
-   placeholder that just hangs up, and `configuredTypes` in the agent's logs is `[]`
-   until real `OUTBOUND1..4_*` values are entered.
-2. Everything else in Phases 4–9 per `docs/PLAN.md`.
+1. `OUTBOUND1` (call_reachability) has real VoIP.ms credentials and is confirmed
+   `Registered`. `OUTBOUND2..4` (voice_code, voice_challenge, sms_code) are still unset —
+   get those from the user when ready for the other three methods.
+2. Build the actual dialplan/ARI call-control logic now that a trunk is genuinely
+   registered — `[powerotp-outbound]` is still a placeholder that just hangs up on any
+   inbound-context match; nothing places or answers a real call yet.
+3. Everything else in Phases 4–9 per `docs/PLAN.md`.

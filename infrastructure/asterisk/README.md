@@ -51,7 +51,11 @@ There is no CI/CD pipeline for the droplet yet; a session deploys it manually:
    runs after the socket exists because the unit is `Type=notify` (systemd waits for
    Asterisk's ready notification, which comes after socket creation, before running
    `ExecStartPost`).
-7. `systemctl enable --now powerotp-agent`.
+7. Append `pjsip-transport.conf` (this directory) to `/etc/asterisk/pjsip.conf` — every
+   transport in the packaged sample config ships commented out, and without at least one
+   active transport, outbound registrations silently fail to be created at all. See that
+   file's comment for the exact symptom this causes if skipped.
+8. `systemctl enable --now powerotp-agent`.
 
 Do not add real SIP, ARI, or SSH credentials to the repository — `agent.env`/`ari.env`
 exist only on the droplet, never here. `NODE_SECRET` itself is entered in App Platform,
