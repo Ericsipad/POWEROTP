@@ -51,7 +51,7 @@ async function buildServerContext(): Promise<ServerContext> {
   const dispatchWorker = createDispatchWorker(
     queueConnection,
     verifications,
-    productionTransportRegistry(),
+    productionTransportRegistry(config),
   );
   const callbackWorker = createCallbackWorker(queueConnection, dataStores.db, config);
 

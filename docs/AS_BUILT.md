@@ -120,8 +120,10 @@ server at all. This is the one to keep building on.
   identity" below) is implemented and confirmed working end-to-end: `powerotpvoip1` is
   hardened, running Asterisk 20 + Node.js 22, and its `powerotp-agent` service
   authenticates to the control plane, pulls configuration, and reloads Asterisk on
-  every change. Not yet done: real VoIP.ms trunk credentials and all dialplan/ARI
-  call-control logic.
+  every change. `call_reachability` now has real ARI call-control logic (see "Phase 4
+  ARI call-control" below) — built and unit-tested, not yet exercised against a real
+  live call. Not yet done: real VoIP.ms trunk credentials for the other three methods
+  and their dialplan/ARI logic.
 - **Phases 5–9**: not started.
 
 ## Platform admin auth (changed from the original TOTP design)
@@ -203,6 +205,63 @@ Platform and redeploying every node with the new value — identical in spirit t
   `NODE_SECRET` itself, which the agent was deployed with directly — the operator never
   logs in to place or change it; the session doing the deployment writes it once as part
   of standing the node up.
+
+## Phase 4 ARI call-control (`call_reachability`, implemented)
+
+The control plane never talks to Asterisk/ARI directly — only a droplet's
+`apps/telephony-agent` does, over ARI bound to `127.0.0.1`. Since a node only ever
+*polls* the control plane (never the reverse), a second, much faster poll loop was
+added alongside the existing 60-second trunk-config sync so call dispatch doesn't wait
+a full minute:
+
+- `apps/api/src/transport.ts#createNodeDispatchTransport` replaces `call_reachability`'s
+  `unavailableTransport` stub: it still fails immediately with `method_not_available` if
+  no trunk is configured (unchanged behavior), but once one is, it advances the
+  interaction to `dispatching` and stops — that state *is* the signal a node polls for.
+  The other three methods stay on `unavailableTransport` regardless of trunk config
+  until their own call-control logic exists (see "Known gaps").
+- `VerificationService.claimNextForNode(type)` atomically hands the oldest
+  still-`dispatching` interaction of a type to whichever node asks next (`dispatching ->
+  calling`, the state machine's normal next active state — MongoDB's `findOneAndUpdate`
+  makes double-claims impossible even with multiple nodes).
+- Two node-facing routes, both `NODE_SECRET`-authenticated like `/v1/nodes/config`:
+  `GET /v1/nodes/jobs/next?type=call_reachability` (claim, `204` if nothing is waiting)
+  and `POST /v1/nodes/jobs/{interactionId}/events` (report progress/result). The report
+  endpoint reuses `VerificationService.transition` — a node gets exactly the same
+  durable event/callback machinery as everything else — and `NodeJobEventSchema`
+  restricts what a node may report to `ringing`/`answered`/`succeeded`/`failed`/
+  `canceled`; only the control plane itself ever sets `queued`/`dispatching`/`calling`.
+- On the droplet, `apps/telephony-agent/src/job-poller.ts` polls the claim endpoint
+  every `JOB_POLL_INTERVAL_MS` (default 2s) — but only for types it has an actual trunk
+  configured for, and only once its ARI WebSocket is actually connected (claiming a job
+  it can't receive events for would just run out the clock). On a claim it places one
+  call at a time (serial, not concurrent — see "Known gaps") via
+  `apps/telephony-agent/src/reachability-call.ts`, using
+  `apps/telephony-agent/src/ari-client.ts` (a small wrapper over ARI's REST + WebSocket
+  using Node 22's built-in `fetch`/`WebSocket`, no new dependency):
+  - Originates `PJSIP/{targetNumber}@trunk-call-reachability` directly into a Stasis app
+    (`app` param on `POST /channels`) with a self-generated `channelId` (so event
+    filtering can start before the HTTP response returns, closing a race where a fast
+    busy/reject could otherwise arrive over the WebSocket first) and ARI's own `timeout`
+    param (`CALL_RING_TIMEOUT_SECONDS`, default 30s) bounding how long it rings.
+  - The WebSocket subscribes with `subscribeAll=true`: a channel that never answers
+    never enters the Stasis app, so its `ChannelStateChange`/`ChannelDestroyed` events
+    only arrive with a system-wide subscription, not an app-scoped one.
+  - `StasisStart` (channel answered and entered the app) -> report `answered` then
+    `succeeded`, and hang up immediately — `call_reachability` only needs to know it was
+    answered, nothing plays. `ChannelDestroyed` (never answered) -> map its Q.850 `cause`
+    code to a small stable reason-code vocabulary (`busy`, `no_answer`, `call_rejected`,
+    `invalid_number`, `provider_unavailable`, or `call_failed`) -> report `failed`. A
+    local hard timeout (ring timeout + 15s) guards against a lost WebSocket event
+    stalling the job loop forever.
+  - No dialplan/`extensions.conf` change was needed: originating directly into a Stasis
+    app bypasses dialplan/context entirely, so the placeholder `[powerotp-outbound]`
+    context remains genuinely unused for this flow (it would only matter for *inbound*
+    calls to that endpoint, which don't exist).
+- Covered by `apps/telephony-agent/src/reachability-call.test.ts` (hangup-cause mapping,
+  answered/busy/originate-failure/unrelated-channel-event paths) using a fake ARI client
+  — no live Asterisk/VoIP.ms dependency in automated tests, consistent with the
+  fake-transport-only-in-tests rule.
 
 ## Telephony droplet (`powerotpvoip1`) — hardening and base install done
 
@@ -300,9 +359,29 @@ comes after the socket is created.
 ## Known gaps / next steps
 
 1. `OUTBOUND1` (call_reachability) has real VoIP.ms credentials and is confirmed
-   `Registered`. `OUTBOUND2..4` (voice_code, voice_challenge, sms_code) are still unset —
-   get those from the user when ready for the other three methods.
-2. Build the actual dialplan/ARI call-control logic now that a trunk is genuinely
-   registered — `[powerotp-outbound]` is still a placeholder that just hangs up on any
-   inbound-context match; nothing places or answers a real call yet.
+   `Registered`, and now has real ARI call-control logic (see "Phase 4 ARI
+   call-control" above) — built and unit-tested, but **not yet exercised against a real
+   live call**; the next session picking this up should place one real canary call
+   end-to-end and confirm the dashboard timeline and callback show `succeeded`/`failed`
+   correctly before considering this fully proven. `OUTBOUND2..4` (voice_code,
+   voice_challenge, sms_code) are still unset — get those from the user when ready, and
+   note their transports intentionally still return `method_not_available` even once
+   trunk credentials exist, until their own dialplan/ARI logic is built the same way.
+2. The agent currently places one `call_reachability` call at a time, serially — there
+   is no concurrency limit to configure yet because there is no concurrency. Revisit
+   once real traffic needs more than one simultaneous call per node.
 3. Everything else in Phases 4–9 per `docs/PLAN.md`.
+
+### Incident: a local ARI password was accidentally echoed to chat
+
+While inspecting `/etc/asterisk/ari.conf` on `powerotpvoip1` to confirm the agent's ARI
+env var names, a `cat` command without redaction leaked the real local ARI password
+(the `powerotp-agent` ARI user's password) into chat output. Severity is low — this
+credential only authenticates to ARI bound to `127.0.0.1` on the droplet itself, never
+reachable from the internet or from App Platform — but per the user's standing
+instruction to never echo raw credentials pulled from live systems, it should be treated
+as compromised. **Action for a future session: regenerate the `powerotp-agent` ARI
+password** (a new random value in `/etc/asterisk/ari.conf`'s `[powerotp-agent]` stanza
+and the matching `ARI_PASS` in `/etc/powerotp/ari.env`, then `asterisk -rx "core reload"`
+and restart `powerotp-agent`) next time this droplet is touched. This does not affect
+`NODE_SECRET` or any VoIP.ms credential — only this one local-only value.

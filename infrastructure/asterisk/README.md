@@ -18,6 +18,13 @@ droplet" sections) for the ground truth of what is actually installed on
   `apps/api/src/node-service.ts`.
 - No customer-facing API, public ARI/AMI, Docker, or Portainer.
 - Media synchronization from private Spaces is not built yet (Phase 5).
+- `apps/telephony-agent` now places real outbound calls for `call_reachability` over
+  local ARI (see `docs/AS_BUILT.md`'s "Phase 4 ARI call-control" section) — no
+  dialplan/`extensions.conf` change is needed for this, since originating directly into
+  a Stasis app bypasses dialplan/context entirely. The agent already reads
+  `ARI_URL`/`ARI_USER`/`ARI_PASS` from `/etc/powerotp/ari.env` (step 5 below), so
+  redeploying updated agent code (step 1–2, then `systemctl restart powerotp-agent`) is
+  the only change needed on an already-deployed droplet; no new env vars are required.
 - Adding a node is deploying the agent there with the current `NODE_SECRET`. Revoking
   access is rotating `NODE_SECRET` in App Platform and redeploying every node with the
   new value — there is no per-node enrollment or revocation.

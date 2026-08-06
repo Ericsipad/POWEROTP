@@ -179,9 +179,40 @@ export class VerificationService {
     );
     if (!updated) return false;
 
-    const event = await this.#writeEvent(updated, to, reasonCode);
-    await this.enqueueCallback(interactionId, event._id);
+    await this.#recordTransition(updated, to, reasonCode);
     return true;
+  }
+
+  /**
+   * Atomically hands the oldest still-`dispatching` interaction of `type`
+   * to a telephony node so it can actually place the call over its
+   * already-registered trunk. `dispatching -> calling` is the state
+   * machine's normal next active state for every voice type, so this reuses
+   * the same invariant `transition` enforces — it is just expressed as a
+   * "claim any matching candidate" query instead of "advance this known
+   * document" so concurrent nodes can never double-claim the same
+   * interaction (MongoDB serializes concurrent `findOneAndUpdate`s against
+   * the same document).
+   */
+  async claimNextForNode(type: VerificationType): Promise<VerificationRequestDocument | null> {
+    const claimed = await this.#requests.findOneAndUpdate(
+      { type, state: "dispatching", expiresAt: { $gt: new Date() } },
+      { $set: { state: "calling", updatedAt: new Date() }, $inc: { sequence: 1 } },
+      { sort: { createdAt: 1 }, returnDocument: "after" },
+    );
+    if (!claimed) return null;
+
+    await this.#recordTransition(claimed, "calling", "node_claimed");
+    return claimed;
+  }
+
+  async #recordTransition(
+    updated: VerificationRequestDocument,
+    to: VerificationState,
+    reasonCode?: string,
+  ) {
+    const event = await this.#writeEvent(updated, to, reasonCode);
+    await this.enqueueCallback(updated._id, event._id);
   }
 
   async attachInteractionToken(interactionId: string, nonce: string) {
