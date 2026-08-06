@@ -3,6 +3,7 @@ import { createCallbackWorker } from "@powerotp/api/callback-worker.js";
 import { loadConfig, type ProductionConfig } from "@powerotp/api/config.js";
 import { connectDataStores, type DataStores } from "@powerotp/api/dependencies.js";
 import { createBrevoEmailService } from "@powerotp/api/email.js";
+import { NodeService } from "@powerotp/api/node-service.js";
 import { ensureIndexes } from "@powerotp/api/persistence.js";
 import { ProjectService } from "@powerotp/api/project-service.js";
 import { productionTransportRegistry } from "@powerotp/api/transport.js";
@@ -19,6 +20,7 @@ export interface ServerContext {
   auth: AuthService;
   projects: ProjectService;
   verifications: VerificationService;
+  nodes: NodeService;
 }
 
 /**
@@ -55,6 +57,7 @@ async function buildServerContext(): Promise<ServerContext> {
 
   const auth = new AuthService(dataStores.db, config, createBrevoEmailService(config));
   const projects = new ProjectService(dataStores.db, config, verifications);
+  const nodes = new NodeService(dataStores.db, config);
 
   async function shutdown(signal: string) {
     console.info(JSON.stringify({ service: "powerotp", signal, msg: "shutting down" }));
@@ -69,7 +72,7 @@ async function buildServerContext(): Promise<ServerContext> {
   process.on("SIGINT", () => void shutdown("SIGINT"));
   process.on("SIGTERM", () => void shutdown("SIGTERM"));
 
-  return { config, dataStores, auth, projects, verifications };
+  return { config, dataStores, auth, projects, verifications, nodes };
 }
 
 export function getServerContext(): Promise<ServerContext> {

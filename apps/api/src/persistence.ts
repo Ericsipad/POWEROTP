@@ -54,6 +54,20 @@ export interface ApiKeyDocument {
   revokedAt?: Date;
 }
 
+export interface NodeDocument {
+  _id: string;
+  name: string;
+  region: string;
+  secretHash: string;
+  secretPrefix: string;
+  secretLastFour: string;
+  status: "active" | "revoked";
+  enrolledAt: Date;
+  lastSeenAt?: Date;
+  revokedAt?: Date;
+  createdBy: string;
+}
+
 export interface AuditDocument {
   _id: string;
   actorId: string;
@@ -92,6 +106,10 @@ export async function ensureIndexes(db: Db) {
     db
       .collection<AuditDocument>("auditEvents")
       .createIndex({ actorId: 1, occurredAt: -1 }),
+    db
+      .collection<NodeDocument>("nodes")
+      .createIndex({ secretHash: 1 }, { unique: true }),
+    db.collection<NodeDocument>("nodes").createIndex({ status: 1 }),
   ]);
   await ensureVerificationIndexes(db);
 }

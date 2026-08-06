@@ -1,5 +1,6 @@
 import { ApiError } from "@powerotp/api/errors.js";
 import { AuthError } from "@powerotp/api/auth-service.js";
+import { NodeError } from "@powerotp/api/node-service.js";
 import { ProjectError } from "@powerotp/api/project-service.js";
 import { VerificationError } from "@powerotp/api/verification-service.js";
 import { InteractionTokenError } from "@powerotp/api/interaction-tokens.js";
@@ -14,6 +15,7 @@ export function toErrorResponse(error: unknown, correlationId: string): NextResp
   if (
     error instanceof ApiError ||
     error instanceof AuthError ||
+    error instanceof NodeError ||
     error instanceof ProjectError ||
     error instanceof VerificationError ||
     error instanceof InteractionTokenError

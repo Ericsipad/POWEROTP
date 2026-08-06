@@ -90,8 +90,10 @@ server at all. This is the one to keep building on.
   (`.cursor/rules/droplet-ssh-access.mdc`) that does not sync across machines or get
   committed. If that alias ever fails on a fresh machine, it needs to be re-created
   there (ask the user, don't ask them to re-paste raw credentials into chat if avoidable).
-  **Nothing has been installed on this droplet yet** — no Asterisk, no PJSIP, no
-  telephony-agent, no hardening beyond whatever DigitalOcean's base image provides.
+  Hardened (key-only SSH via a new sudo user `opsadmin`, `ufw` default-deny inbound except
+  22, `fail2ban`) and has Asterisk 20 + Node.js 22 installed and running — see "Telephony
+  droplet" below for the full detail. The telephony-agent itself is not deployed there
+  yet and no node has been enrolled, so no real call/SMS traffic is possible yet.
 - **VoIP.ms**: account exists per the user, but no trunk credentials have been provided
   or configured yet. `OUTBOUND1_URL/USER/PASS` through `OUTBOUND4_*` are declared as
   optional env vars (one dedicated trunk per verification method — see
@@ -110,10 +112,12 @@ server at all. This is the one to keep building on.
 - **Public demo widget**: added ahead of Phase 4 (not in the original phase list) — a
   "try it now" widget on the marketing homepage hero, backed by the anonymous, tightly
   scoped `/v1/demo/verifications` endpoints and the `prj_demo` project above.
-- **Phase 4 (voice types 1 and 2 / telephony)**: **not started.** No Asterisk/PJSIP
-  install, no node enrollment/mTLS system, no ARI integration, no VoIP.ms trunk wiring
-  in `apps/telephony-agent` (it's still the Phase-1 stub). The droplet is live and
-  reachable over SSH, but that's the only piece in place.
+- **Phase 4 (voice types 1 and 2 / telephony)**: **in progress.** Node identity/enrollment
+  (bearer secret, not mTLS — see "Phase 4 node identity" below) is implemented end-to-end
+  in the control plane. The droplet is hardened, and Asterisk 20 + Node.js 22 are
+  installed and running. Not yet done: deploying the agent itself onto the droplet,
+  enrolling that node, real VoIP.ms trunk credentials, and all dialplan/ARI call-control
+  logic.
 - **Phases 5–9**: not started.
 
 ## Platform admin auth (changed from the original TOTP design)
@@ -145,20 +149,82 @@ If a future session is asked to "add MFA back" or "let customers become admins" 
 without re-confirming with the user first; this was a deliberate simplification, not an
 oversight.
 
+## Phase 4 node identity (implemented; not yet enrolled)
+
+Confirmed with the user: true mutual TLS is not pursued (not straightforward to terminate
+on App Platform's shared ingress). Node identity is a **per-node hashed bearer secret**,
+issued once at enrollment and sent as `Authorization: Bearer <secret>` — structurally the
+same pattern as a project API key, deliberately reusing `API_KEY_HASH_SECRET` for hashing
+rather than adding a second near-identical secret.
+
+- Contracts: `libraries/contracts/src/nodes.ts` (`CreateNodeSchema`, `NodeSchema`,
+  `NodeEnrolledSchema`, `NodeConfigSchema`).
+- `apps/api/src/node-service.ts` (`NodeService`): `enroll` (admin-only, returns the secret
+  exactly once), `list`, `revoke`, `authenticate` (bearer secret → active `NodeDocument`,
+  also stamps `lastSeenAt` as a liveness heartbeat), `configFor` (returns whichever
+  `OUTBOUND1..4_*` trunks are currently configured in App Platform — never any other app
+  secret).
+- Routes: `POST/GET /v1/admin/nodes` and `POST /v1/admin/nodes/[nodeId]/revoke` (admin
+  session + CSRF), `GET /v1/nodes/config` (node bearer secret, no admin session — this is
+  the droplet-facing endpoint).
+- `/admin` has a "Telephony nodes" panel: enroll a node (name + region), see the secret
+  once, list nodes with last-seen time, revoke.
+- **Config flows one direction only, on demand**: App Platform env vars
+  (`OUTBOUND1..4_*`) are the source of truth; a droplet never receives or stores any other
+  app secret. A node polls `/v1/nodes/config` (see `apps/telephony-agent/src/index.ts`)
+  and, when `ASTERISK_PJSIP_TRUNKS_PATH` is set, renders the trunks it received into a
+  local PJSIP include file (`apps/telephony-agent/src/pjsip-config.ts`) and asks the local
+  Asterisk to `pjsip reload`. Dialplan/ARI call-control logic is intentionally not built
+  yet — there is no real trunk to test it against until VoIP.ms credentials are entered.
+- **No node has been enrolled yet.** The droplet's agent is installed and running (see
+  below) but is not yet authenticated — it will log `node secret rejected` until an
+  operator enrolls it at `/admin` and copies the resulting secret into
+  `/etc/powerotp/agent.env` on the droplet.
+
+## Telephony droplet (`powerotpvoip1`) — hardening and base install done
+
+Real changes made directly on the droplet via `ssh powerotp` (see
+`.cursor/rules/droplet-ssh-access.mdc`, local-only):
+
+- **SSH/access**: created a sudo, key-only login user `opsadmin` (same authorized key as
+  root) and confirmed it works with `sudo` before changing anything else. Set
+  `PasswordAuthentication no` and `PermitRootLogin prohibit-password` in `sshd_config` —
+  password auth is fully disabled account-wide; root can still only ever log in with the
+  same key, never a password. Installed and enabled `fail2ban`.
+- **Firewall**: `ufw` is active, default-deny incoming, only `22/tcp` (SSH) allowed in.
+  Nothing else — no ARI, AMI, or Asterisk port is reachable from outside the box, matching
+  the threat model.
+- **Unattended upgrades**: already correctly configured by DigitalOcean's base image
+  (security-origin automatic updates enabled) — verified, not changed.
+- **Asterisk**: installed from Ubuntu 24.04's apt repo — Asterisk 20 (LTS), already running
+  as the non-root `asterisk` system user via its packaged systemd unit
+  (`asterisk -U asterisk`). ARI is enabled in `http.conf`/`ari.conf`, bound to
+  `127.0.0.1` only (never exposed publicly), with one local ARI user
+  (`powerotp-agent`) whose generated password lives only in
+  `/etc/powerotp/ari.env` (root-only, `600`) on the droplet — it is never sent to or
+  stored by the control plane. `pjsip.conf` includes `pjsip_trunks.conf`, which the agent
+  owns and rewrites on every successful config poll. `extensions.conf` has a placeholder
+  `[powerotp-outbound]` context (just logs and hangs up) so the endpoint config has
+  somewhere to point until real dialplan/ARI call-control logic is built against a live
+  trunk.
+- **Node.js 22** installed from NodeSource for running the agent.
+- **Not yet done**: deploying `apps/telephony-agent` itself onto the droplet as a
+  systemd-managed service (needs a decision on transfer mechanism — see next steps),
+  enrolling the node from `/admin`, and writing the real `NODE_SECRET` into
+  `/etc/powerotp/agent.env`.
+
 ## Known gaps / next steps
 
-1. Confirm the DigitalOcean app's build/run commands are `npm run build` / `npm start`
-   (auto-detected) and that a deploy is actually serving `/v1/*` correctly (see the
-   `/v1/capabilities` check above) before doing anything else.
-2. Sign in at `/admin` and click "Provision demo project" once, if not already done, so
-   the homepage widget has live data.
-3. Design and build the Phase 4 node-enrollment/identity system before installing
-   anything on the droplet — `docs/PLAN.md` calls for a "unique, revocable" node identity
-   with outbound-only authenticated connections back to the control plane. Note: true
-   mutual-TLS termination is not straightforward on DigitalOcean App Platform's shared
-   ingress; the realistic implementation is likely a per-node bearer secret (issued at
-   enrollment, hashed at rest, revocable) sent over TLS, analogous to how project API
-   keys already work — this still needs an explicit decision, not a silent assumption.
-4. Get VoIP.ms trunk credentials from the user and populate `OUTBOUND1..4_*` before any
-   real outbound calling/SMS is possible.
+1. Deploy `apps/telephony-agent` onto `powerotpvoip1` as a hardened, non-root systemd
+   service (own service user, `ProtectSystem=strict`, `NoNewPrivileges`), pointed at
+   `CONTROL_PLANE_URL=https://powerotp.com` and `ASTERISK_PJSIP_TRUNKS_PATH=/etc/asterisk/pjsip_trunks.conf`.
+2. Sign in at `/admin`, enroll `powerotpvoip1` under "Telephony nodes", and copy the
+   returned secret into `/etc/powerotp/agent.env` on the droplet (`NODE_SECRET=...`) —
+   it is shown exactly once.
+3. Get real VoIP.ms trunk credentials from the user and enter them as `OUTBOUND1..4_*` in
+   the App Platform UI (the user has said they will enter these directly; no code change
+   needed — the schema already exists in `apps/api/src/config.ts`).
+4. Once a trunk is live end-to-end (agent renders it into `pjsip_trunks.conf`, Asterisk
+   registers to VoIP.ms), build the actual dialplan/ARI call-control logic — currently
+   `[powerotp-outbound]` is a placeholder that just hangs up.
 5. Everything else in Phases 4–9 per `docs/PLAN.md`.
