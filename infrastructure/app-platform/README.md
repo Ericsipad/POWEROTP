@@ -48,7 +48,11 @@ and do not create a repository `.env` file.
 - `API_KEY_HASH_SECRET`: at least 32 random bytes, independent from other secrets
 - `ADMIN_EMAIL` / `ADMIN_PASSWORD`: the single platform admin's login credentials
 - `ADMIN_ALLOWED_IPS`: comma-separated exact IP addresses allowed to sign in at
-  `/admin/login` — no other IP can log in regardless of password
+  `/admin/login` — no other IP can log in regardless of password. The literal entry
+  `0.0.0.0` is a deliberate "allow all IPs" opt-out (see
+  `apps/api/src/ip-allowlist.ts`) for when you need to log in from a genuinely dynamic
+  IP; using it means admin login relies on the password alone, dropping IP as a second
+  factor — prefer real IPs when you can.
 - `BREVO_API_KEY`: production transactional-email API key
 - `EMAIL_FROM`: verified POWEROTP sender address
 - `PUBLIC_APP_URL` / `PUBLIC_API_URL`: both `https://powerotp.com` (see Domains below)
