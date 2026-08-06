@@ -21,7 +21,9 @@ Next.js Route Handlers in `apps/web/app`, backed by library code from `apps/api`
 - `libraries/contracts` — shared runtime schemas
 - `libraries/sdk-js` — server-side TypeScript client foundation
 - `libraries/widget-loader` — hosted-widget loader foundation
-- `docs` — product plan, specification, threat model, and acceptance criteria
+- `docs` — product plan, specification, threat model, and acceptance criteria;
+  [`docs/AS_BUILT.md`](docs/AS_BUILT.md) is the ground-truth log of what's actually
+  deployed — read it first when starting a new session
 
 There is exactly one App Platform component. See
 [`infrastructure/app-platform/README.md`](infrastructure/app-platform/README.md).
