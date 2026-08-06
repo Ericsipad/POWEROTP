@@ -81,9 +81,17 @@ server at all. This is the one to keep building on.
   (via the MongoDB MCP tool, since this environment has no standing DB credentials) at
   `_id: "prj_demo"`, `slug: "demo"`, owned by `usr_platform_admin`, all four verification
   methods enabled. `DEMO_PROJECT_SLUG=demo` is the App Platform env var that activates
-  the public "try it now" widget against it. There is also an idempotent admin-only
+  the public "try it now" widget against it — **confirm this is actually set** before
+  assuming the demo widget works; it was found unset in a later session despite this
+  note previously assuming it was configured. There is also an idempotent admin-only
   `POST /v1/admin/demo-project` endpoint (button on `/admin`) that can recreate/refresh
-  this project if it's ever lost — safe to click repeatedly.
+  this project if it's ever lost — safe to click repeatedly. **Known-fixed bug**: that
+  manual Mongo insert stored `activatedAt` as a plain string instead of a BSON `Date`
+  (an artifact of inserting via the MCP tool's JSON interface), which crashed
+  `ProjectService#toResponse`'s `activatedAt.toISOString()` every time this endpoint
+  ran (`"e.activatedAt.toISOString is not a function"` in App Platform runtime logs).
+  Fixed by having `ensureDemoProject` always `$set` (not `$setOnInsert`) `activatedAt`,
+  so re-running the endpoint self-heals any legacy bad value.
 - **Telephony droplet**: `powerotpvoip1`, Ubuntu 24.04.4 LTS, IP `178.128.235.192`, DNS
   `na1.powerotp.com` (already pointed at it). SSH access from this machine is via the
   alias `ssh powerotp` — defined in a **local-only, gitignored** Cursor rule

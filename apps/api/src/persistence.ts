@@ -55,10 +55,10 @@ export interface ApiKeyDocument {
 }
 
 /**
- * A node's identity is its source IP, checked against `NODE_ALLOWED_IPS`
- * (see `NodeService`) — this document is purely a visibility record of
- * which allowlisted IPs have actually connected, not an access-control
- * record itself.
+ * A node authenticates with the shared `NODE_SECRET` (see `NodeService`);
+ * this document is purely a visibility/heartbeat record of which source
+ * IPs have successfully authenticated, not an access-control record
+ * itself.
  */
 export interface NodeDocument {
   _id: string;

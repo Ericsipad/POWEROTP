@@ -203,6 +203,14 @@ export class ProjectService {
    * attributed to the platform administrator account, not a customer,
    * because no customer should have visibility into anonymous demo
    * traffic.
+   *
+   * `activatedAt` is deliberately refreshed on every call (not just
+   * `$setOnInsert`) so re-running this after the document was created any
+   * other way (e.g. a manual insert, which is how this project was first
+   * seeded — see `docs/AS_BUILT.md`) always leaves it as a genuine BSON
+   * `Date`, which `#toResponse` requires. A manually-inserted document had
+   * it stored as a plain string, which crashed `activatedAt.toISOString()`
+   * here every time this endpoint ran until this self-healing fix.
    */
   async ensureDemoProject(slug: string, allowedOrigin: string, actorId: string) {
     const now = new Date();
@@ -219,13 +227,13 @@ export class ProjectService {
           ] as VerificationType[],
           allowedOrigins: [allowedOrigin],
           active: true,
+          activatedAt: now,
           updatedAt: now,
         },
         $setOnInsert: {
           _id: createId("prj"),
           customerId: "usr_platform_admin",
           slug,
-          activatedAt: now,
           createdAt: now,
         },
       },
