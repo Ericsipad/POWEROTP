@@ -4,6 +4,8 @@ import type { Node, SessionResponse } from "@powerotp/contracts";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
+import { ChallengesPanel } from "./challenges-panel";
+
 export default function AdminPage() {
   const router = useRouter();
   const [session, setSession] = useState<SessionResponse>();
@@ -130,6 +132,7 @@ export default function AdminPage() {
             ))}
           </ul>
         </article>
+        {session && <ChallengesPanel csrfToken={session.csrfToken} />}
       </section>
     </main>
   );

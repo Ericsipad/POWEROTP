@@ -78,6 +78,17 @@ and do not create a repository `.env` file.
   never edited on a droplet — it is baked into a node's deployment once, and rotating it
   is only ever an App Platform env var edit plus redeploying every node with the new
   value.
+- `SPACES_ENDPOINT` / `SPACES_BUCKET` / `SPACES_ACCESS_KEY` / `SPACES_SECRET_KEY`:
+  optional, a private DigitalOcean Spaces bucket holding `voice_challenge` (Type 3)
+  recordings — see `docs/PROVIDER_CHECKLIST.md`. Leave all four unset to keep the admin
+  recording/challenge APIs and `voice_challenge` failing closed with
+  `method_not_available`/`media_storage_not_configured`.
+- `MEDIA_MANIFEST_SECRET`: optional, at least 32 random bytes, independent from every
+  other secret (never reused for `NODE_SECRET`) — signs the media manifest telephony
+  nodes verify before trusting a recording checksum (see
+  `apps/api/src/challenge-service.ts#currentManifest`). Also written to each droplet's
+  `/etc/powerotp/agent.env`, the exact same value, the same way `NODE_SECRET` is (see
+  `infrastructure/asterisk/README.md`).
 
 ## Domains
 

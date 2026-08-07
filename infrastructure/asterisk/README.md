@@ -18,13 +18,15 @@ droplet" sections) for the ground truth of what is actually installed on
   `apps/api/src/node-service.ts`.
 - No customer-facing API, public ARI/AMI, Docker, or Portainer.
 - Media synchronization from private Spaces is not built yet (Phase 5).
-- `apps/telephony-agent` now places real outbound calls for `call_reachability` over
-  local ARI (see `docs/AS_BUILT.md`'s "Phase 4 ARI call-control" section) — no
-  dialplan/`extensions.conf` change is needed for this, since originating directly into
-  a Stasis app bypasses dialplan/context entirely. The agent already reads
-  `ARI_URL`/`ARI_USER`/`ARI_PASS` from `/etc/powerotp/ari.env` (step 5 below), so
-  redeploying updated agent code (step 1–2, then `systemctl restart powerotp-agent`) is
-  the only change needed on an already-deployed droplet; no new env vars are required.
+- `apps/telephony-agent` now places real outbound calls for `call_reachability`,
+  `voice_code`, and `voice_challenge` over local ARI (see `docs/AS_BUILT.md`'s "Phase 4
+  ARI call-control" and "Phase 5" sections) — no dialplan/`extensions.conf` change is
+  needed for this, since originating directly into a Stasis app bypasses
+  dialplan/context entirely. The agent already reads `ARI_URL`/`ARI_USER`/`ARI_PASS`
+  from `/etc/powerotp/ari.env` (step 5 below), so redeploying updated agent code (step
+  1–2, then `systemctl restart powerotp-agent`) is the only change needed on an
+  already-deployed droplet for call-control updates; `voice_challenge`'s media sync
+  needs the two additional env vars and sound directory described in step 5a below.
 - Adding a node is deploying the agent there with the current `NODE_SECRET`. Revoking
   access is rotating `NODE_SECRET` in App Platform and redeploying every node with the
   new value — there is no per-node enrollment or revocation.
@@ -47,6 +49,15 @@ There is no CI/CD pipeline for the droplet yet; a session deploys it manually:
    automatically through `/v1/nodes/config` instead). `/etc/powerotp/ari.env` holds the
    local-only ARI user credential generated directly on the droplet at install time. Both
    files are `640 root:asterisk`, readable only by `potp-agent`.
+5a. For `voice_challenge`: also add `MEDIA_MANIFEST_SECRET` (the exact same value as App
+    Platform's `MEDIA_MANIFEST_SECRET` — an independent secret, never `NODE_SECRET`) and
+    `MEDIA_ROOT=/var/lib/asterisk/sounds/custom` to `/etc/powerotp/agent.env`. Create that
+    directory (`mkdir -p /var/lib/asterisk/sounds/custom && chown potp-agent:asterisk
+    /var/lib/asterisk/sounds/custom`) so the agent's `media-sync.ts` loop can write synced
+    recordings there. `MEDIA_SOUND_PREFIX` defaults to `custom/potp` and does not need to
+    be set unless recordings are placed under a different Asterisk sound-search-relative
+    path. Skip this step entirely on a node that never handles `voice_challenge` — the
+    media-sync loop simply never runs without `MEDIA_ROOT`/`MEDIA_MANIFEST_SECRET` set.
 6. Asterisk's packaged `asterisk.service` doesn't apply `asterisk.conf`'s
    `astctlpermissions`/`astctlgroup` settings reliably on this build, so
    `/var/run/asterisk/asterisk.ctl` is recreated `srwxr-xr-x` (owner-only write) on every

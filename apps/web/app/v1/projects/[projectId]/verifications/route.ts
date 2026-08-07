@@ -1,5 +1,5 @@
 import { parseBody } from "@powerotp/api/errors.js";
-import { issueInteractionToken } from "@powerotp/api/interaction-tokens.js";
+import { issueInteractionToken, tokenActionForType } from "@powerotp/api/interaction-tokens.js";
 import { authenticateProjectApiKey } from "@powerotp/api/project-api-auth.js";
 import { ApiError } from "@powerotp/api/errors.js";
 import { CreateVerificationSchema, type VerificationAccepted } from "@powerotp/contracts";
@@ -8,12 +8,6 @@ import { NextResponse } from "next/server";
 import { apiRoute, clientIp } from "@/lib/api-route";
 import { enforceRateLimit } from "@/lib/rate-limit";
 import { getServerContext } from "@/lib/server-context";
-
-const tokenActionByType = {
-  voice_code: "submit_code",
-  sms_code: "submit_code",
-  voice_challenge: "submit_challenge",
-} as const;
 
 interface RouteParams {
   /** Despite the folder name, this is the project *slug*, not its internal id. */
@@ -53,12 +47,7 @@ export const POST = apiRoute<RouteParams>(async (request, { params }, correlatio
     correlationId,
   );
 
-  const tokenAction =
-    input.type === "voice_code" ||
-    input.type === "sms_code" ||
-    input.type === "voice_challenge"
-      ? tokenActionByType[input.type]
-      : undefined;
+  const tokenAction = tokenActionForType(input.type);
   const origin = request.headers.get("origin");
   let interactionToken: string | undefined;
   if (input.browserResponse && tokenAction && origin && project.allowedOrigins.includes(origin)) {

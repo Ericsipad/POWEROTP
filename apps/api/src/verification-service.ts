@@ -7,6 +7,7 @@ import type {
 import { createHash } from "node:crypto";
 import type { Db } from "mongodb";
 
+import type { ChallengeService } from "./challenge-service.js";
 import type { ProductionConfig } from "./config.js";
 import {
   createFiveDigitCode,
@@ -16,6 +17,7 @@ import {
   safeEqual,
 } from "./security.js";
 import {
+  hasReachedAwaitingResponse,
   initialVerificationState,
   isTerminalState,
   isTransitionAllowed,
@@ -59,6 +61,7 @@ export class VerificationService {
   constructor(
     db: Db,
     private readonly config: Pick<ProductionConfig, "PUBLIC_API_URL" | "CONFIG_ENCRYPTION_KEY">,
+    private readonly challenges: ChallengeService,
     private readonly enqueueDispatch: EnqueueDispatch,
     private readonly enqueueTimeout: EnqueueTimeout,
     private readonly enqueueCallback: EnqueueCallback,
@@ -98,6 +101,17 @@ export class VerificationService {
           ? createFiveDigitCode()
           : undefined;
 
+    // A missing challenge is a content-catalog precondition (nothing the
+    // admin has published yet), not an infrastructure credential — unlike
+    // an unconfigured trunk, which every other method only discovers
+    // asynchronously at dispatch, this fails the request synchronously,
+    // the same way an unsupported method or bad E.164 number already does.
+    const challenge =
+      input.type === "voice_challenge" ? await this.challenges.selectAndMaterialize() : undefined;
+    if (input.type === "voice_challenge" && !challenge) {
+      throw new VerificationError("no_published_challenges", 409);
+    }
+
     const now = new Date();
     const verification: VerificationRequestDocument = {
       _id: createSortableId("int"),
@@ -112,6 +126,7 @@ export class VerificationService {
       expectedCodeEncrypted: code
         ? encryptString(code, this.config.CONFIG_ENCRYPTION_KEY)
         : undefined,
+      challenge,
       createdAt: now,
       updatedAt: now,
       expiresAt: new Date(now.getTime() + VERIFICATION_LIFETIME_MS),
@@ -159,6 +174,19 @@ export class VerificationService {
       reasonCode: verification.reasonCode,
       createdAt: verification.createdAt.toISOString(),
       expiresAt: verification.expiresAt.toISOString(),
+      challenge:
+        verification.challenge &&
+        hasReachedAwaitingResponse(verification.type, verification.state)
+          ? {
+              challengeId: verification.challenge.challengeDefinitionId,
+              question: verification.challenge.question,
+              options: verification.challenge.options,
+              allowsMultiple: verification.challenge.allowsMultiple,
+              minSelections: verification.challenge.minSelections,
+              maxSelections: verification.challenge.maxSelections,
+              expiresAt: verification.expiresAt.toISOString(),
+            }
+          : undefined,
     };
   }
 
@@ -280,6 +308,34 @@ export class VerificationService {
     return { succeeded: correct };
   }
 
+  /**
+   * Grades a `voice_challenge` response the same way `submitCode` grades a
+   * code: exactly one accepted submission per interaction, no distinction
+   * in the response between a wrong answer and a stale/expired one beyond
+   * the existing terminal-state and transition guards.
+   */
+  async submitChallenge(interactionId: string, optionIds: string[]) {
+    const verification = await this.#requireActive(interactionId, "voice_challenge");
+    if (verification.state !== "awaiting_response") {
+      throw new VerificationError("not_awaiting_response", 409);
+    }
+    if (!verification.challenge) {
+      throw new VerificationError("challenge_not_available", 409);
+    }
+
+    const correct = this.challenges.gradeSubmission(
+      verification.challenge.expectedAnswerOptionIdsEncrypted,
+      optionIds,
+    );
+    const applied = await this.transition(
+      interactionId,
+      correct ? "succeeded" : "failed",
+      correct ? "challenge_matched" : "challenge_mismatch",
+    );
+    if (!applied) throw new VerificationError("stale_verification_state", 409);
+    return { succeeded: correct };
+  }
+
   async cancel(interactionId: string, projectId: string) {
     const verification = await this.#requests.findOne({ _id: interactionId, projectId });
     if (!verification) throw new VerificationError("verification_not_found", 404);
@@ -294,6 +350,17 @@ export class VerificationService {
   codeForDelivery(verification: VerificationRequestDocument): string | undefined {
     if (!verification.expectedCodeEncrypted) return undefined;
     return decryptString(verification.expectedCodeEncrypted, this.config.CONFIG_ENCRYPTION_KEY);
+  }
+
+  /**
+   * The local sound basename a claiming node should already have synced
+   * (see `apps/telephony-agent/src/media-sync.ts`) — never a Spaces key or
+   * URL, since a node's ARI `sound:` media type resolves files by basename
+   * from its own local media directory.
+   */
+  soundBasenameForDelivery(verification: VerificationRequestDocument): string | undefined {
+    if (!verification.challenge) return undefined;
+    return this.challenges.soundBasenameFor(verification.challenge.recordingAssetId);
   }
 
   async projectStats(projectId: string) {

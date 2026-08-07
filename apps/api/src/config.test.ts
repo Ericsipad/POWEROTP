@@ -36,6 +36,11 @@ describe("loadConfig", () => {
         VOIPMS_SMS_API_PASSWORD: "",
         VOIPMS_SMS_DID: "",
         ADMIN_ALLOWED_IPS: "",
+        SPACES_ENDPOINT: "",
+        SPACES_BUCKET: "",
+        SPACES_ACCESS_KEY: "",
+        SPACES_SECRET_KEY: "",
+        MEDIA_MANIFEST_SECRET: "",
       }),
     );
   });

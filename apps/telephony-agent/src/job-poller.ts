@@ -2,6 +2,7 @@ import type { AriClient } from "./ari-client.js";
 import type { AgentConfig } from "./config.js";
 import { fetchNextJob, reportJobEvent } from "./control-plane-client.js";
 import { placeReachabilityCall } from "./reachability-call.js";
+import { placeVoiceChallengeCall } from "./voice-challenge-call.js";
 import { placeVoiceCodeCall } from "./voice-code-call.js";
 
 type Logger = (msg: string, extra?: Record<string, unknown>) => void;
@@ -18,6 +19,7 @@ type ReportableState = "ringing" | "answered" | "playing" | "succeeded" | "faile
 const trunkEndpointByType: Record<string, string> = {
   call_reachability: "trunk-call-reachability",
   voice_code: "trunk-voice-code",
+  voice_challenge: "trunk-voice-challenge",
 };
 
 /**
@@ -49,7 +51,7 @@ export async function pollAndRunOneJob(
         log("failed to report call progress", { interactionId: job.interactionId, error: errorMessage(error) }),
       );
 
-    const result = await runJob(ari, trunkEndpoint, job, config.CALL_RING_TIMEOUT_SECONDS, report);
+    const result = await runJob(ari, trunkEndpoint, job, config, report);
 
     try {
       await reportJobEvent(config, job.interactionId, result.state, result.reasonCode);
@@ -64,13 +66,19 @@ export async function pollAndRunOneJob(
 async function runJob(
   ari: AriClient,
   trunkEndpoint: string,
-  job: { type: string; targetNumber: string; code?: string },
-  ringTimeoutSeconds: number,
+  job: { type: string; targetNumber: string; code?: string; soundBasename?: string },
+  config: AgentConfig,
   report: (state: ReportableState) => void,
 ): Promise<{ state: "succeeded" | "failed" | "awaiting_response"; reasonCode: string }> {
+  const ringTimeoutSeconds = config.CALL_RING_TIMEOUT_SECONDS;
   if (job.type === "voice_code") {
     if (!job.code) return { state: "failed", reasonCode: "node_error" };
     return placeVoiceCodeCall(ari, trunkEndpoint, job.targetNumber, job.code, ringTimeoutSeconds, report);
+  }
+  if (job.type === "voice_challenge") {
+    if (!job.soundBasename) return { state: "failed", reasonCode: "node_error" };
+    const media = `sound:${config.MEDIA_SOUND_PREFIX}/${job.soundBasename}`;
+    return placeVoiceChallengeCall(ari, trunkEndpoint, job.targetNumber, media, ringTimeoutSeconds, report);
   }
   return placeReachabilityCall(ari, trunkEndpoint, job.targetNumber, ringTimeoutSeconds, report);
 }

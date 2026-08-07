@@ -120,7 +120,7 @@ originate calls or SMS.
 - Provision native Asterisk, PJSIP, local ARI, agent watchdogs, mTLS enrollment, health,
   leasing, failover, VoIP.ms trunk routing, and composable digit playback.
 
-### Phase 5 — Voice challenges
+### Phase 5 — Voice challenges (implemented)
 
 - Add recording processing/publication, question and answer administration, media
   manifests, headless challenge JSON, answer validation, and optional hosted iframe.

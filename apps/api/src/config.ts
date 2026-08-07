@@ -65,6 +65,21 @@ const ProductionConfigSchema = z.object({
   VOIPMS_SMS_API_USERNAME: z.string().min(1).optional(),
   VOIPMS_SMS_API_PASSWORD: z.string().min(1).optional(),
   VOIPMS_SMS_DID: z.string().min(1).optional(),
+  /**
+   * Private DigitalOcean Spaces bucket holding `voice_challenge` (Type 3)
+   * recordings, and the independent secret used to sign the manifest
+   * telephony nodes verify before trusting a recording checksum (see
+   * `apps/api/src/challenge-service.ts`). All optional: the admin
+   * recording/challenge APIs and `voice_challenge` fail closed with
+   * `method_not_available`/`no_published_challenges` until every one of
+   * these is set, the same deferred-credential convention as the other
+   * verification methods.
+   */
+  SPACES_ENDPOINT: z.string().url().optional(),
+  SPACES_BUCKET: z.string().min(1).optional(),
+  SPACES_ACCESS_KEY: z.string().min(1).optional(),
+  SPACES_SECRET_KEY: z.string().min(1).optional(),
+  MEDIA_MANIFEST_SECRET: z.string().min(32).optional(),
 });
 
 export type ProductionConfig = z.infer<typeof ProductionConfigSchema>;

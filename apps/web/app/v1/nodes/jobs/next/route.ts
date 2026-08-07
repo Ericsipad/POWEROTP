@@ -31,6 +31,8 @@ export const GET = apiRoute(async (request) => {
     type: claimed.type,
     targetNumber: claimed.targetNumber,
     code: claimed.type === "voice_code" ? verifications.codeForDelivery(claimed) : undefined,
+    soundBasename:
+      claimed.type === "voice_challenge" ? verifications.soundBasenameForDelivery(claimed) : undefined,
   };
   const response = NextResponse.json(job);
   response.headers.set("cache-control", "no-store");

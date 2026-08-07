@@ -1,9 +1,25 @@
-import type { InteractionTokenClaims } from "@powerotp/contracts";
+import type { InteractionTokenClaims, VerificationType } from "@powerotp/contracts";
 import { InteractionTokenClaimsSchema } from "@powerotp/contracts";
 
 import { createSecret, signPayload, verifySignedPayload } from "./security.js";
 
 const DEFAULT_LIFETIME_MS = 5 * 60 * 1_000;
+
+/**
+ * Which interaction-token action (if any) a verification type's response
+ * is submitted under. Shared by both the creation route (which issues the
+ * token) and the response route (which verifies it), so the mapping is
+ * never duplicated or allowed to drift between the two.
+ */
+const tokenActionByType: Partial<Record<VerificationType, InteractionTokenClaims["action"]>> = {
+  voice_code: "submit_code",
+  sms_code: "submit_code",
+  voice_challenge: "submit_challenge",
+};
+
+export function tokenActionForType(type: VerificationType) {
+  return tokenActionByType[type];
+}
 
 export class InteractionTokenError extends Error {
   constructor(

@@ -1,5 +1,6 @@
 import { AuthService } from "@powerotp/api/auth-service.js";
 import { createCallbackWorker } from "@powerotp/api/callback-worker.js";
+import { ChallengeService } from "@powerotp/api/challenge-service.js";
 import { loadConfig, type ProductionConfig } from "@powerotp/api/config.js";
 import { connectDataStores, type DataStores } from "@powerotp/api/dependencies.js";
 import { createBrevoEmailService } from "@powerotp/api/email.js";
@@ -21,6 +22,7 @@ export interface ServerContext {
   projects: ProjectService;
   verifications: VerificationService;
   nodes: NodeService;
+  challenges: ChallengeService;
 }
 
 /**
@@ -39,11 +41,13 @@ async function buildServerContext(): Promise<ServerContext> {
   const dataStores = await connectDataStores(config);
   await ensureIndexes(dataStores.db);
 
+  const challenges = new ChallengeService(dataStores.db, config);
   const queueConnection = toQueueConnectionOptions(config.VALKEY_URL);
   const queues = createVerificationQueues(queueConnection);
   const verifications = new VerificationService(
     dataStores.db,
     config,
+    challenges,
     queues.enqueueDispatch,
     queues.enqueueTimeout,
     queues.enqueueCallback,
@@ -72,7 +76,7 @@ async function buildServerContext(): Promise<ServerContext> {
   process.on("SIGINT", () => void shutdown("SIGINT"));
   process.on("SIGTERM", () => void shutdown("SIGTERM"));
 
-  return { config, dataStores, auth, projects, verifications, nodes };
+  return { config, dataStores, auth, projects, verifications, nodes, challenges };
 }
 
 export function getServerContext(): Promise<ServerContext> {

@@ -60,6 +60,13 @@ export const NodeJobSchema = z.object({
    * response, to this one authenticated node, for this one claim.
    */
   code: z.string().regex(/^\d{5}$/).optional(),
+  /**
+   * Only present for `voice_challenge` jobs: the local basename (no path,
+   * no Spaces key) of the already-synced recording to play via ARI's
+   * `sound:` media type. See `apps/telephony-agent/src/media-sync.ts` for
+   * how a node keeps its local copy checksummed and in sync.
+   */
+  soundBasename: z.string().min(1).optional(),
 });
 
 /**

@@ -1,6 +1,8 @@
 import { ApiError } from "@powerotp/api/errors.js";
 import { AuthError } from "@powerotp/api/auth-service.js";
+import { ChallengeError } from "@powerotp/api/challenge-service.js";
 import { NodeError } from "@powerotp/api/node-service.js";
+import { MediaValidationError } from "@powerotp/api/media-service.js";
 import { ProjectError } from "@powerotp/api/project-service.js";
 import { VerificationError } from "@powerotp/api/verification-service.js";
 import { InteractionTokenError } from "@powerotp/api/interaction-tokens.js";
@@ -18,11 +20,19 @@ export function toErrorResponse(error: unknown, correlationId: string): NextResp
     error instanceof NodeError ||
     error instanceof ProjectError ||
     error instanceof VerificationError ||
-    error instanceof InteractionTokenError
+    error instanceof InteractionTokenError ||
+    error instanceof ChallengeError
   ) {
     return NextResponse.json(
       { error: error.code },
       { status: error.statusCode, headers: { "x-correlation-id": correlationId } },
+    );
+  }
+
+  if (error instanceof MediaValidationError) {
+    return NextResponse.json(
+      { error: error.reasonCode },
+      { status: 400, headers: { "x-correlation-id": correlationId } },
     );
   }
 

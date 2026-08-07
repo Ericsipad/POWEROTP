@@ -106,15 +106,14 @@ export function createSmsCodeTransport(
 
 export function productionTransportRegistry(config: ProductionConfig): TransportRegistry {
   return {
-    // The two methods with real dialplan/ARI call-control logic on the
-    // droplet so far (see apps/telephony-agent/src/job-poller.ts). The
-    // other two stay on the unavailable stub until their own call-control
-    // logic exists, even after their trunks are configured — otherwise
-    // their interactions would sit in `dispatching` for the full
-    // interaction lifetime with no node ever able to execute them.
+    // All three voice methods now have real dialplan/ARI call-control
+    // logic on the droplet (see apps/telephony-agent/src/job-poller.ts).
+    // `voice_challenge`'s content precondition (a published challenge)
+    // is checked synchronously at creation, not here — this transport
+    // only gates on the OUTBOUND3 trunk, same as the other two.
     call_reachability: createNodeDispatchTransport(config, "call_reachability"),
     voice_code: createNodeDispatchTransport(config, "voice_code"),
-    voice_challenge: unavailableTransport,
+    voice_challenge: createNodeDispatchTransport(config, "voice_challenge"),
     sms_code: createSmsCodeTransport(config),
   };
 }

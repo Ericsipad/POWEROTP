@@ -51,11 +51,20 @@ assigns them to specific telephony nodes.
 
 ## DigitalOcean Spaces
 
-- Private bucket and region selected
+- Private bucket and region selected; set as `SPACES_ENDPOINT`/`SPACES_BUCKET` in App
+  Platform
 - Versioning/lifecycle policy reviewed
-- Separate least-privilege publishing and node-read credentials
-- CORS disabled unless a documented browser flow requires it
-- Manifest signing key and checksum algorithm configured
+- One access key pair with write access to the bucket, set as `SPACES_ACCESS_KEY` /
+  `SPACES_SECRET_KEY` in App Platform — this is the only credential that ever exists;
+  telephony droplets never receive Spaces credentials at all. A node instead downloads
+  each recording via a short-lived presigned URL the control plane generates per request
+  (see `apps/api/src/challenge-service.ts#currentManifest`), scoped to that one object
+  for a few minutes.
+- CORS disabled (no browser ever talks to Spaces directly — uploads go through the
+  admin API, downloads go through a node's presigned URL)
+- `MEDIA_MANIFEST_SECRET` set independently in App Platform (never reused for
+  `NODE_SECRET`) — signs the manifest of recording checksums a node verifies before
+  trusting anything it downloads (SHA-256, `apps/telephony-agent/src/media-sync.ts`)
 
 ## First telephony droplet
 

@@ -19,6 +19,10 @@ ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
 ReadWritePaths=/etc/asterisk/pjsip_trunks.conf
+# voice_challenge recordings synced by media-sync.ts — must sit under one
+# of Asterisk's configured sound-search paths so ARI's `sound:` media type
+# can resolve MEDIA_SOUND_PREFIX/<basename> (see docs/AS_BUILT.md).
+ReadWritePaths=/var/lib/asterisk/sounds/custom
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true

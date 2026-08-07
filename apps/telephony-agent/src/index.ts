@@ -6,6 +6,7 @@ import { AriClient } from "./ari-client.js";
 import { ControlPlaneAuthError, fetchNodeConfig } from "./control-plane-client.js";
 import { loadAgentConfig } from "./config.js";
 import { pollAndRunOneJob } from "./job-poller.js";
+import { syncMediaOnce } from "./media-sync.js";
 import { renderPjsipTrunks } from "./pjsip-config.js";
 
 const run = promisify(execFile);
@@ -86,8 +87,26 @@ async function jobLoop(ari: AriClient) {
   }
 }
 
+/**
+ * Independent poll loop for `voice_challenge` recordings — separate from
+ * `configLoop` since media rarely changes and downloads can take longer
+ * than a trunk-config fetch; see `media-sync.ts`. No-ops entirely on a
+ * droplet without `MEDIA_ROOT`/`MEDIA_MANIFEST_SECRET` configured.
+ */
+async function mediaLoop() {
+  for (;;) {
+    try {
+      await syncMediaOnce(config, log);
+    } catch (error) {
+      log("media sync failed", { error: error instanceof Error ? error.message : "unknown" });
+    }
+    await new Promise((resolve) => setTimeout(resolve, config.MEDIA_POLL_INTERVAL_MS));
+  }
+}
+
 log("starting", { controlPlaneUrl: config.CONTROL_PLANE_URL });
 const ari = new AriClient(config.ARI_URL, config.ARI_USER, config.ARI_PASS, "powerotp-reachability");
 ari.connect();
 void configLoop();
 void jobLoop(ari);
+void mediaLoop();

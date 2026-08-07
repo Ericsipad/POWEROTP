@@ -111,6 +111,11 @@ server at all. This is the one to keep building on.
   see `apps/api/src/outbound-trunks.ts`. SMS does not use a trunk: its dedicated
   `VOIPMS_SMS_API_USERNAME/PASSWORD/DID` variables are currently unset pending the
   planned combined live-credential validation pass.
+- **DigitalOcean Spaces**: not provisioned yet. `SPACES_ENDPOINT/BUCKET/ACCESS_KEY/
+  SECRET_KEY` and the independent `MEDIA_MANIFEST_SECRET` are unset placeholders — see
+  "Phase 5" below. The admin recording/challenge APIs and `voice_challenge` are
+  code-complete and unit-tested against this deferred configuration; they fail closed
+  (`media_storage_not_configured` / `no_published_challenges`) until it is set.
 
 ## Phase status vs. `PLAN.md`
 
@@ -157,7 +162,11 @@ server at all. This is the one to keep building on.
   people vary in answer speed too), or add Asterisk's AMD (answering-machine detection)
   app before treating a `StasisStart` as a true reachability success (Phase 9-level
   hardening, not urgent for the current product contract).
-- **Phase 5**: not started.
+- **Phase 5 (voice_challenge / recording pipeline)**: implemented and unit-tested end to
+  end — admin recording upload/normalization, immutable challenge authoring, per-
+  interaction opaque option materialization and grading, signed media manifest, node
+  media sync, and ARI recording playback. See "Phase 5 recording/challenge pipeline"
+  below. Live Spaces/OUTBOUND3 credentials are deliberately deferred, same as Phase 4/6.
 - **Phase 6 (SMS)**: provider adapter implemented and unit-tested; live VoIP.ms SMS API
   credentials are deliberately deferred until the combined validation pass.
 - **Phases 7–9**: not started.
@@ -254,9 +263,10 @@ a full minute:
   `unavailableTransport` stub: it still fails immediately with `method_not_available` if
   no trunk is configured (unchanged behavior), but once one is, it advances the
   interaction to `dispatching` and stops — that state *is* the signal a node polls for.
-  `voice_challenge` stays on `unavailableTransport` until its media pipeline and
-  call-control exist. `sms_code` uses a separate in-process HTTPS adapter described
-  below; it never enters this node queue.
+  `voice_challenge` also now uses `createNodeDispatchTransport` (see "Phase 5
+  recording/challenge pipeline" below — its content precondition, a published
+  challenge, is checked synchronously at creation, not here). `sms_code` uses a
+  separate in-process HTTPS adapter described below; it never enters this node queue.
 - `VerificationService.claimNextForNode(type)` atomically hands the oldest
   still-`dispatching` interaction of a type to whichever node asks next (`dispatching ->
   calling`, the state machine's normal next active state — MongoDB's `findOneAndUpdate`
@@ -325,6 +335,122 @@ a full minute:
   omitted code could never actually succeed a submission; `VerificationService#create`
   now generates a cryptographically random five-digit code
   (`apps/api/src/security.ts#createFiveDigitCode`) when one isn't supplied.
+
+## Phase 5 recording/challenge pipeline (`voice_challenge`, implemented)
+
+`voice_challenge` (Type 3) is code-complete and unit-tested end to end: admin-authored
+recordings and challenges, private Spaces storage, a signed media manifest, node media
+sync, and ARI recording playback — reusing the same encrypted-secret and node-dispatch
+machinery already proven for `voice_code` rather than introducing anything new.
+
+- **Contracts**: `libraries/contracts/src/challenges.ts` (`ChallengeSchema`,
+  `ChallengeSubmissionSchema`, `CreateChallengeSchema`, `RecordingAsset`) already existed
+  before this phase and needed no changes; `NodeJobSchema` in
+  `libraries/contracts/src/nodes.ts` gained an optional `soundBasename` for claimed
+  `voice_challenge` jobs.
+- **Storage**: two new Mongo collections, `recordingAssets` and `challengeDefinitions`
+  (`apps/api/src/challenge-persistence.ts`), plus a `{ type, state, createdAt }` index on
+  the verification collection to support `claimNextForNode` filtering by type at scale
+  (`apps/api/src/persistence.ts`). The verification document's previously-unused
+  singular `answerOptionId` field was replaced with an embedded, per-interaction
+  `challenge` snapshot (`challengeDefinitionId`, freshly shuffled `challengeOptions`,
+  `expectedAnswerOptionIdsEncrypted`) — see `apps/api/src/verification-persistence.ts`.
+- **`apps/api/src/media-service.ts`**: validates an admin upload (magic-byte sniffing for
+  WAV/MP3/M4A, a hard size cap rejected before even inspecting contents) and normalizes
+  it with `@ffmpeg-installer/ffmpeg` (an npm static binary, not a DigitalOcean Aptfile —
+  App Platform's Aptfile buildpack doesn't reliably expose system FFmpeg at runtime) to
+  8kHz mono, matching the existing PJSIP `allow=ulaw,alaw` codec config so the output is
+  directly playable via ARI's `sound:` media type with no dialplan change. Also computes
+  the SHA-256 checksum a node later verifies before trusting a download.
+- **`apps/api/src/spaces-client.ts`**: a thin S3-compatible wrapper (`@aws-sdk/client-s3`
+  + `@aws-sdk/s3-request-presigner`) over the private Spaces bucket — `putObject` for
+  admin publish, `presignedGetUrl` (short-lived) for node download. Telephony droplets
+  never hold Spaces credentials at all, matching the "no per-node secrets" node-identity
+  model; a node instead receives one presigned URL per recording from the manifest
+  route below.
+- **`apps/api/src/challenge-service.ts`** (`ChallengeService`): admin `publishRecording`/
+  `createChallenge`/`listRecordings`/`listChallenges`/`retireRecording`/`retireChallenge`
+  (soft-retire only — an immutable Spaces object and any challenge/interaction already
+  referencing it are left untouched, so retiring never breaks an in-flight interaction);
+  `selectAndMaterialize` (random selection of one published challenge whose recording is
+  also still published, fresh per-interaction opaque option IDs in random order,
+  encrypted correct-set re-derived under those new IDs — never the admin's stable option
+  keys, so nothing outside this one call ever learns which key was correct);
+  `gradeSubmission` (exact-set match against `minSelections`/`maxSelections`/
+  `allowsMultiple`, decrypting only transiently); `currentManifest` (the signed manifest
+  + presigned URLs described below).
+- **`VerificationService`** (`apps/api/src/verification-service.ts`): `create()` binds a
+  challenge synchronously via `selectAndMaterialize()` for `voice_challenge` — a missing
+  published challenge is a content-catalog precondition, so it fails the request
+  immediately with `no_published_challenges` (409), the same way a bad E.164 number or
+  unsupported method already does, rather than waiting until dispatch like an
+  unconfigured trunk. `toStatus()` only includes `challenge` (question/options, never
+  correctness information) once the verification has reached `awaiting_response` or a
+  later terminal state (`hasReachedAwaitingResponse()` in
+  `apps/api/src/verification-state-machine.ts`) — never at `queued`/`dispatching`/
+  `calling`/etc., so a status poll can't see the challenge before the recording has
+  actually been dispatched for playback. `submitChallenge()` grades a submission the
+  same way `submitCode()` grades a voice/SMS code, and `soundBasenameForDelivery()`
+  mirrors `codeForDelivery()` for the claiming node.
+- **`apps/api/src/transport.ts`**: `voice_challenge` now uses
+  `createNodeDispatchTransport`, identical in shape to `call_reachability`/`voice_code` —
+  it still fails immediately with `method_not_available` if `OUTBOUND3` isn't
+  configured; the challenge-content precondition above is checked earlier, at creation,
+  not here.
+- **Admin routes** (`apps/web/app/v1/admin/recordings/route.ts` + `[id]/route.ts`,
+  `apps/web/app/v1/admin/challenges/route.ts` + `[id]/route.ts`): session + CSRF gated
+  exactly like `/v1/admin/demo-project` (`requireAdminSession` + `verifyCsrfHeader`; IP
+  allowlisting is enforced once at admin login, not re-checked per request, consistent
+  with every other admin route). `/admin`'s new `challenges-panel.tsx` wires recording
+  upload and challenge authoring into the existing admin page.
+- **`GET /v1/nodes/media-manifest`** (`apps/web/app/v1/nodes/media-manifest/route.ts`):
+  `NODE_SECRET`-authenticated exactly like `/v1/nodes/config`, no per-node identity.
+  Returns `204` when nothing is published yet (no Spaces/manifest-secret configuration,
+  or no published challenge currently references a recording) — the agent's media-sync
+  loop treats that as "nothing to do", not an error. `GET /v1/nodes/jobs/next` now
+  attaches `soundBasename` for a claimed `voice_challenge` job.
+- **`apps/telephony-agent/src/media-sync.ts`**: a poll loop (alongside the existing
+  trunk-config and job-claim loops) that verifies the manifest's signature, downloads
+  and checksum-verifies each referenced recording, and does an atomic local
+  install/removal under `MEDIA_ROOT` — a partially-downloaded or corrupt file is never
+  left where Asterisk could try to play it. Does nothing when `MEDIA_ROOT`/
+  `MEDIA_MANIFEST_SECRET` are unset, so a node that never handles `voice_challenge`
+  doesn't need this configuration at all.
+- **`apps/telephony-agent/src/voice-challenge-call.ts`**: mirrors `voice-code-call.ts`'s
+  originate → wait-for-answer flow, then plays the synced recording via ARI's
+  `sound: playback` (not digit playback) and resolves at `awaiting_response` once
+  `PlaybackFinished` fires — grading happens later via the unchanged `submitChallenge`
+  flow, not by anything the node does. `job-poller.ts` tries `voice_challenge` in the
+  same per-poll-cycle loop as the other two voice types, only when this node has an
+  `OUTBOUND3` trunk and its media-sync loop is enabled.
+- **Response route**: `POST /v1/verifications/{interactionId}/response` now branches on
+  verification type to accept `ChallengeSubmissionSchema` (opaque option IDs) alongside
+  the existing code path; the browser-response interaction token reuses the existing
+  `submit_challenge` action that already existed in the contracts.
+- **New optional config**: `SPACES_ENDPOINT`/`SPACES_BUCKET`/`SPACES_ACCESS_KEY`/
+  `SPACES_SECRET_KEY` and an independent `MEDIA_MANIFEST_SECRET` (never reused for
+  `NODE_SECRET`) in `apps/api/src/config.ts` — all optional, all covered by the same
+  empty-string-is-unset sanitization as every other optional field (see the "empty-string
+  optional env vars" incident above), so `voice_challenge` and the admin
+  recording/challenge APIs fail closed with `media_storage_not_configured` (Spaces not
+  configured) or `no_published_challenges` (nothing published yet) until every one of
+  these is set.
+
+### Incident: `@ffmpeg-installer/ffmpeg` broke the production build under Turbopack
+
+`npm run build` (`next build`, Turbopack) failed with `Module not found: Can't resolve
+'.../@ffmpeg-installer/win32-x64/package.json'` once `media-service.ts` (imported
+transitively by `server-context.ts` → `challenge-service.ts`) reached a server route.
+Root cause: `@ffmpeg-installer/ffmpeg` resolves its platform binary via dynamic
+`require()` branching at runtime — code Turbopack cannot statically analyze and bundle
+correctly. Fixed by adding `serverExternalPackages: ["@ffmpeg-installer/ffmpeg",
+"@aws-sdk/client-s3", "@aws-sdk/s3-request-presigner"]` to `apps/web/next.config.ts` —
+Next.js's documented mechanism for telling the bundler to leave a package as a real
+Node `require()` at runtime instead of statically bundling it (the AWS SDK packages were
+included proactively since they carry similarly dynamic optional dependencies, even
+though the original build error only named `ffmpeg-installer`). If a future dependency
+with a platform-specific or `require()`-branching binary breaks the build the same way,
+add it to this same list rather than re-discovering the mechanism from scratch.
 
 ## Phase 6 SMS provider adapter (`sms_code`, implemented)
 
@@ -470,10 +596,11 @@ comes after the socket is created.
    Country/prefix limits, opt-out suppression, and provider delivery callbacks remain
    pre-public-launch policy/hardening work; the current adapter normalizes synchronous
    `sendSMS` acceptance or rejection only.
-4. `voice_challenge` (Type 3) remains on `unavailableTransport`. It needs Phase 5's
-   recording/challenge administration first (there is no admin UI or media pipeline to
-   author a challenge yet, so there's nothing to play even once dial logic exists);
-   building its ARI call-control alone would not be end-to-end useful.
+4. `voice_challenge` (Type 3) is code-complete and unit-tested (see "Phase 5
+   recording/challenge pipeline" above) but not yet validated against a real droplet:
+   DigitalOcean Spaces is not provisioned, `OUTBOUND3` has no real VoIP.ms credentials,
+   and `powerotpvoip1` has not yet been redeployed with the media-sync/challenge-call
+   code. Same deliberately-deferred pattern as `voice_code`/`sms_code` above.
 5. The agent currently places one call at a time, serially (across every type it
    handles), whichever type it tries first each poll cycle — there is no concurrency
    limit to configure yet because there is no concurrency. Revisit once real traffic

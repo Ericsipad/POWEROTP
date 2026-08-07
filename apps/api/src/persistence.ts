@@ -1,6 +1,7 @@
 import type { AccountClass, VerificationType } from "@powerotp/contracts";
 import type { Db } from "mongodb";
 
+import { ensureChallengeIndexes } from "./challenge-persistence.js";
 import { ensureVerificationIndexes } from "./verification-persistence.js";
 
 export interface UserDocument {
@@ -108,4 +109,5 @@ export async function ensureIndexes(db: Db) {
     db.collection<NodeDocument>("nodes").createIndex({ ip: 1 }, { unique: true }),
   ]);
   await ensureVerificationIndexes(db);
+  await ensureChallengeIndexes(db);
 }

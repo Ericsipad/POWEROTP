@@ -1,6 +1,8 @@
 import {
+  MediaManifestResponseSchema,
   NodeConfigSchema,
   NodeJobSchema,
+  type MediaManifestResponse,
   type NodeConfig,
   type NodeJob,
   type reportableNodeJobStates,
@@ -54,6 +56,27 @@ export async function fetchNextJob(config: AgentConfig, type: string): Promise<N
     throw new Error(`Control plane returned ${response.status}`);
   }
   return NodeJobSchema.parse(await response.json());
+}
+
+/**
+ * Fetches the signed `voice_challenge` media manifest, if anything is
+ * currently published. `204` (no body) means Spaces/manifest-secret
+ * configuration or a published challenge doesn't exist yet — treated as
+ * "nothing to sync", not an error, same as an empty job queue.
+ */
+export async function fetchMediaManifest(config: AgentConfig): Promise<MediaManifestResponse | null> {
+  const response = await fetch(new URL("/v1/nodes/media-manifest", config.CONTROL_PLANE_URL), {
+    headers: authHeaders(config),
+  });
+
+  if (response.status === 204) return null;
+  if (response.status === 401) {
+    throw new ControlPlaneAuthError("Node secret was rejected by the control plane");
+  }
+  if (!response.ok) {
+    throw new Error(`Control plane returned ${response.status}`);
+  }
+  return MediaManifestResponseSchema.parse(await response.json());
 }
 
 /**

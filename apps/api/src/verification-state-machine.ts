@@ -46,6 +46,26 @@ export function isTerminalState(state: VerificationState) {
 }
 
 /**
+ * True once a verification's state is `awaiting_response` or any terminal
+ * state reached after it (`succeeded`/`failed`/`expired`/`canceled`) —
+ * never for an earlier active state like `queued`/`dispatching`/`calling`.
+ * Used to gate when challenge question/options may appear in status
+ * responses: never before the recording has actually been dispatched for
+ * playback.
+ */
+export function hasReachedAwaitingResponse(
+  type: VerificationType,
+  state: VerificationState,
+): boolean {
+  if (isTerminalState(state)) return true;
+  const activeStates = activeStatesByType[type];
+  const stateIndex = activeStates.indexOf(state);
+  const awaitingIndex = activeStates.indexOf("awaiting_response");
+  if (stateIndex === -1 || awaitingIndex === -1) return false;
+  return stateIndex >= awaitingIndex;
+}
+
+/**
  * A transition is allowed when either:
  * - the target is a terminal state and the current state is not already
  *   terminal (any active state can be interrupted by a result), or

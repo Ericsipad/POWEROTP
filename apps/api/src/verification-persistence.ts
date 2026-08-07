@@ -1,6 +1,8 @@
 import type { VerificationState, VerificationType } from "@powerotp/contracts";
 import type { Db } from "mongodb";
 
+import type { InteractionChallenge } from "./challenge-service.js";
+
 export interface VerificationRequestDocument {
   _id: string;
   projectId: string;
@@ -21,7 +23,13 @@ export interface VerificationRequestDocument {
    * the delivery boundary (telephony node or SMS provider adapter).
    */
   expectedCodeEncrypted?: string;
-  answerOptionId?: string;
+  /**
+   * A `voice_challenge` interaction's per-interaction snapshot, bound once
+   * at `create()` (see `ChallengeService#selectAndMaterialize`) — never
+   * re-derived from the mutable challenge catalog, so retiring a challenge
+   * can never break an interaction already in flight.
+   */
+  challenge?: InteractionChallenge;
   interactionTokenNonce?: string;
   interactionTokenConsumedAt?: Date;
   createdAt: Date;
@@ -73,6 +81,12 @@ export async function ensureVerificationIndexes(db: Db) {
     db
       .collection<VerificationRequestDocument>("verificationRequests")
       .createIndex({ state: 1, expiresAt: 1 }),
+    // Supports claimNextForNode's per-type claim query at scale — without
+    // this, a node polling for one type scans every document in any active
+    // state.
+    db
+      .collection<VerificationRequestDocument>("verificationRequests")
+      .createIndex({ type: 1, state: 1, createdAt: 1 }),
     db
       .collection<VerificationEventDocument>("verificationEvents")
       .createIndex({ interactionId: 1, sequence: 1 }, { unique: true }),

@@ -43,6 +43,28 @@ const ConfigSchema = z.object({
    * the agent only logs what it received.
    */
   ASTERISK_PJSIP_TRUNKS_PATH: z.string().startsWith("/").optional(),
+  /**
+   * Independent secret (never `NODE_SECRET`) that signs the media manifest
+   * for `voice_challenge` recordings — see `docs/AS_BUILT.md`'s Phase 5
+   * section and `apps/api/src/challenge-service.ts#currentManifest`.
+   * Optional: a node with no local media directory configured simply never
+   * runs the media-sync loop.
+   */
+  MEDIA_MANIFEST_SECRET: z.string().min(32).optional(),
+  /**
+   * Local directory recordings are synced into. Left unset on any droplet
+   * that doesn't handle `voice_challenge` yet — the media-sync loop then
+   * simply never runs, same convention as `ASTERISK_PJSIP_TRUNKS_PATH`.
+   */
+  MEDIA_ROOT: z.string().startsWith("/").optional(),
+  /**
+   * The Asterisk sound-search-relative path `MEDIA_ROOT` is mounted at,
+   * used to build the `sound:` media string ARI plays
+   * (`sound:{MEDIA_SOUND_PREFIX}/{soundBasename}`). Documented in
+   * `infrastructure/asterisk/README.md`.
+   */
+  MEDIA_SOUND_PREFIX: z.string().min(1).default("custom/potp"),
+  MEDIA_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(60_000),
 });
 
 export type AgentConfig = z.infer<typeof ConfigSchema>;
