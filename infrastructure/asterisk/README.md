@@ -35,6 +35,15 @@ droplet" sections) for the ground truth of what is actually installed on
 
 There is no CI/CD pipeline for the droplet yet; a session deploys it manually:
 
+0. **Confirm swap is present before running `npm ci`**: `swapon --show` on the droplet
+   should report a 2GB `/swapfile`. The droplet has only ~961Mi of RAM, and installing
+   the full monorepo's dependency tree (Next.js, the AWS SDK, `@ffmpeg-installer/ffmpeg`,
+   etc. — needed to build `@powerotp/contracts`/`@powerotp/telephony-agent` even though
+   the agent only runs a fraction of that tree) can OOM-kill `npm ci` and make `sshd`
+   itself briefly unresponsive without it (see the "npm ci OOM-killed" incident in
+   `docs/AS_BUILT.md`). If missing: `sudo fallocate -l 2G /swapfile && sudo chmod 600
+   /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile && echo '/swapfile none
+   swap sw 0 0' | sudo tee -a /etc/fstab`.
 1. From a clean local `main` checkout: `git archive --format=tar.gz -o /tmp/powerotp-deploy.tar.gz HEAD`.
 2. `scp` the archive to the droplet, extract it to `/opt/powerotp`, `npm ci`, then
    `npm run build -w @powerotp/contracts -w @powerotp/telephony-agent`.

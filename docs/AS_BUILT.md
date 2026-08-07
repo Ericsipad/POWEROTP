@@ -607,6 +607,27 @@ comes after the socket is created.
    needs more than one simultaneous call per node.
 6. Everything else in Phases 4–9 per `docs/PLAN.md`.
 
+### Incident: `npm ci` OOM-killed on the droplet during the Phase 5 redeploy (fixed with a permanent swap file)
+
+Redeploying `apps/telephony-agent` after Phase 5 landed (`npm ci` at the monorepo root,
+per `infrastructure/asterisk/README.md`'s deploy steps) got the kernel OOM-killer to kill
+the `npm ci` process outright (`dmesg`: `Out of memory: Killed process ... (npm ci)
+total-vm:1868604kB, anon-rss:636624kB`), leaving a half-installed `node_modules` and
+making `sshd` itself briefly unresponsive (TCP connected but the SSH banner exchange
+never completed) while the box was thrashing. Root cause: `powerotpvoip1` has only
+961Mi of RAM and **had zero swap configured**, and installing the full monorepo's
+dependency tree (Next.js 16, the AWS SDK, `@ffmpeg-installer/ffmpeg`, etc. — all needed
+to build `@powerotp/contracts`/`@powerotp/telephony-agent` even though the agent itself
+only runs a small fraction of that dependency tree at runtime) exceeded available
+memory. **Fixed permanently, not with a one-off retry**: added a 2GB swap file
+(`/swapfile`, `fallocate` + `mkswap` + `swapon`, persisted in `/etc/fstab` so it survives
+a reboot) — a standard, safe mitigation for small-RAM droplets doing occasional
+memory-heavy work like a monorepo install. After adding swap, `rm -rf node_modules` and
+re-running `npm ci` completed cleanly (used ~146Mi of swap, never came close to OOM
+again). If a future session redeploys and sees `sshd` become unresponsive or `npm ci`/
+`npm run build` silently disappear, check `dmesg -T | grep -i oom` and `free -h` first,
+and confirm `swapon --show` reports the 2GB file before assuming anything else is wrong.
+
 ### Incident: a local ARI password was accidentally echoed to chat
 
 While inspecting `/etc/asterisk/ari.conf` on `powerotpvoip1` to confirm the agent's ARI
