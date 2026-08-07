@@ -107,8 +107,10 @@ server at all. This is the one to keep building on.
   VoIP.ms.
 - **VoIP.ms**: account exists; `OUTBOUND1_URL/USER/PASS` (call_reachability) has real
   credentials set in App Platform and is confirmed registering successfully.
-  `OUTBOUND2..4_*` (voice_code, voice_challenge, sms_code) are still unset placeholders —
-  see `apps/api/src/outbound-trunks.ts` for the mapping.
+  `OUTBOUND2..3_*` (voice_code and voice_challenge) are still unset SIP placeholders —
+  see `apps/api/src/outbound-trunks.ts`. SMS does not use a trunk: its dedicated
+  `VOIPMS_SMS_API_USERNAME/PASSWORD/DID` variables are currently unset pending the
+  planned combined live-credential validation pass.
 
 ## Phase status vs. `PLAN.md`
 
@@ -136,8 +138,8 @@ server at all. This is the one to keep building on.
   `queued -> dispatching -> calling -> succeeded` (`reasonCode: "answered"`) after the
   droplet actually originated the call over VoIP.ms, detected the answer via ARI's
   `StasisStart`, and reported it back through the control plane's real transition/event
-  machinery. Not yet done: real VoIP.ms trunk credentials for the other three methods
-  and their dialplan/ARI logic; a busy/no-answer/rejected outcome hasn't been observed
+  machinery. Not yet done: live credentials for the other methods and
+  `voice_challenge`'s media/call-control; a busy/no-answer/rejected outcome hasn't been observed
   live yet (only the cause-code mapping is unit-tested), and there is no automated
   canary test for this — it was exercised manually once.
   **Observed nuance, not a bug**: on that canary call the callee's phone was never
@@ -155,7 +157,10 @@ server at all. This is the one to keep building on.
   people vary in answer speed too), or add Asterisk's AMD (answering-machine detection)
   app before treating a `StasisStart` as a true reachability success (Phase 9-level
   hardening, not urgent for the current product contract).
-- **Phases 5–9**: not started.
+- **Phase 5**: not started.
+- **Phase 6 (SMS)**: provider adapter implemented and unit-tested; live VoIP.ms SMS API
+  credentials are deliberately deferred until the combined validation pass.
+- **Phases 7–9**: not started.
 
 ## Platform admin auth (changed from the original TOTP design)
 
@@ -214,7 +219,7 @@ Platform and redeploying every node with the new value — identical in spirit t
 - `apps/api/src/node-service.ts` (`NodeService`): `list` (admin visibility),
   `authenticate` (constant-time compare of the `Authorization: Bearer` header against
   `config.NODE_SECRET`; on success, upserts a connection-log row keyed by source IP as a
-  liveness heartbeat), `configFor` (returns whichever `OUTBOUND1..4_*` trunks are
+  liveness heartbeat), `configFor` (returns whichever `OUTBOUND1..3_*` voice trunks are
   currently configured — identical response for every node, never any other app secret).
 - Routes: `GET /v1/admin/nodes` (admin session, read-only — nothing to create or revoke),
   `GET /v1/nodes/config` (shared secret, no admin session — the droplet-facing endpoint).
@@ -245,12 +250,13 @@ The control plane never talks to Asterisk/ARI directly — only a droplet's
 added alongside the existing 60-second trunk-config sync so call dispatch doesn't wait
 a full minute:
 
-- `apps/api/src/transport.ts#createNodeDispatchTransport` replaces `call_reachability`'s
+- `apps/api/src/transport.ts#createNodeDispatchTransport` replaces the voice methods'
   `unavailableTransport` stub: it still fails immediately with `method_not_available` if
   no trunk is configured (unchanged behavior), but once one is, it advances the
   interaction to `dispatching` and stops — that state *is* the signal a node polls for.
-  The other three methods stay on `unavailableTransport` regardless of trunk config
-  until their own call-control logic exists (see "Known gaps").
+  `voice_challenge` stays on `unavailableTransport` until its media pipeline and
+  call-control exist. `sms_code` uses a separate in-process HTTPS adapter described
+  below; it never enters this node queue.
 - `VerificationService.claimNextForNode(type)` atomically hands the oldest
   still-`dispatching` interaction of a type to whichever node asks next (`dispatching ->
   calling`, the state machine's normal next active state — MongoDB's `findOneAndUpdate`
@@ -260,8 +266,9 @@ a full minute:
   and `POST /v1/nodes/jobs/{interactionId}/events` (report progress/result). The report
   endpoint reuses `VerificationService.transition` — a node gets exactly the same
   durable event/callback machinery as everything else — and `NodeJobEventSchema`
-  restricts what a node may report to `ringing`/`answered`/`succeeded`/`failed`/
-  `canceled`; only the control plane itself ever sets `queued`/`dispatching`/`calling`.
+  restricts what a node may report to `ringing`/`answered`/`playing`/
+  `awaiting_response`/`succeeded`/`failed`/`canceled`; only the control plane itself
+  ever sets `queued`/`dispatching`/`calling`.
 - On the droplet, `apps/telephony-agent/src/job-poller.ts` polls the claim endpoint
   every `JOB_POLL_INTERVAL_MS` (default 2s) — but only for types it has an actual trunk
   configured for, and only once its ARI WebSocket is actually connected (claiming a job
@@ -312,12 +319,39 @@ a full minute:
   same primitive already used for `ProjectDocument#callbackSecretEncrypted`), decrypted
   only transiently: once to compare against a submitted code
   (`VerificationService#submitCode`), and once to hand to the claiming node
-  (`VerificationService#codeForNodeJob`, called from the `jobs/next` route) — never
+  (`VerificationService#codeForDelivery`, called from the `jobs/next` route) — never
   logged, never returned in any API response. Also: a customer-supplied code was always
   optional per `docs/PRODUCT_SPEC.md`, but nothing generated one when omitted, so an
   omitted code could never actually succeed a submission; `VerificationService#create`
   now generates a cryptographically random five-digit code
   (`apps/api/src/security.ts#createFiveDigitCode`) when one isn't supplied.
+
+## Phase 6 SMS provider adapter (`sms_code`, implemented)
+
+`sms_code` is executed entirely by the control plane. It does not use Asterisk, ARI,
+the telephony-agent, a SIP trunk, or the node-facing job queue:
+
+- `VerificationService#create` generates a cryptographically random five-digit SMS code
+  and stores only `expectedCodeEncrypted`, using the same authenticated encryption and
+  response-grading path as `voice_code`. The customer cannot supply an SMS code.
+- `apps/api/src/sms.ts#createVoipMsSmsService` calls VoIP.ms's `sendSMS` REST method
+  over HTTPS. Credentials use dedicated `VOIPMS_SMS_API_USERNAME`,
+  `VOIPMS_SMS_API_PASSWORD`, and `VOIPMS_SMS_DID` App Platform variables rather than
+  the SIP-shaped `OUTBOUND4_*` variables. Parameters are sent as POST form data so the
+  API password never appears in a request URL.
+- `apps/api/src/transport.ts#createSmsCodeTransport` drives
+  `queued -> dispatching -> awaiting_response` after provider acceptance and normalizes
+  provider/API failures to stable `provider_rejected` or `provider_unavailable` reason
+  codes. The atomic `queued -> dispatching` transition is also the send claim, so a
+  BullMQ retry cannot submit the same SMS twice. Missing or partial credentials retain
+  the production-safe `method_not_available` behavior.
+- The existing `POST /v1/verifications/{interactionId}/response` endpoint now grades
+  both `voice_code` and `sms_code`; browser-response interaction tokens use the same
+  existing `submit_code` action.
+- Adapter and lifecycle behavior are unit-tested without live credentials. Live
+  provider validation remains deliberately deferred until all planned methods are
+  code-complete, when credentials will be supplied once for the combined end-to-end
+  validation pass.
 
 ## Telephony droplet (`powerotpvoip1`) — hardening and base install done
 
@@ -376,7 +410,7 @@ Real changes made directly on the droplet via `ssh powerotp` (see
   for two issues hit and fixed along the way).
 
 **Status as of the last session: fully working end-to-end.** `NODE_SECRET` and the
-`OUTBOUND1..4_*` placeholders are set in App Platform and deployed; `powerotp-agent` on
+`OUTBOUND1..3_*` voice-trunk placeholders are set in App Platform and deployed; `powerotp-agent` on
 `powerotpvoip1` authenticates, fetches config, renders `pjsip_trunks.conf`, and
 successfully reloads Asterisk (`"trunk configuration changed; reloaded pjsip"` in its
 logs). One deploy-time incident and its fix are recorded below so they aren't
@@ -429,23 +463,22 @@ comes after the socket is created.
    `OUTBOUND2`'s real VoIP.ms credentials from the user only once the rest of the
    planned work is code-complete, then do one full pass validating every wired-up
    method end-to-end together, rather than one live-credential round-trip per method.
-3. `voice_challenge` (Type 3) and `sms_code` (Type 4) remain on the
-   `unavailableTransport` stub — no call-control/provider-adapter logic built yet.
-   `voice_challenge` additionally needs Phase 5's recording/challenge administration
-   (there is no admin UI or media pipeline to author a challenge yet, so there's
-   nothing to play even once dial logic exists) — building its call-control ARI logic
-   alone, without that, wouldn't be end-to-end useful. `sms_code` doesn't need
-   Asterisk/ARI/a droplet at all — VoIP.ms's SMS API is a plain HTTPS call, so it can
-   likely be built as a provider adapter entirely inside `apps/api` (closer in shape to
-   `apps/api/src/email.ts`'s Brevo adapter than to the telephony-agent pattern) — note
-   this for whoever picks it up next, since `OUTBOUND4_URL/USER/PASS`'s SIP-trunk shape
-   (`outbound-trunks.ts`) doesn't actually fit an HTTP API credential; it may need its
-   own dedicated env vars instead of reusing the `OUTBOUND4_*` naming.
-4. The agent currently places one call at a time, serially (across every type it
+3. `sms_code` (Type 4) is built and unit-tested but its dedicated
+   `VOIPMS_SMS_API_USERNAME/PASSWORD/DID` variables are still unset, so production
+   correctly returns `method_not_available` today. Live sending and response grading
+   remain part of the deliberately deferred combined end-to-end validation pass.
+   Country/prefix limits, opt-out suppression, and provider delivery callbacks remain
+   pre-public-launch policy/hardening work; the current adapter normalizes synchronous
+   `sendSMS` acceptance or rejection only.
+4. `voice_challenge` (Type 3) remains on `unavailableTransport`. It needs Phase 5's
+   recording/challenge administration first (there is no admin UI or media pipeline to
+   author a challenge yet, so there's nothing to play even once dial logic exists);
+   building its ARI call-control alone would not be end-to-end useful.
+5. The agent currently places one call at a time, serially (across every type it
    handles), whichever type it tries first each poll cycle — there is no concurrency
    limit to configure yet because there is no concurrency. Revisit once real traffic
    needs more than one simultaneous call per node.
-5. Everything else in Phases 4–9 per `docs/PLAN.md`.
+6. Everything else in Phases 4–9 per `docs/PLAN.md`.
 
 ### Incident: a local ARI password was accidentally echoed to chat
 

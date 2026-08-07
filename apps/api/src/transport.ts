@@ -1,12 +1,15 @@
 import type { VerificationState, VerificationType } from "@powerotp/contracts";
 
 import type { ProductionConfig } from "./config.js";
-import { outboundTrunkFor } from "./outbound-trunks.js";
+import { outboundTrunkFor, type VoiceVerificationType } from "./outbound-trunks.js";
+import { createVoipMsSmsService, SmsProviderError, type SmsService } from "./sms.js";
 
 export interface TransportContext {
   interactionId: string;
   type: VerificationType;
   targetNumber: string;
+  /** Present only for code-delivery transports; never log this context. */
+  code?: string;
 }
 
 /**
@@ -16,7 +19,7 @@ export interface TransportContext {
  * implementing its own persistence.
  */
 export interface TransportHandle {
-  advance(state: VerificationState, reasonCode?: string): Promise<void>;
+  advance(state: VerificationState, reasonCode?: string): Promise<boolean>;
 }
 
 export interface VerificationTransport {
@@ -55,10 +58,9 @@ function createNodeDispatchTransport(
     ProductionConfig,
     "OUTBOUND1_URL" | "OUTBOUND1_USER" | "OUTBOUND1_PASS" |
     "OUTBOUND2_URL" | "OUTBOUND2_USER" | "OUTBOUND2_PASS" |
-    "OUTBOUND3_URL" | "OUTBOUND3_USER" | "OUTBOUND3_PASS" |
-    "OUTBOUND4_URL" | "OUTBOUND4_USER" | "OUTBOUND4_PASS"
+    "OUTBOUND3_URL" | "OUTBOUND3_USER" | "OUTBOUND3_PASS"
   >,
-  type: VerificationType,
+  type: VoiceVerificationType,
 ): VerificationTransport {
   return {
     async dispatch(context, handle) {
@@ -67,6 +69,37 @@ function createNodeDispatchTransport(
         return;
       }
       await handle.advance("dispatching", "queued_for_node");
+    },
+  };
+}
+
+export function createSmsCodeTransport(
+  config: ProductionConfig,
+  sms: SmsService | undefined = createVoipMsSmsService(config),
+): VerificationTransport {
+  if (!sms) return unavailableTransport;
+
+  return {
+    async dispatch(context, handle) {
+      // Only the worker that atomically moved queued -> dispatching may
+      // contact the provider. A BullMQ retry after an ambiguous failure
+      // must not send the same verification code a second time.
+      const claimed = await handle.advance("dispatching", "sending_to_provider");
+      if (!claimed) return;
+      if (!context.code) {
+        await handle.advance("failed", "code_unavailable");
+        return;
+      }
+
+      try {
+        await sms.sendVerificationCode(context.targetNumber, context.code);
+      } catch (error) {
+        const reasonCode =
+          error instanceof SmsProviderError ? error.reasonCode : "provider_unavailable";
+        await handle.advance("failed", reasonCode);
+        return;
+      }
+      await handle.advance("awaiting_response", "code_sent");
     },
   };
 }
@@ -82,6 +115,6 @@ export function productionTransportRegistry(config: ProductionConfig): Transport
     call_reachability: createNodeDispatchTransport(config, "call_reachability"),
     voice_code: createNodeDispatchTransport(config, "voice_code"),
     voice_challenge: unavailableTransport,
-    sms_code: unavailableTransport,
+    sms_code: createSmsCodeTransport(config),
   };
 }

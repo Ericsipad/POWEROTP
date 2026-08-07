@@ -89,10 +89,14 @@ export class VerificationService {
       if (verification) return this.#toAccepted(verification);
     }
 
-    // A client-supplied code is optional (docs/PRODUCT_SPEC.md); when absent
-    // for voice_code, the platform generates one itself rather than leaving
-    // nothing to actually speak over the call.
-    const code = input.type === "voice_code" ? input.code ?? createFiveDigitCode() : undefined;
+    // Voice clients may supply their own code; SMS codes are always generated
+    // by the platform. Both use the same encrypted-at-rest representation.
+    const code =
+      input.type === "voice_code"
+        ? input.code ?? createFiveDigitCode()
+        : input.type === "sms_code"
+          ? createFiveDigitCode()
+          : undefined;
 
     const now = new Date();
     const verification: VerificationRequestDocument = {
@@ -258,7 +262,7 @@ export class VerificationService {
    * covers both replay and over-attempt cases from a single durable check.
    */
   async submitCode(interactionId: string, code: string) {
-    const verification = await this.#requireActive(interactionId, "voice_code");
+    const verification = await this.#requireActive(interactionId, ["voice_code", "sms_code"]);
     if (verification.state !== "awaiting_response") {
       throw new VerificationError("not_awaiting_response", 409);
     }
@@ -284,11 +288,10 @@ export class VerificationService {
   }
 
   /**
-   * The one place a `voice_code` code is ever decrypted for a purpose other
-   * than validating a submission: handing it to the telephony node that
-   * claimed the job, so it has something to actually speak over the call.
+   * Decrypts a code only at its delivery boundary: either the authenticated
+   * telephony node that speaks it or the in-process SMS provider adapter.
    */
-  codeForNodeJob(verification: VerificationRequestDocument): string | undefined {
+  codeForDelivery(verification: VerificationRequestDocument): string | undefined {
     if (!verification.expectedCodeEncrypted) return undefined;
     return decryptString(verification.expectedCodeEncrypted, this.config.CONFIG_ENCRYPTION_KEY);
   }
@@ -301,10 +304,14 @@ export class VerificationService {
     return listProjectInteractions(this.#requests, projectId, limit);
   }
 
-  async #requireActive(interactionId: string, expectedType: VerificationType) {
+  async #requireActive(
+    interactionId: string,
+    expectedTypes: VerificationType | readonly VerificationType[],
+  ) {
     const verification = await this.#requests.findOne({ _id: interactionId });
     if (!verification) throw new VerificationError("verification_not_found", 404);
-    if (verification.type !== expectedType) {
+    const allowedTypes = Array.isArray(expectedTypes) ? expectedTypes : [expectedTypes];
+    if (!allowedTypes.includes(verification.type)) {
       throw new VerificationError("unsupported_response_type", 400);
     }
     if (isTerminalState(verification.state)) {

@@ -32,6 +32,9 @@ describe("loadConfig", () => {
         OUTBOUND1_URL: "",
         OUTBOUND1_USER: "",
         OUTBOUND1_PASS: "",
+        VOIPMS_SMS_API_USERNAME: "",
+        VOIPMS_SMS_API_PASSWORD: "",
+        VOIPMS_SMS_DID: "",
         ADMIN_ALLOWED_IPS: "",
       }),
     );

@@ -60,11 +60,18 @@ and do not create a repository `.env` file.
   widget on the marketing site — use `demo`. After deploy, sign in at `/admin` and click
   "Provision demo project" once to create it at that exact slug. Leave the variable
   unset to keep the demo endpoints disabled.
-- `OUTBOUND1_URL` / `OUTBOUND1_USER` / `OUTBOUND1_PASS` through `OUTBOUND4_*`: optional
-  VoIP.ms trunk credentials, one dedicated outbound per verification method
+- `OUTBOUND1_URL` / `OUTBOUND1_USER` / `OUTBOUND1_PASS` through `OUTBOUND3_*`: optional
+  VoIP.ms trunk credentials, one dedicated outbound per voice verification method
   (`OUTBOUND1`=`call_reachability`, `OUTBOUND2`=`voice_code`,
-  `OUTBOUND3`=`voice_challenge`, `OUTBOUND4`=`sms_code`) — see
+  `OUTBOUND3`=`voice_challenge`) — see
   `apps/api/src/outbound-trunks.ts`. Leave unset until Phase 4 telephony wiring.
+- `VOIPMS_SMS_API_USERNAME` / `VOIPMS_SMS_API_PASSWORD` / `VOIPMS_SMS_DID`: optional
+  VoIP.ms REST API credentials and SMS-enabled sender DID for `sms_code`. These are
+  deliberately separate from the SIP-shaped `OUTBOUND*` variables because the control
+  plane sends SMS directly over HTTPS; no Asterisk node receives them. The adapter uses
+  POST form data so the API password is never placed in a request URL. Leave all three
+  unset until the provider account is ready; `sms_code` then fails closed with
+  `method_not_available`.
 - `NODE_SECRET`: at least 32 random bytes, the single shared secret every telephony
   droplet uses to authenticate to `/v1/nodes/config` (see `apps/api/src/node-service.ts`
   and `docs/AS_BUILT.md`'s "Phase 4 node identity" section). Not a per-node value and

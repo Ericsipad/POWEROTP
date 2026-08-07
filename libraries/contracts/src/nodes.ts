@@ -35,7 +35,11 @@ export const OutboundTrunkConfigSchema = z.object({
  * without a separate assignment step.
  */
 export const NodeConfigSchema = z.object({
-  trunks: z.record(VerificationTypeSchema, OutboundTrunkConfigSchema.optional()),
+  trunks: z.object({
+    call_reachability: OutboundTrunkConfigSchema.optional(),
+    voice_code: OutboundTrunkConfigSchema.optional(),
+    voice_challenge: OutboundTrunkConfigSchema.optional(),
+  }),
 });
 
 /**

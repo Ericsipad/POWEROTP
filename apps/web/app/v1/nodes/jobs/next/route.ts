@@ -30,7 +30,7 @@ export const GET = apiRoute(async (request) => {
     interactionId: claimed._id,
     type: claimed.type,
     targetNumber: claimed.targetNumber,
-    code: claimed.type === "voice_code" ? verifications.codeForNodeJob(claimed) : undefined,
+    code: claimed.type === "voice_code" ? verifications.codeForDelivery(claimed) : undefined,
   };
   const response = NextResponse.json(job);
   response.headers.set("cache-control", "no-store");

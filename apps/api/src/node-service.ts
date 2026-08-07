@@ -72,7 +72,6 @@ export class NodeService {
         call_reachability: outboundTrunkFor(this.config, "call_reachability"),
         voice_code: outboundTrunkFor(this.config, "voice_code"),
         voice_challenge: outboundTrunkFor(this.config, "voice_challenge"),
-        sms_code: outboundTrunkFor(this.config, "sms_code"),
       },
     };
   }

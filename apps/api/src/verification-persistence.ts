@@ -17,8 +17,8 @@ export interface VerificationRequestDocument {
    * `ProjectDocument#callbackSecretEncrypted`), never plaintext — a
    * five-digit code is short enough that a plaintext leak (logs, a DB
    * snapshot, etc.) would be trivially guessable/replayable. Decrypted only
-   * transiently: once to compare against a submitted code, and once to
-   * hand to the telephony node that speaks it over the call.
+   * transiently: once to compare against a submitted code, and once at
+   * the delivery boundary (telephony node or SMS provider adapter).
    */
   expectedCodeEncrypted?: string;
   answerOptionId?: string;

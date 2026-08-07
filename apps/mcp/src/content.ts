@@ -44,7 +44,8 @@ export function buildExample(type: VerificationType, language: "curl" | "typescr
       type,
       targetNumber: "+15551234567",
       ...(type === "voice_code" ? { code: "12345" } : {}),
-      browserResponse: type === "voice_code" || type === "voice_challenge",
+      browserResponse:
+        type === "voice_code" || type === "sms_code" || type === "voice_challenge",
     },
     null,
     2,

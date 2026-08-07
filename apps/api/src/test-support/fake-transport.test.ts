@@ -13,6 +13,7 @@ async function run(type: VerificationType, outcome?: FakeOutcome) {
     {
       async advance(state) {
         states.push(state);
+        return true;
       },
     },
   );

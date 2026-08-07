@@ -11,6 +11,7 @@ import { getServerContext } from "@/lib/server-context";
 
 const tokenActionByType = {
   voice_code: "submit_code",
+  sms_code: "submit_code",
   voice_challenge: "submit_challenge",
 } as const;
 
@@ -53,7 +54,9 @@ export const POST = apiRoute<RouteParams>(async (request, { params }, correlatio
   );
 
   const tokenAction =
-    input.type === "voice_code" || input.type === "voice_challenge"
+    input.type === "voice_code" ||
+    input.type === "sms_code" ||
+    input.type === "voice_challenge"
       ? tokenActionByType[input.type]
       : undefined;
   const origin = request.headers.get("origin");

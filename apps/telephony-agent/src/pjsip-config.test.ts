@@ -10,7 +10,6 @@ describe("renderPjsipTrunks", () => {
         call_reachability: { url: "sip.voip.ms", user: "sub1", pass: "secret1" },
         voice_code: undefined,
         voice_challenge: undefined,
-        sms_code: undefined,
       },
     });
 
@@ -30,7 +29,6 @@ describe("renderPjsipTrunks", () => {
         call_reachability: undefined,
         voice_code: undefined,
         voice_challenge: undefined,
-        sms_code: undefined,
       },
     });
 

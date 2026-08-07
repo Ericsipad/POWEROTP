@@ -12,6 +12,9 @@
 - SIP encryption setting aligned with Asterisk transport
 - Response codes and billing behavior for busy, no-answer, rejected, and invalid numbers
 - SMS API availability, sender requirements, callbacks, opt-out handling, and country limits
+- For the `sms_code` HTTPS adapter: enable REST API access and IP allowlisting, use an
+  SMS-enabled DID, and set that DID's API dialing mode to E.164 so the API's existing
+  `+<country><number>` contract can be forwarded without lossy rewriting
 - Provider acceptable-use approval for transactional verification calls
 - Low-balance and fraud notifications
 

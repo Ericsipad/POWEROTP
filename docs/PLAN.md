@@ -8,13 +8,15 @@ See [`AS_BUILT.md`](AS_BUILT.md) for what is actually deployed and running right
 including deviations from this plan and infrastructure with real credentials behind it.
 This file describes intended direction; `AS_BUILT.md` describes ground truth.
 
-Implementation status: Phases 0, 1, 2, and 3 are implemented. Phase 2 requires the
+Implementation status: Phases 0, 1, 2, 3, and Phase 6's SMS provider adapter are
+implemented. Phase 2 requires the
 production Atlas, Valkey, Brevo, domain, and cryptographic configuration listed in
 [`PHASE2_OPERATIONS.md`](PHASE2_OPERATIONS.md) before activation. Phase 3's durable
 queue (idempotent creation, dispatch, timeouts, and signed callback retries) runs on the
 same Valkey instance via BullMQ and stays idle until `VALKEY_URL` is provisioned; real
-call/SMS transports arrive in Phases 4–6, so every verification method currently resolves
-to `failed` with reason `method_not_available` in production until then. The durable
+real transports arrive in Phases 4–6. Voice types 1 and 2 have node/ARI call-control;
+SMS has an in-process VoIP.ms HTTPS adapter. Each still fails closed with
+`method_not_available` until its dedicated live credentials are configured. The durable
 state machine, events, callbacks, and interaction tokens are fully exercised by automated
 tests using a test-only fake transport that never runs outside `*.test.ts` files.
 
@@ -123,7 +125,7 @@ originate calls or SMS.
 - Add recording processing/publication, question and answer administration, media
   manifests, headless challenge JSON, answer validation, and optional hosted iframe.
 
-### Phase 6 — SMS
+### Phase 6 — SMS (provider adapter implemented)
 
 - Add SMS through a provider adapter with normalized delivery status and suppression rules.
 

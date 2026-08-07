@@ -114,10 +114,14 @@ export function createDispatchWorker(
           interactionId,
           type: verification.type,
           targetNumber: verification.targetNumber,
+          code:
+            verification.type === "sms_code"
+              ? service.codeForDelivery(verification)
+              : undefined,
         },
         {
           async advance(state, reasonCode) {
-            await service.transition(interactionId, state, reasonCode);
+            return service.transition(interactionId, state, reasonCode);
           },
         },
       );

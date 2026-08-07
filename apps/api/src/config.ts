@@ -43,9 +43,9 @@ const ProductionConfigSchema = z.object({
    */
   DEMO_PROJECT_SLUG: z.string().min(3).max(48).optional(),
   /**
-   * VoIP.ms trunk credentials, one dedicated outbound per verification
-   * method so a limit, suspension, or compromise on one method's trunk
-   * cannot affect the others. See `outbound-trunks.ts` for the mapping.
+   * VoIP.ms trunk credentials, one dedicated outbound per voice method so
+   * a limit, suspension, or compromise on one method's trunk cannot affect
+   * the others. See `outbound-trunks.ts` for the mapping.
    * All optional: the API starts fine before Phase 4 telephony wiring.
    */
   OUTBOUND1_URL: z.string().min(1).optional(),
@@ -57,9 +57,14 @@ const ProductionConfigSchema = z.object({
   OUTBOUND3_URL: z.string().min(1).optional(),
   OUTBOUND3_USER: z.string().min(1).optional(),
   OUTBOUND3_PASS: z.string().min(1).optional(),
-  OUTBOUND4_URL: z.string().min(1).optional(),
-  OUTBOUND4_USER: z.string().min(1).optional(),
-  OUTBOUND4_PASS: z.string().min(1).optional(),
+  /**
+   * VoIP.ms REST API credentials for `sms_code`. SMS is sent directly by
+   * the control plane over HTTPS and never passes through Asterisk, so it
+   * intentionally does not reuse the SIP-shaped OUTBOUND4_* variables.
+   */
+  VOIPMS_SMS_API_USERNAME: z.string().min(1).optional(),
+  VOIPMS_SMS_API_PASSWORD: z.string().min(1).optional(),
+  VOIPMS_SMS_DID: z.string().min(1).optional(),
 });
 
 export type ProductionConfig = z.infer<typeof ProductionConfigSchema>;

@@ -2,6 +2,8 @@ import type { VerificationType } from "@powerotp/contracts";
 
 import type { ProductionConfig } from "./config.js";
 
+export type VoiceVerificationType = Exclude<VerificationType, "sms_code">;
+
 export interface OutboundTrunk {
   url: string;
   user: string;
@@ -19,9 +21,6 @@ type OutboundConfig = Pick<
   | "OUTBOUND3_URL"
   | "OUTBOUND3_USER"
   | "OUTBOUND3_PASS"
-  | "OUTBOUND4_URL"
-  | "OUTBOUND4_USER"
-  | "OUTBOUND4_PASS"
 >;
 
 /**
@@ -32,18 +31,17 @@ type OutboundConfig = Pick<
  * configuration to telephony nodes.
  */
 const trunkKeysByType: Record<
-  VerificationType,
+  VoiceVerificationType,
   { url: keyof OutboundConfig; user: keyof OutboundConfig; pass: keyof OutboundConfig }
 > = {
   call_reachability: { url: "OUTBOUND1_URL", user: "OUTBOUND1_USER", pass: "OUTBOUND1_PASS" },
   voice_code: { url: "OUTBOUND2_URL", user: "OUTBOUND2_USER", pass: "OUTBOUND2_PASS" },
   voice_challenge: { url: "OUTBOUND3_URL", user: "OUTBOUND3_USER", pass: "OUTBOUND3_PASS" },
-  sms_code: { url: "OUTBOUND4_URL", user: "OUTBOUND4_USER", pass: "OUTBOUND4_PASS" },
 };
 
 export function outboundTrunkFor(
   config: OutboundConfig,
-  type: VerificationType,
+  type: VoiceVerificationType,
 ): OutboundTrunk | undefined {
   const keys = trunkKeysByType[type];
   const url = config[keys.url];

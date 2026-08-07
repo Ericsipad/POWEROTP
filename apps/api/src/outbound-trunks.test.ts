@@ -4,7 +4,7 @@ import { describe, it } from "node:test";
 import { outboundTrunkFor } from "./outbound-trunks.js";
 
 describe("outboundTrunkFor", () => {
-  it("resolves the dedicated trunk for each verification method", () => {
+  it("resolves the dedicated trunk for each voice verification method", () => {
     const config = {
       OUTBOUND1_URL: "sip1.voip.ms",
       OUTBOUND1_USER: "sub1",
@@ -27,6 +27,6 @@ describe("outboundTrunkFor", () => {
   });
 
   it("returns undefined when a trunk is not fully configured", () => {
-    assert.equal(outboundTrunkFor({}, "sms_code"), undefined);
+    assert.equal(outboundTrunkFor({}, "voice_challenge"), undefined);
   });
 });
