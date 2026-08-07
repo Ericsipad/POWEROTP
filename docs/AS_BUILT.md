@@ -628,6 +628,32 @@ again). If a future session redeploys and sees `sshd` become unresponsive or `np
 `npm run build` silently disappear, check `dmesg -T | grep -i oom` and `free -h` first,
 and confirm `swapon --show` reports the 2GB file before assuming anything else is wrong.
 
+### Incident: a fast-answered call could get stuck at `ringing` forever (job-poller report race)
+
+Live-tested against a real answered call: a `call_reachability` demo verification
+answered almost instantly, and `apps/telephony-agent` logged the job as `succeeded`
+(`{"msg":"call job finished","state":"succeeded","reasonCode":"answered"}`) — but the
+verification's actual state in the API stayed at `ringing` forever, never advancing.
+Root cause: `job-poller.ts` calls `report("ringing")` and `report("answered")` from
+call-control code (`reachability-call.ts`, etc.) **without awaiting** each one's HTTP
+round-trip (it must stay responsive to ARI events, not block on a network call), then
+separately awaits one final result report. `VerificationService#transition` is
+optimistic-concurrency (read current `state`+`sequence`, then a conditional
+`findOneAndUpdate` matching both) — if two of these unawaited reports for the same
+interaction are ever in flight at once and arrive at the server out of order, whichever
+one's conditional write loses the race is **silently rejected** (the route returns a
+`409`, which `reportJobEvent` turns into `{ applied: false }` without throwing, so
+neither the fire-and-forget `.catch()` nor the final `await` — which never checked
+`.applied` — ever surfaced it). A call answered quickly enough for `ringing` and
+`answered` to race each other over the network could permanently strand the
+interaction at whichever state happened to land last. **Fixed** in `job-poller.ts`: every
+report for one job (progress and the final result) is now chained through a single
+promise so each is fully applied at the server before the next is even sent, making the
+race structurally impossible — plus the final report's `.applied` result is now logged
+if ever rejected, so a regression here wouldn't be silent again. Covered by
+`apps/telephony-agent/src/job-poller.test.ts` (asserts the agent never has two `/events`
+requests for the same job in flight at once, regardless of individual request latency).
+
 ### Incident: a local ARI password was accidentally echoed to chat
 
 While inspecting `/etc/asterisk/ari.conf` on `powerotpvoip1` to confirm the agent's ARI
