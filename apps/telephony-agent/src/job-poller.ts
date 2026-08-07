@@ -46,15 +46,34 @@ export async function pollAndRunOneJob(
     if (!job) continue;
 
     log("claimed call job", { interactionId: job.interactionId, type });
-    const report = (state: ReportableState, reasonCode?: string) =>
-      reportJobEvent(config, job.interactionId, state, reasonCode).catch((error: unknown) =>
-        log("failed to report call progress", { interactionId: job.interactionId, error: errorMessage(error) }),
+
+    // Call-control code fires progress reports (ringing/answered/playing)
+    // without waiting for each HTTP round-trip, since it must stay
+    // responsive to ARI events. But the control plane's `transition()` is
+    // optimistic-concurrency (read state+sequence, then a conditional
+    // write) — if two reports for the same interaction are ever in flight
+    // at once, whichever's write loses the race gets silently rejected
+    // (a 409 that never throws), and a fast-answered call could strand the
+    // interaction at an earlier state forever. Chaining every report for
+    // this job through one promise, so each is fully applied before the
+    // next is even sent, makes that race impossible.
+    let reportChain: Promise<unknown> = Promise.resolve();
+    const report = (state: ReportableState, reasonCode?: string) => {
+      reportChain = reportChain.then(() =>
+        reportJobEvent(config, job.interactionId, state, reasonCode).catch((error: unknown) =>
+          log("failed to report call progress", { interactionId: job.interactionId, error: errorMessage(error) }),
+        ),
       );
+    };
 
     const result = await runJob(ari, trunkEndpoint, job, config, report);
+    await reportChain;
 
     try {
-      await reportJobEvent(config, job.interactionId, result.state, result.reasonCode);
+      const outcome = await reportJobEvent(config, job.interactionId, result.state, result.reasonCode);
+      if (!outcome.applied) {
+        log("call result report was rejected as stale", { interactionId: job.interactionId, ...result });
+      }
     } catch (error) {
       log("failed to report call result", { interactionId: job.interactionId, error: errorMessage(error) });
     }
