@@ -88,6 +88,18 @@ export const reportableNodeJobStates = [
 export const NodeJobEventSchema = z.object({
   state: z.enum(reportableNodeJobStates),
   reasonCode: z.string().min(1).max(100).optional(),
+  /**
+   * Which trunk id (`trunk-1`, `trunk-2`, ...) actually produced this
+   * outcome — only meaningful on the final `succeeded`/`failed`/
+   * `awaiting_response` report of a job, since an earlier progress report
+   * within the same job can belong to a trunk attempt that failed over to
+   * another one (see `apps/telephony-agent/src/job-poller.ts#runJobWithFailover`).
+   * Recorded on the interaction (`VerificationRequestDocument#callTrunkId`)
+   * so a later billing-reconciliation pass knows which VoIP.ms subaccount
+   * to query for this call's real cost/duration — see
+   * `apps/api/src/provider-reconcile-service.ts`.
+   */
+  trunkId: z.string().min(1).optional(),
 });
 
 export type Node = z.infer<typeof NodeSchema>;

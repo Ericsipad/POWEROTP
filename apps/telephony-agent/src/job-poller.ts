@@ -68,7 +68,13 @@ export async function pollAndRunOneJob(
     await reportChain;
 
     try {
-      const outcome = await reportJobEvent(config, job.interactionId, result.state, result.reasonCode);
+      const outcome = await reportJobEvent(
+        config,
+        job.interactionId,
+        result.state,
+        result.reasonCode,
+        result.trunkId,
+      );
       if (!outcome.applied) {
         log("call result report was rejected as stale", { interactionId: job.interactionId, ...result });
       }
@@ -102,7 +108,13 @@ async function runJobWithFailover(
   config: AgentConfig,
   report: (state: ReportableState) => void,
   log: Logger,
-): Promise<{ state: "succeeded" | "failed" | "awaiting_response"; reasonCode: string }> {
+): Promise<{
+  state: "succeeded" | "failed" | "awaiting_response";
+  reasonCode: string;
+  /** Which trunk actually produced this outcome — absent when zero trunks
+   * were healthy enough to even attempt the job (`method_not_available`). */
+  trunkId?: string;
+}> {
   const healthyTrunks = trunkPool.pickHealthyTrunks();
   if (healthyTrunks.length === 0) {
     return { state: "failed", reasonCode: "method_not_available" };
@@ -112,13 +124,15 @@ async function runJobWithFailover(
     state: "failed",
     reasonCode: "method_not_available",
   };
+  let lastTrunkId: string | undefined;
 
   for (const trunkId of healthyTrunks) {
     lastResult = await runJob(ari, trunkId, job, config, report);
+    lastTrunkId = trunkId;
     trunkPool.reportOutcome(trunkId, lastResult.reasonCode);
 
     if (lastResult.state !== "failed" || !isProviderLevelFailure(lastResult.reasonCode)) {
-      return lastResult;
+      return { ...lastResult, trunkId };
     }
 
     log("provider-level failure on trunk; retrying on the next healthy trunk", {
@@ -127,7 +141,7 @@ async function runJobWithFailover(
     });
   }
 
-  return lastResult;
+  return { ...lastResult, trunkId: lastTrunkId };
 }
 
 async function runJob(

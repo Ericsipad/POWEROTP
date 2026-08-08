@@ -23,7 +23,10 @@ export const POST = apiRoute<RouteParams>(async (request, { params }) => {
   await nodes.authenticate(request.headers.get("authorization") ?? undefined, clientIp(request));
   const { interactionId } = await params;
 
-  const { state, reasonCode } = parseBody(NodeJobEventSchema, await request.json());
+  const { state, reasonCode, trunkId } = parseBody(NodeJobEventSchema, await request.json());
+  if (trunkId) {
+    await verifications.recordProviderAttemptMeta(interactionId, { callTrunkId: trunkId });
+  }
   const applied = await verifications.transition(interactionId, state, reasonCode);
   if (!applied) throw new ApiError("stale_verification_state", 409);
 

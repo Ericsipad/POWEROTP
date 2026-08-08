@@ -1,7 +1,6 @@
 import type { ProductionConfig } from "./config.js";
 import { allTrunkDids } from "./outbound-trunks.js";
-
-const VOIPMS_API_URL = "https://voip.ms/api/v1/rest.php";
+import { postVoipMsApi } from "./voipms-http.js";
 
 type SmsConfig = Pick<
   ProductionConfig,
@@ -9,8 +8,16 @@ type SmsConfig = Pick<
   | "TRUNK1_DID" | "TRUNK2_DID" | "TRUNK3_DID" | "TRUNK4_DID" | "TRUNK5_DID" | "TRUNK6_DID"
 >;
 
+export interface SmsSendResult {
+  /** Which `TRUNKn_DID` actually sent this message — recorded on the
+   * interaction (see `apps/api/src/transport.ts`) so a later billing
+   * reconciliation pass knows which DID to query VoIP.ms's `getSMS`
+   * records for. */
+  did: string;
+}
+
 export interface SmsService {
-  sendVerificationCode(targetNumber: string, code: string): Promise<void>;
+  sendVerificationCode(targetNumber: string, code: string): Promise<SmsSendResult>;
 }
 
 export class SmsProviderError extends Error {
@@ -65,7 +72,7 @@ export function createVoipMsSmsService(
 
         try {
           await sendOnce(fetchImpl, username, password, did, targetNumber, code);
-          return;
+          return { did };
         } catch (error) {
           lastError = error instanceof SmsProviderError ? error : new SmsProviderError("provider_unavailable");
         }
@@ -84,56 +91,46 @@ async function sendOnce(
   targetNumber: string,
   code: string,
 ): Promise<void> {
-  const form = new FormData();
-  form.set("api_username", username);
-  form.set("api_password", password);
-  form.set("method", "sendSMS");
-  form.set("did", did);
-  form.set("dst", targetNumber);
-  form.set("message", `Your POWEROTP verification code is ${code}.`);
-  form.set("format", "json");
+  const result = await postVoipMsApi(
+    {
+      api_username: username,
+      api_password: password,
+      method: "sendSMS",
+      did,
+      dst: targetNumber,
+      message: `Your POWEROTP verification code is ${code}.`,
+      format: "json",
+    },
+    fetchImpl,
+  );
 
-  let response: Response;
-  try {
-    response = await fetchImpl(VOIPMS_API_URL, {
-      method: "POST",
-      headers: { accept: "application/json" },
-      body: form,
-      signal: AbortSignal.timeout(10_000),
-    });
-  } catch (error) {
-    logSmsFailure("fetch threw before a response was received", {
-      error: error instanceof Error ? error.message : String(error),
-    });
+  if (!result.ok) {
+    // Logged (truncated, no headers, never credentials) so any future
+    // non-2xx (a real outage, a request-shape regression, VoIP.ms API
+    // changes, etc.) is diagnosable from App Platform's own log viewer
+    // without needing to reproduce it from another network.
+    switch (result.failure.kind) {
+      case "network":
+        logSmsFailure("fetch threw before a response was received", { error: result.failure.error });
+        break;
+      case "http":
+        logSmsFailure("VoIP.ms returned a non-2xx response", {
+          status: result.failure.status,
+          bodyPreview: result.failure.bodyPreview,
+        });
+        break;
+      case "bad_json":
+        logSmsFailure("VoIP.ms's response body was not valid JSON (possible WAF/challenge page)", {
+          status: result.failure.status,
+          contentType: result.failure.contentType,
+        });
+        break;
+    }
     throw new SmsProviderError("provider_unavailable");
   }
 
-  if (!response.ok) {
-    // Never contains credentials — VoIP.ms's own response body, at most.
-    // Logged (truncated, no headers) so any future non-2xx (a real outage,
-    // a request-shape regression, VoIP.ms API changes, etc.) is
-    // diagnosable from App Platform's own log viewer without needing to
-    // reproduce it from another network.
-    const bodyPreview = await response.text().then(
-      (text) => text.slice(0, 300),
-      () => "<unreadable>",
-    );
-    logSmsFailure("VoIP.ms returned a non-2xx response", { status: response.status, bodyPreview });
-    throw new SmsProviderError("provider_unavailable");
-  }
-
-  let result: unknown;
-  try {
-    result = await response.json();
-  } catch {
-    logSmsFailure("VoIP.ms's response body was not valid JSON (possible WAF/challenge page)", {
-      status: response.status,
-      contentType: response.headers.get("content-type"),
-    });
-    throw new SmsProviderError("provider_unavailable");
-  }
-  if (!isSuccessfulResponse(result)) {
-    logSmsFailure("VoIP.ms rejected the request", { result });
+  if (!isSuccessfulResponse(result.body)) {
+    logSmsFailure("VoIP.ms rejected the request", { result: result.body });
     throw new SmsProviderError("provider_rejected");
   }
 }

@@ -838,6 +838,107 @@ installed at `/etc/systemd/system/asterisk.service.d/override.conf` on the dropl
 is `Type=notify`, so `ExecStartPost` only runs after Asterisk's ready notification, which
 comes after the socket is created.
 
+## Provider cost reconciliation (implemented; customer billing/balance not yet built)
+
+The platform needed its own record of what every call/SMS actually costs and
+how long it took, pulled from VoIP.ms's own records rather than trusted
+solely to Asterisk/agent-side reporting — the user's own framing: capture
+"the Asterisk version of events" immediately, then "the VoIP.ms version"
+minutes later, both saved on the one row that already represents that OTP
+transaction (`verificationRequests` — deliberately **not** a separate
+join table; the user was explicit that a single table backing every
+customer/admin report is the design goal, so this only ever adds fields to
+the existing document, never a new collection).
+
+- **What's captured immediately (the "Asterisk version")**: which trunk
+  (`callTrunkId`, e.g. `trunk-1`) or SMS DID (`smsDid`) actually carried
+  out the delivery attempt. For calls this is reported by the telephony
+  node itself — `NodeJobEventSchema` gained an optional `trunkId`,
+  populated from `apps/telephony-agent/src/job-poller.ts#runJobWithFailover`'s
+  return value (whichever trunk produced the final outcome, not an
+  earlier failed-over attempt) — and recorded via
+  `VerificationService#recordProviderAttemptMeta` before the corresponding
+  state transition is applied (`apps/web/app/v1/nodes/jobs/[interactionId]/events/route.ts`).
+  For `sms_code`, `apps/api/src/sms.ts#createVoipMsSmsService`'s
+  `sendVerificationCode` now returns `{ did }` on success (only on
+  success — a DID that was tried and rejected before a working one is
+  never recorded, since it was never actually used/billed), threaded
+  through `TransportHandle#advance`'s new optional third `meta` argument
+  (`apps/api/src/transport.ts`, wired in
+  `apps/api/src/verification-queue.ts#createDispatchWorker`). The existing
+  per-transition timeline in `verificationEvents` (already timestamped)
+  remains the record of state-change timing; nothing new was needed there.
+- **What's captured minutes later (the "VoIP.ms version")**:
+  `VerificationService#transition` schedules a delayed reconciliation job
+  (`apps/api/src/provider-reconcile-worker.ts`, queue
+  `verification-provider-reconcile`) the *first* time an interaction
+  crosses into "delivery is done" — expressed generically as
+  `!hasReachedAwaitingResponse(current.type, current.state) &&
+  hasReachedAwaitingResponse(updated.type, updated.state)`, which fires
+  exactly once per interaction regardless of type (works for
+  `call_reachability`, which has no `awaiting_response` state at all, and
+  for `voice_code`/`voice_challenge`/`sms_code`, without re-firing on the
+  customer's own later code/challenge submission) — and only when a real
+  trunk/DID was actually recorded (skipped entirely for
+  `method_not_available`, since nothing was ever attempted).
+  `apps/api/src/provider-reconcile-service.ts` then queries VoIP.ms's
+  `getCDR` (voice) or `getSMS` (`sms_code`) for a ±1-day window around the
+  interaction's `createdAt` (VoIP.ms's own date filters are day-granularity,
+  not datetime) and matches the closest-in-time row whose destination/
+  contact number matches (suffix-tolerant, to survive `+1`/no-`+1`
+  formatting differences) — narrowed further by VoIP.ms account name (the
+  trunk's own `TRUNKn_USER`) for calls, where available. A match is stored
+  as `providerRecord` (`{ source, fetchedAt, durationSeconds?,
+  providerCostUsd?, raw }` — `raw` is the *entire* unmodified VoIP.ms row,
+  kept regardless, purely so nothing is lost if VoIP.ms ever adds/renames a
+  field). Field names (`destination`, `account`, `seconds`, `total`, etc.
+  for `getCDR`; `contact`, `type`, `date` for `getSMS`) are **not
+  guessed** — they're VoIP.ms's own confirmed, real response schema,
+  sourced from VoIP.ms's official API documentation
+  (`https://voip.ms/m/apidocs.php`) and cross-checked against real captured
+  example values in the open-source `ecliptical/voip-ms` Rust client's
+  `tools/api-responses.json` and its published `GetCDRResponseCDR`/
+  `GetSMSResponseSMS` types — see the `VoipMsCdrRow`/`VoipMsSmsRow`
+  interfaces and their doc comments in
+  `apps/api/src/provider-reconcile-service.ts` for the full confirmed
+  shape and citations. `sms_code`'s cost is **not** read from `getSMS` (VoIP.ms
+  doesn't return a per-message cost there) — it's `SMS_OUTBOUND_RATE_USD`
+  (`$0.0075`, VoIP.ms's own published flat rate, a constant to update by
+  hand if VoIP.ms's rate ever changes) applied whenever a real send is
+  matched. No new credentials were needed — `getCDR`/`getSMS` are called
+  with the same account-wide `VOIPMS_SMS_API_USERNAME`/
+  `VOIPMS_SMS_API_PASSWORD` REST credentials `sms_code` already uses (the
+  new low-level POST helper, `apps/api/src/voipms-http.ts`, is also a
+  dedup of `sms.ts`'s previously-inline `multipart/form-data` POST logic —
+  behavior-preserving, same log lines, same live-confirmed
+  `multipart/form-data`-not-urlencoded quirk, just shared with the new
+  `apps/api/src/voipms-billing-client.ts`).
+- **Retry/give-up policy**: VoIP.ms's own CDR/SMS logs are not guaranteed
+  to be queryable the instant a call/message finishes, so a "no match yet"
+  result is retried via BullMQ's backoff (5 attempts, fixed 2-minute delay,
+  after an initial 3-minute delay before the first attempt) rather than
+  failing immediately; only on the final attempt is
+  `providerRecordStatus` set to a terminal `"not_found"` (or `"error"` if
+  the lookup itself kept failing, e.g. bad credentials or a VoIP.ms
+  outage — kept distinct from `"not_found"` so the two failure modes
+  aren't confused later). `"pending"` is set the moment reconciliation is
+  scheduled so a document's state is always inspectable mid-flight.
+- **Deliberately not built yet, per the user's own framing**: any notion
+  of a *customer's* cost or account balance. There is no `customerCostUsd`
+  field, no balance collection, and no pricing-tier logic anywhere yet —
+  the user described the intended rule (a customer's **current balance**
+  determines which flat per-transaction pricing tier applies: **&ge;$100 →
+  tier 1, $50–$99.99 → tier 2, &lt;$50 → tier 3**, plus a separate daily
+  charge) but has not yet specified the actual tier rates or daily-charge
+  amount, and the customer-balance database itself does not exist yet
+  either. **Do not build either of those speculatively** — the plan is to
+  add them once the exact charge logic is given, at which point
+  `providerRecord.providerCostUsd` (this platform's real, actual cost per
+  transaction, already being captured) is the input the tiered customer
+  price gets computed from, and only front-end customer-facing UI cards
+  are meant to display the resulting customer cost (never expose raw
+  provider cost/trunk/DID details to a customer).
+
 ## Known gaps / next steps
 
 1. `call_reachability` and `voice_code` are both **confirmed working end-to-end live**,
@@ -875,7 +976,19 @@ comes after the socket is created.
    health/rotation state is not shared across nodes and resets on an agent restart. Not
    a problem yet (one droplet, `powerotpvoip1`); would need externalizing (e.g. into
    Valkey) if multi-node routing (Phase 9) is ever built.
-7. Everything else in Phases 4–9 per `docs/PLAN.md`.
+7. Provider cost/duration reconciliation (see "Provider cost reconciliation" above) is
+   code-complete and unit-tested against VoIP.ms's own confirmed, real `getCDR`/`getSMS`
+   response schema (sourced from VoIP.ms's official API docs, not guessed — see that
+   section), but **not yet live-tested against the real API** — it needs the telephony
+   droplet redeployed (the trunk-reporting change to `apps/telephony-agent` requires it,
+   per the standing "redeploy in the same sitting" lesson) and a real completed call/SMS
+   to confirm live end-to-end, the same as every other provider integration in this
+   project. Customer-facing
+   cost calculation and the balance-tiered pricing rule (≥$100/$50–99.99/&lt;$50 tiers,
+   plus a daily charge — exact rates not yet given) and the customer-balance database
+   itself are **not started at all** — don't build either speculatively; see that
+   section for what's already been decided vs. still open.
+8. Everything else in Phases 4–9 per `docs/PLAN.md`.
 
 ### Incident: `npm ci` OOM-killed on the droplet during the Phase 5 redeploy (fixed with a permanent swap file)
 

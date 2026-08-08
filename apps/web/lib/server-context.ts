@@ -6,6 +6,7 @@ import { connectDataStores, type DataStores } from "@powerotp/api/dependencies.j
 import { createBrevoEmailService } from "@powerotp/api/email.js";
 import { NodeService } from "@powerotp/api/node-service.js";
 import { ensureIndexes } from "@powerotp/api/persistence.js";
+import { createProviderReconcileWorker } from "@powerotp/api/provider-reconcile-worker.js";
 import { ProjectService } from "@powerotp/api/project-service.js";
 import { productionTransportRegistry } from "@powerotp/api/transport.js";
 import {
@@ -51,6 +52,7 @@ async function buildServerContext(): Promise<ServerContext> {
     queues.enqueueDispatch,
     queues.enqueueTimeout,
     queues.enqueueCallback,
+    queues.enqueueProviderReconcile,
   );
   const dispatchWorker = createDispatchWorker(
     queueConnection,
@@ -58,6 +60,7 @@ async function buildServerContext(): Promise<ServerContext> {
     productionTransportRegistry(config),
   );
   const callbackWorker = createCallbackWorker(queueConnection, dataStores.db, config);
+  const providerReconcileWorker = createProviderReconcileWorker(queueConnection, dataStores.db, config);
 
   const auth = new AuthService(dataStores.db, config, createBrevoEmailService(config));
   const projects = new ProjectService(dataStores.db, config, verifications);
@@ -68,6 +71,7 @@ async function buildServerContext(): Promise<ServerContext> {
     await Promise.allSettled([
       dispatchWorker.close(),
       callbackWorker.close(),
+      providerReconcileWorker.close(),
       queues.close(),
     ]);
     await dataStores.close();

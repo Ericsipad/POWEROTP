@@ -5,6 +5,13 @@ import type { VerificationService } from "./verification-service.js";
 
 const JOBS_QUEUE_NAME = "verification-jobs";
 const CALLBACKS_QUEUE_NAME = "verification-callbacks";
+const PROVIDER_RECONCILE_QUEUE_NAME = "verification-provider-reconcile";
+
+/** VoIP.ms's own CDR/SMS records are not always available the instant a
+ * call/SMS finishes — this delay plus the retry backoff below (see
+ * `apps/api/src/provider-reconcile-worker.ts`) gives them a few minutes to
+ * appear before giving up and marking the interaction `not_found`. */
+const PROVIDER_RECONCILE_INITIAL_DELAY_MS = 3 * 60 * 1_000;
 
 /**
  * BullMQ manages its own dedicated Redis connections per Queue/Worker (and
@@ -38,12 +45,18 @@ interface TimeoutJobData {
   interactionId: string;
 }
 
+export interface ProviderReconcileJobData {
+  interactionId: string;
+}
+
 export interface VerificationQueues {
   jobsQueue: Queue<DispatchJobData | TimeoutJobData>;
   callbacksQueue: Queue<CallbackJobData>;
+  providerReconcileQueue: Queue<ProviderReconcileJobData>;
   enqueueDispatch(interactionId: string): Promise<void>;
   enqueueTimeout(interactionId: string, delayMs: number): Promise<void>;
   enqueueCallback(interactionId: string, eventId: string): Promise<void>;
+  enqueueProviderReconcile(interactionId: string): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -52,10 +65,14 @@ export function createVerificationQueues(connection: ConnectionOptions): Verific
     connection,
   });
   const callbacksQueue = new Queue<CallbackJobData>(CALLBACKS_QUEUE_NAME, { connection });
+  const providerReconcileQueue = new Queue<ProviderReconcileJobData>(PROVIDER_RECONCILE_QUEUE_NAME, {
+    connection,
+  });
 
   return {
     jobsQueue,
     callbacksQueue,
+    providerReconcileQueue,
     async enqueueDispatch(interactionId) {
       // BullMQ job IDs may not contain ":" (it uses colons as a Redis key
       // delimiter internally), so job names and IDs are hyphen-separated.
@@ -85,8 +102,30 @@ export function createVerificationQueues(connection: ConnectionOptions): Verific
         },
       );
     },
+    async enqueueProviderReconcile(interactionId) {
+      // Delayed, not immediate — see PROVIDER_RECONCILE_INITIAL_DELAY_MS.
+      // A stable jobId per interaction means calling this more than once
+      // for the same interaction (it never should, but `transition()`'s
+      // guard is defensive) just no-ops instead of scheduling a duplicate.
+      await providerReconcileQueue.add(
+        "reconcile",
+        { interactionId },
+        {
+          jobId: `reconcile-${interactionId}`,
+          delay: PROVIDER_RECONCILE_INITIAL_DELAY_MS,
+          attempts: 5,
+          backoff: { type: "fixed", delay: 2 * 60 * 1_000 },
+          removeOnComplete: true,
+          removeOnFail: { age: 7 * 24 * 60 * 60 },
+        },
+      );
+    },
     async close() {
-      await Promise.allSettled([jobsQueue.close(), callbacksQueue.close()]);
+      await Promise.allSettled([
+        jobsQueue.close(),
+        callbacksQueue.close(),
+        providerReconcileQueue.close(),
+      ]);
     },
   };
 }
@@ -120,7 +159,10 @@ export function createDispatchWorker(
               : undefined,
         },
         {
-          async advance(state, reasonCode) {
+          async advance(state, reasonCode, meta) {
+            if (meta?.smsDid) {
+              await service.recordProviderAttemptMeta(interactionId, { smsDid: meta.smsDid });
+            }
             return service.transition(interactionId, state, reasonCode);
           },
         },

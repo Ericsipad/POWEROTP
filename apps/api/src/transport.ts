@@ -19,7 +19,11 @@ export interface TransportContext {
  * implementing its own persistence.
  */
 export interface TransportHandle {
-  advance(state: VerificationState, reasonCode?: string): Promise<boolean>;
+  advance(
+    state: VerificationState,
+    reasonCode?: string,
+    meta?: { smsDid?: string },
+  ): Promise<boolean>;
 }
 
 export interface VerificationTransport {
@@ -96,15 +100,16 @@ export function createSmsCodeTransport(
         return;
       }
 
+      let sent: { did: string };
       try {
-        await sms.sendVerificationCode(context.targetNumber, context.code);
+        sent = await sms.sendVerificationCode(context.targetNumber, context.code);
       } catch (error) {
         const reasonCode =
           error instanceof SmsProviderError ? error.reasonCode : "provider_unavailable";
         await handle.advance("failed", reasonCode);
         return;
       }
-      await handle.advance("awaiting_response", "code_sent");
+      await handle.advance("awaiting_response", "code_sent", { smsDid: sent.did });
     },
   };
 }

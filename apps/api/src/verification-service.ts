@@ -25,6 +25,7 @@ import {
 import {
   idempotencyRecordId,
   type IdempotencyRecordDocument,
+  type ProviderRecordSnapshot,
   type VerificationEventDocument,
   type VerificationRequestDocument,
 } from "./verification-persistence.js";
@@ -53,6 +54,10 @@ export interface EnqueueCallback {
   (interactionId: string, eventId: string): Promise<void>;
 }
 
+export interface EnqueueProviderReconcile {
+  (interactionId: string): Promise<void>;
+}
+
 export class VerificationService {
   readonly #requests;
   readonly #events;
@@ -65,6 +70,7 @@ export class VerificationService {
     private readonly enqueueDispatch: EnqueueDispatch,
     private readonly enqueueTimeout: EnqueueTimeout,
     private readonly enqueueCallback: EnqueueCallback,
+    private readonly enqueueProviderReconcile: EnqueueProviderReconcile,
   ) {
     this.#requests = db.collection<VerificationRequestDocument>("verificationRequests");
     this.#events = db.collection<VerificationEventDocument>("verificationEvents");
@@ -225,7 +231,65 @@ export class VerificationService {
     if (!updated) return false;
 
     await this.#recordTransition(updated, to, reasonCode);
+
+    // The exact moment a call/SMS delivery attempt is fully finished
+    // (whether or not the customer ever completes a follow-up code/
+    // challenge submission) is the first time this interaction's state
+    // crosses into "awaiting a response" (or a terminal state reached
+    // directly, e.g. `call_reachability`, which has no awaiting_response
+    // state at all) — never re-fires for a later succeeded/failed caused
+    // by the customer's own code submission, since by then
+    // `hasReachedAwaitingResponse(current.state)` is already true. Only
+    // schedule reconciliation if a real trunk/DID was actually used —
+    // nothing to look up for a `method_not_available` failure that never
+    // reached a node or the SMS provider at all.
+    const justFinishedDelivery =
+      !hasReachedAwaitingResponse(current.type, current.state) &&
+      hasReachedAwaitingResponse(updated.type, updated.state);
+    if (justFinishedDelivery && (updated.callTrunkId || updated.smsDid)) {
+      await this.#requests.updateOne(
+        { _id: updated._id },
+        { $set: { providerRecordStatus: "pending" } },
+      );
+      await this.enqueueProviderReconcile(updated._id);
+    }
+
     return true;
+  }
+
+  /**
+   * Records which trunk/DID actually carried out a delivery attempt,
+   * ahead of the state transition that will decide whether to schedule
+   * billing reconciliation (see `transition()` above) — called from the
+   * node job-events route (`callTrunkId`) and the SMS dispatch transport
+   * (`smsDid`) once the provider has actually accepted/placed the attempt,
+   * never before. Deliberately a plain metadata write, not a state-machine
+   * transition: it can't fail a stale-state race the way `transition()`
+   * can, since it never depends on the current `state`/`sequence`.
+   */
+  async recordProviderAttemptMeta(
+    interactionId: string,
+    meta: { callTrunkId?: string; smsDid?: string },
+  ) {
+    await this.#requests.updateOne({ _id: interactionId }, { $set: meta });
+  }
+
+  /** Called by `apps/api/src/provider-reconcile-worker.ts` once a matching
+   * VoIP.ms CDR/SMS record has been found. */
+  async applyProviderRecord(interactionId: string, record: ProviderRecordSnapshot) {
+    await this.#requests.updateOne(
+      { _id: interactionId },
+      { $set: { providerRecord: record, providerRecordStatus: "matched" } },
+    );
+  }
+
+  /** Called once reconciliation gives up (`"not_found"`) or keeps failing
+   * (`"error"`) — see `apps/api/src/provider-reconcile-worker.ts`. */
+  async applyProviderRecordStatus(interactionId: string, status: "not_found" | "error") {
+    await this.#requests.updateOne(
+      { _id: interactionId },
+      { $set: { providerRecordStatus: status } },
+    );
   }
 
   /**

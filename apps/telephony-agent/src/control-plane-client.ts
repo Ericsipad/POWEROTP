@@ -90,13 +90,14 @@ export async function reportJobEvent(
   interactionId: string,
   state: (typeof reportableNodeJobStates)[number],
   reasonCode?: string,
+  trunkId?: string,
 ): Promise<{ applied: boolean }> {
   const response = await fetch(
     new URL(`/v1/nodes/jobs/${interactionId}/events`, config.CONTROL_PLANE_URL),
     {
       method: "POST",
       headers: { ...authHeaders(config), "content-type": "application/json" },
-      body: JSON.stringify({ state, reasonCode }),
+      body: JSON.stringify({ state, reasonCode, trunkId }),
     },
   );
 
