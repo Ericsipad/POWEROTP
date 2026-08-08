@@ -36,6 +36,17 @@ export const TrunkStatusReportSchema = z.object({
   trunks: z.array(TrunkStatusSchema),
 });
 
+/**
+ * A node polls `/v1/nodes/config` every `POLL_INTERVAL_MS` (60s default, see
+ * `apps/telephony-agent/src/config.ts`) — 3x that is a reasonable buffer
+ * before treating a node as unexpectedly quiet rather than just between
+ * polls. Shared between `/admin`'s staleness badge
+ * (`apps/web/app/admin/page.tsx`) and the platform alerting job
+ * (`apps/api/src/alerting-service.ts`) so both sides agree on one
+ * definition of "stale".
+ */
+export const NODE_STALE_THRESHOLD_MS = 3 * 60_000;
+
 export const NodeSchema = z.object({
   id: z.string().min(16),
   ip: z.string().min(1),

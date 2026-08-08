@@ -124,6 +124,22 @@ export function idempotencyRecordId(projectId: string, idempotencyKey: string) {
   return `${projectId}:${idempotencyKey}`;
 }
 
+/**
+ * Retention policy for `verificationRequests`/`verificationEvents`/
+ * `callbackDeliveries` (see `docs/AS_BUILT.md`'s "Data retention" section):
+ * the user was explicit these records must never be manually/eagerly
+ * deleted (they're the platform's one source of truth for every
+ * transaction, report, and provider-cost figure) — but 18 months after
+ * creation, MongoDB's own TTL background task removes them automatically,
+ * the same mechanism already used for `sessions`/`emailVerifications`/
+ * `idempotencyRecords` above. 18 months ~= 547.5 days; rounded up to 548
+ * so nothing is ever removed a day early. A future session may add a
+ * pre-expiry export to cold storage (the user mentioned Wasabi) once
+ * that's actually needed — deliberately not built yet, since nothing is
+ * close to the 18-month mark today.
+ */
+export const RETENTION_PERIOD_SECONDS = 548 * 24 * 60 * 60;
+
 export async function ensureVerificationIndexes(db: Db) {
   await Promise.all([
     db
@@ -139,13 +155,22 @@ export async function ensureVerificationIndexes(db: Db) {
       .collection<VerificationRequestDocument>("verificationRequests")
       .createIndex({ type: 1, state: 1, createdAt: 1 }),
     db
+      .collection<VerificationRequestDocument>("verificationRequests")
+      .createIndex({ createdAt: 1 }, { expireAfterSeconds: RETENTION_PERIOD_SECONDS }),
+    db
       .collection<VerificationEventDocument>("verificationEvents")
       .createIndex({ interactionId: 1, sequence: 1 }, { unique: true }),
+    db
+      .collection<VerificationEventDocument>("verificationEvents")
+      .createIndex({ occurredAt: 1 }, { expireAfterSeconds: RETENTION_PERIOD_SECONDS }),
     db
       .collection<IdempotencyRecordDocument>("idempotencyRecords")
       .createIndex({ createdAt: 1 }, { expireAfterSeconds: 7 * 24 * 60 * 60 }),
     db
       .collection<CallbackDeliveryDocument>("callbackDeliveries")
       .createIndex({ interactionId: 1, occurredAt: -1 }),
+    db
+      .collection<CallbackDeliveryDocument>("callbackDeliveries")
+      .createIndex({ occurredAt: 1 }, { expireAfterSeconds: RETENTION_PERIOD_SECONDS }),
   ]);
 }

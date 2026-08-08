@@ -54,6 +54,16 @@ export const ProjectSchema = z.object({
   stats: ProjectStatsSchema,
 });
 
+/**
+ * Same shape as a project's own `stats`, but aggregated across every
+ * project on the platform — the admin "operator health" usage view (see
+ * `docs/AS_BUILT.md`'s "Admin operator health dashboard" section and
+ * `apps/api/src/verification-reporting.ts#computePlatformStats`).
+ */
+export const PlatformUsageResponseSchema = z.object({
+  stats: ProjectStatsSchema,
+});
+
 export const ProjectCreatedSchema = z.object({
   project: ProjectSchema,
   apiKey: z.string().min(32),
@@ -68,3 +78,4 @@ export type CreateProject = z.infer<typeof CreateProjectSchema>;
 export type UpdateProject = z.infer<typeof UpdateProjectSchema>;
 export type Project = z.infer<typeof ProjectSchema>;
 export type ProjectCreated = z.infer<typeof ProjectCreatedSchema>;
+export type PlatformUsageResponse = z.infer<typeof PlatformUsageResponseSchema>;

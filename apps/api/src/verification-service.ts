@@ -24,12 +24,18 @@ import {
 } from "./verification-state-machine.js";
 import {
   idempotencyRecordId,
+  type CallbackDeliveryDocument,
   type IdempotencyRecordDocument,
   type ProviderRecordSnapshot,
   type VerificationEventDocument,
   type VerificationRequestDocument,
 } from "./verification-persistence.js";
-import { computeProjectStats, listProjectInteractions } from "./verification-reporting.js";
+import {
+  computePlatformStats,
+  computeProjectStats,
+  listProjectInteractions,
+  listRecentCallbackDeliveries,
+} from "./verification-reporting.js";
 
 const VERIFICATION_LIFETIME_MS = 10 * 60 * 1_000;
 
@@ -62,6 +68,7 @@ export class VerificationService {
   readonly #requests;
   readonly #events;
   readonly #idempotency;
+  readonly #callbackDeliveries;
 
   constructor(
     db: Db,
@@ -75,6 +82,7 @@ export class VerificationService {
     this.#requests = db.collection<VerificationRequestDocument>("verificationRequests");
     this.#events = db.collection<VerificationEventDocument>("verificationEvents");
     this.#idempotency = db.collection<IdempotencyRecordDocument>("idempotencyRecords");
+    this.#callbackDeliveries = db.collection<CallbackDeliveryDocument>("callbackDeliveries");
   }
 
   async create(
@@ -431,8 +439,20 @@ export class VerificationService {
     return computeProjectStats(this.#requests, projectId);
   }
 
+  /** Admin-only, platform-wide totals — see `docs/AS_BUILT.md`'s "Admin
+   * operator health dashboard" section. */
+  async platformStats() {
+    return computePlatformStats(this.#requests);
+  }
+
   async listInteractions(projectId: string, limit = 50) {
     return listProjectInteractions(this.#requests, projectId, limit);
+  }
+
+  /** Admin-only visibility into recent callback delivery attempts — the
+   * data is already recorded by `apps/api/src/callback-worker.ts`. */
+  async recentCallbackDeliveries(limit = 50) {
+    return listRecentCallbackDeliveries(this.#callbackDeliveries, limit);
   }
 
   async #requireActive(

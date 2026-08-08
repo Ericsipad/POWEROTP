@@ -1,21 +1,16 @@
 "use client";
 
-import type { Node, SessionResponse } from "@powerotp/contracts";
+import { NODE_STALE_THRESHOLD_MS, type Node, type SessionResponse } from "@powerotp/contracts";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
+import { CallbackDeliveriesPanel } from "./callback-deliveries-panel";
 import { ChallengesPanel } from "./challenges-panel";
 import { OpsPanel } from "./ops-panel";
-
-/**
- * A node polls `/v1/nodes/config` every `POLL_INTERVAL_MS` (60s default, see
- * `apps/telephony-agent/src/config.ts`) — 3x that is a reasonable buffer
- * before treating a node as unexpectedly quiet rather than just between polls.
- */
-const STALE_THRESHOLD_MS = 3 * 60_000;
+import { UsagePanel } from "./usage-panel";
 
 function isNodeStale(lastSeenAt: string): boolean {
-  return Date.now() - new Date(lastSeenAt).getTime() > STALE_THRESHOLD_MS;
+  return Date.now() - new Date(lastSeenAt).getTime() > NODE_STALE_THRESHOLD_MS;
 }
 
 export default function AdminPage() {
@@ -186,6 +181,8 @@ export default function AdminPage() {
           </ul>
         </article>
         <OpsPanel />
+        <UsagePanel />
+        <CallbackDeliveriesPanel />
         {session && <ChallengesPanel csrfToken={session.csrfToken} />}
       </section>
     </main>

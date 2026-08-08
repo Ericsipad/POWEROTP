@@ -1,3 +1,4 @@
+import { createAlertQueue, createAlertWorker, scheduleAlertChecks } from "@powerotp/api/alert-worker.js";
 import { AuthService } from "@powerotp/api/auth-service.js";
 import { createCallbackWorker } from "@powerotp/api/callback-worker.js";
 import { ChallengeService } from "@powerotp/api/challenge-service.js";
@@ -64,9 +65,18 @@ async function buildServerContext(): Promise<ServerContext> {
   const callbackWorker = createCallbackWorker(queueConnection, dataStores.db, config);
   const providerReconcileWorker = createProviderReconcileWorker(queueConnection, dataStores.db, config);
 
-  const auth = new AuthService(dataStores.db, config, createBrevoEmailService(config));
+  const emailService = createBrevoEmailService(config);
+  const auth = new AuthService(dataStores.db, config, emailService);
   const projects = new ProjectService(dataStores.db, config, verifications);
   const nodes = new NodeService(dataStores.db, config);
+
+  // Platform operator alerting (queue backlog / high failure rate / stale
+  // node) — see `docs/AS_BUILT.md`'s "Admin operator health dashboard"
+  // section. `scheduleAlertChecks` is idempotent (stable jobId), so it's
+  // safe to call on every boot.
+  const alertQueue = createAlertQueue(queueConnection);
+  const alertWorker = createAlertWorker(queueConnection, dataStores.db, config, queues, nodes, emailService);
+  await scheduleAlertChecks(alertQueue);
 
   async function shutdown(signal: string) {
     console.info(JSON.stringify({ service: "powerotp", signal, msg: "shutting down" }));
@@ -74,6 +84,8 @@ async function buildServerContext(): Promise<ServerContext> {
       dispatchWorker.close(),
       callbackWorker.close(),
       providerReconcileWorker.close(),
+      alertWorker.close(),
+      alertQueue.close(),
       queues.close(),
     ]);
     await dataStores.close();

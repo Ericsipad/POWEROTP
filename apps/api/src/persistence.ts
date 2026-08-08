@@ -82,6 +82,18 @@ export interface NodeDocument {
   trunkStatusReportedAt?: Date;
 }
 
+/**
+ * Cooldown state for one platform alert condition (see
+ * `apps/api/src/alerting-service.ts`) — keyed by a stable condition key
+ * (e.g. `queue_backlog:verification-jobs`, `node_stale:node_abc123`) so
+ * `apps/api/src/alert-dispatcher.ts` doesn't re-email the admin for the
+ * same still-ongoing problem more than once per `ALERT_COOLDOWN_MS`.
+ */
+export interface AlertStateDocument {
+  _id: string;
+  lastAlertedAt: Date;
+}
+
 export interface AuditDocument {
   _id: string;
   actorId: string;

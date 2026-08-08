@@ -165,6 +165,29 @@ export const InteractionSummarySchema = z.object({
   correlationId: z.string().min(1).optional(),
 });
 
+/**
+ * Read-only view of one recorded callback delivery attempt (see
+ * `apps/api/src/callback-worker.ts`, which already writes one of these on
+ * every attempt) — surfaced on `/admin` for callback delivery diagnostics
+ * (`docs/AS_BUILT.md`'s "Admin operator health dashboard" section). Nothing
+ * new is captured here; this just makes already-recorded data visible.
+ */
+export const CallbackDeliverySummarySchema = z.object({
+  id: z.string().min(1),
+  interactionId: z.string().min(16),
+  eventId: z.string().min(16),
+  projectId: z.string().min(16),
+  attempt: z.number().int().positive(),
+  status: z.enum(["delivered", "failed"]),
+  statusCode: z.number().int().optional(),
+  error: z.string().optional(),
+  occurredAt: z.string().datetime(),
+});
+
+export const CallbackDeliveriesResponseSchema = z.object({
+  deliveries: z.array(CallbackDeliverySummarySchema),
+});
+
 export type VerificationType = z.infer<typeof VerificationTypeSchema>;
 export type VerificationState = z.infer<typeof VerificationStateSchema>;
 export type AccountClass = z.infer<typeof AccountClassSchema>;
@@ -179,3 +202,5 @@ export type CallbackEnvelope = z.infer<typeof CallbackEnvelopeSchema>;
 export type VerificationStatus = z.infer<typeof VerificationStatusSchema>;
 export type InteractionSummary = z.infer<typeof InteractionSummarySchema>;
 export type DemoVerificationRequest = z.infer<typeof DemoVerificationRequestSchema>;
+export type CallbackDeliverySummary = z.infer<typeof CallbackDeliverySummarySchema>;
+export type CallbackDeliveriesResponse = z.infer<typeof CallbackDeliveriesResponseSchema>;

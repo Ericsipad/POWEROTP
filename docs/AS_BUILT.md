@@ -1044,6 +1044,96 @@ during this session:
   aren't unit-tested against a real Redis either) — verify live via
   `/admin` once deployed.
 
+## Phase 7: usage counters, callback diagnostics, alerting, retention (implemented)
+
+The remaining Phase 7 items chosen for this session — usage counters/
+dashboards (admin-wide and per-project), callback delivery diagnostics
+(visibility only), alerting, and a retention policy — deliberately reused
+existing data/patterns everywhere possible rather than adding new
+infrastructure:
+
+- **Per-project usage counters already existed** (`Project#stats` —
+  `total`/`succeeded`/`failed`/`byType`, computed by
+  `apps/api/src/verification-reporting.ts#computeProjectStats` and already
+  rendered on the customer dashboard's `project-card.tsx`) — nothing new
+  was needed here, just confirmed as already covering the customer-facing
+  half of this session's usage-counters scope.
+- **Admin-wide usage counters** (the new half): same shape, aggregated
+  across every project — `computePlatformStats` (a small refactor of
+  `computeProjectStats` to share one `aggregateStats` helper with an
+  optional filter), `VerificationService#platformStats`, and a new
+  admin-session-gated route, `GET /v1/admin/usage`
+  (`apps/web/app/v1/admin/usage/route.ts`). Rendered as a new manual-
+  refresh panel, `apps/web/app/admin/usage-panel.tsx`, reusing the exact
+  `statsGrid`/`opsTable` CSS classes already used elsewhere on `/admin`.
+- **Callback delivery diagnostics (visibility only, no manual retry)**: the
+  data already existed — `apps/api/src/callback-worker.ts` has recorded
+  every delivery attempt (`delivered`/`failed`, status code, error, attempt
+  number) to the `callbackDeliveries` collection since Phase 3. This session
+  only added visibility: `verification-reporting.ts#listRecentCallbackDeliveries`
+  (most recent 50, newest first), `VerificationService#recentCallbackDeliveries`,
+  a new admin route `GET /v1/admin/callback-deliveries`
+  (`apps/web/app/v1/admin/callback-deliveries/route.ts`), and a new panel
+  `apps/web/app/admin/callback-deliveries-panel.tsx`. New contract:
+  `CallbackDeliverySummarySchema`/`CallbackDeliveriesResponseSchema`
+  (`libraries/contracts/src/verification.ts`).
+- **Alerting**: emails `ADMIN_EMAIL` (the existing Brevo integration already
+  used for customer email verification — `apps/api/src/email.ts` gained
+  `EmailService#sendAdminAlert`, no new credential) when any of three
+  conditions trip, checked every 5 minutes by a new BullMQ repeatable job
+  (`platform-alerts` queue, `apps/api/src/alert-worker.ts`, scheduled via
+  `scheduleAlertChecks` — idempotent stable `jobId`, safe to call on every
+  server boot, wired into `apps/web/lib/server-context.ts`):
+  - A queue's `waiting + delayed` job count exceeds `QUEUE_BACKLOG_THRESHOLD`
+    (50), or its `failed` count exceeds `QUEUE_FAILED_THRESHOLD` (20) —
+    checked for every queue this app runs.
+  - The failure/expiry rate among interactions created in the last hour
+    exceeds `FAILURE_RATE_THRESHOLD` (50%), but only once at least
+    `FAILURE_RATE_MIN_SAMPLES` (5) interactions exist in that window, so a
+    single failed call on a quiet day never triggers a false alarm.
+  - A telephony node has gone quiet past the same `NODE_STALE_THRESHOLD_MS`
+    (3x the agent's 60s poll interval) the `/admin` staleness badge already
+    uses — this constant moved to `libraries/contracts/src/nodes.ts` so
+    both sides share one definition of "stale" instead of two independent
+    hardcoded values.
+  - All three condition checks (`apps/api/src/alerting-service.ts`) are pure
+    functions taking already-fetched data (queue counts, a total/failed
+    count pair, a node list) — no Mongo/BullMQ/Node handle passed in — so
+    they're unit-tested (`alerting-service.test.ts`) without any live
+    connection; only `alert-worker.ts` does the actual fetching.
+  - A new `alertState` collection (`AlertStateDocument`, one row per
+    triggered condition key, e.g. `queue_backlog:verification-jobs`,
+    `node_stale:<nodeId>`) backs a one-hour cooldown
+    (`apps/api/src/alert-dispatcher.ts#dispatchAlerts`) so an ongoing
+    problem re-emails at most once per hour, not every 5-minute check.
+    Silently a no-op (not an error) whenever `ADMIN_EMAIL` is unset, the
+    same deferred-configuration convention as every other optional feature.
+  - Thresholds are plain hardcoded constants (not new env vars) —
+    deliberately kept simple; revisit only if real alert noise/silence in
+    production shows they need tuning.
+- **Retention (18 months, no deletion before then, no archival built yet)**:
+  the user was explicit `verificationRequests`/its events/its callback
+  deliveries — the platform's one durable transaction/report/billing
+  source — must never be manually or eagerly deleted, but 18 months after
+  creation they should stop being kept in the hot Mongo collection. Fixed
+  with three new single-field TTL indexes (`{ createdAt: 1 }` /
+  `{ occurredAt: 1 }`, `expireAfterSeconds: RETENTION_PERIOD_SECONDS`
+  where `RETENTION_PERIOD_SECONDS` = 548 days ~= 18 months, rounded up so
+  nothing expires a day early) on `verificationRequests`,
+  `verificationEvents`, and `callbackDeliveries`
+  (`apps/api/src/verification-persistence.ts`) — the exact same mechanism
+  this project already uses for `sessions`/`emailVerifications`/
+  `idempotencyRecords`, just with a much longer horizon. **Deliberately not
+  built yet, per the user's own explicit framing this session**: exporting
+  data to cold storage (the user mentioned Wasabi, explicitly not
+  DigitalOcean Spaces, with a plain file download, not a specific format
+  yet) before the 18-month TTL deletes it — the user's framing was "we're
+  not at 180 days yet to be worried about this... we'll deal with 6-month
+  archiving at 6 months time." Nothing is close to the 18-month mark today,
+  so there is no urgency; a future session should raise this again once
+  real data approaches that age, not before. Do not provision Wasabi
+  credentials or build an export job speculatively.
+
 ## Known gaps / next steps
 
 1. `call_reachability` and `voice_code` are both **confirmed working end-to-end live**,
@@ -1090,7 +1180,20 @@ during this session:
    plus a daily charge — exact rates not yet given) and the customer-balance database
    itself are **not started at all** — don't build either speculatively; see that
    section for what's already been decided vs. still open.
-8. Everything else in Phases 4–9 per `docs/PLAN.md`.
+8. **Phase 7 is now mostly done** (see the new "Phase 7: usage counters,
+   callback diagnostics, alerting, retention" section above): usage
+   counters (admin-wide and per-project), callback delivery diagnostics
+   (visibility only), alerting (queue backlog / high failure rate / stale
+   node, emailed to `ADMIN_EMAIL`), and an 18-month Mongo TTL retention
+   policy are all implemented. Deliberately not built yet, per the user's
+   own explicit framing: archiving to cold storage (Wasabi, not
+   DigitalOcean Spaces) before the 18-month TTL deletes anything — revisit
+   once real data actually approaches that age (the user's own words:
+   "we'll deal with 6-month archiving at 6 months time"), not
+   speculatively. Also not built: a manual "retry this callback" admin
+   action (visibility only was the explicit scope this session).
+9. Everything else in Phases 8–9 per `docs/PLAN.md` (integration surface,
+   production hardening) — neither started at all.
 
 ### Incident: `npm ci` OOM-killed on the droplet during the Phase 5 redeploy (fixed with a permanent swap file)
 
