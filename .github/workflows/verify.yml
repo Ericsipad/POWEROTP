@@ -32,3 +32,54 @@ jobs:
 
       - name: Audit production dependencies
         run: npm audit --omit=dev --audit-level=high
+
+  # Redeploys apps/telephony-agent on the Asterisk droplet after every push
+  # to main, only once `verify` has passed — the droplet has no App
+  # Platform-style webhook of its own, so this replicates that same
+  # "push to main -> live" behavior for it via SSH. See
+  # infrastructure/asterisk/README.md for the equivalent manual steps this
+  # mirrors, and docs/AS_BUILT.md's "Telephony droplet" section for why a
+  # droplet is never individually configured beyond CONTROL_PLANE_URL/
+  # NODE_SECRET — this job only ever pushes code, never any secret.
+  deploy-droplet:
+    needs: verify
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Build deployment archive
+        run: git archive --format=tar.gz -o /tmp/powerotp-deploy.tar.gz HEAD
+
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.DROPLET_SSH_KEY }}" > ~/.ssh/droplet_key
+          chmod 600 ~/.ssh/droplet_key
+          ssh-keyscan -H "${{ secrets.DROPLET_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Copy archive to droplet
+        run: |
+          scp -i ~/.ssh/droplet_key -o StrictHostKeyChecking=yes \
+            /tmp/powerotp-deploy.tar.gz \
+            "${{ secrets.DROPLET_SSH_USER }}@${{ secrets.DROPLET_HOST }}:/tmp/powerotp-deploy.tar.gz"
+
+      - name: Extract, build, and restart the agent on the droplet
+        run: |
+          ssh -i ~/.ssh/droplet_key -o StrictHostKeyChecking=yes \
+            "${{ secrets.DROPLET_SSH_USER }}@${{ secrets.DROPLET_HOST }}" '
+              set -euo pipefail
+              mkdir -p /opt/powerotp
+              tar -xzf /tmp/powerotp-deploy.tar.gz -C /opt/powerotp
+              rm -f /tmp/powerotp-deploy.tar.gz
+              cd /opt/powerotp
+              npm ci
+              npm run build -w @powerotp/contracts -w @powerotp/telephony-agent
+              chown -R potp-agent:asterisk /opt/powerotp
+              systemctl restart powerotp-agent
+              sleep 2
+              systemctl is-active powerotp-agent
+            '

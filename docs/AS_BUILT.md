@@ -92,6 +92,19 @@ server at all. This is the one to keep building on.
   ran (`"e.activatedAt.toISOString is not a function"` in App Platform runtime logs).
   Fixed by having `ensureDemoProject` always `$set` (not `$setOnInsert`) `activatedAt`,
   so re-running the endpoint self-heals any legacy bad value.
+- **Droplet auto-deploy**: as of this session, `powerotpvoip1` redeploys itself
+  automatically on every push to `main` (once `verify` passes), the same as
+  `apps/web` already does on App Platform — see `.github/workflows/verify.yml`'s
+  `deploy-droplet` job and `infrastructure/asterisk/README.md`. It uses three
+  GitHub Actions secrets (`DROPLET_HOST`/`DROPLET_SSH_USER`/`DROPLET_SSH_KEY`,
+  the same key as the local `ssh powerotp` alias) to run the identical
+  archive/`scp`/`npm ci`/build/restart sequence the manual runbook always
+  used. **A future schema/contract change that the old agent can't parse
+  (like the trunk-pool redesign two sessions ago) is no longer a "redeploy in
+  the same sitting" manual reminder — it just happens automatically the
+  moment the commit reaches `main`.** First-time node provisioning
+  (hardening, Asterisk install, the systemd unit, `/etc/powerotp/*.env`) is
+  still a one-time manual process; only routine code updates are automated.
 - **Telephony droplet**: `powerotpvoip1`, Ubuntu 24.04.4 LTS, IP `178.128.235.192`, DNS
   `na1.powerotp.com` (already pointed at it). SSH access from this machine is via the
   alias `ssh powerotp` — defined in a **local-only, gitignored** Cursor rule
@@ -979,11 +992,10 @@ the existing document, never a new collection).
 7. Provider cost/duration reconciliation (see "Provider cost reconciliation" above) is
    code-complete and unit-tested against VoIP.ms's own confirmed, real `getCDR`/`getSMS`
    response schema (sourced from VoIP.ms's official API docs, not guessed — see that
-   section), but **not yet live-tested against the real API** — it needs the telephony
-   droplet redeployed (the trunk-reporting change to `apps/telephony-agent` requires it,
-   per the standing "redeploy in the same sitting" lesson) and a real completed call/SMS
-   to confirm live end-to-end, the same as every other provider integration in this
-   project. Customer-facing
+   section), and the droplet has already auto-deployed the trunk-reporting change (see
+   "Droplet auto-deploy" above) — but it's **not yet live-tested against the real API**;
+   that needs a real completed call/SMS to confirm end-to-end, the same as every other
+   provider integration in this project. Customer-facing
    cost calculation and the balance-tiered pricing rule (≥$100/$50–99.99/&lt;$50 tiers,
    plus a daily charge — exact rates not yet given) and the customer-balance database
    itself are **not started at all** — don't build either speculatively; see that

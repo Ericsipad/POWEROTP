@@ -33,7 +33,21 @@ droplet" sections) for the ground truth of what is actually installed on
 
 ## Deploying/updating the agent on a droplet
 
-There is no CI/CD pipeline for the droplet yet; a session deploys it manually:
+**As of this session, this is automated.** `.github/workflows/verify.yml`'s
+`deploy-droplet` job runs after every push to `main` that passes `verify`
+(mirroring how DigitalOcean App Platform auto-deploys `apps/web` on every
+push) — it builds the same `git archive` tarball, `scp`s it to the droplet,
+and runs the same `npm ci` / build / restart sequence described below over
+SSH, using three GitHub Actions repository secrets (`DROPLET_HOST`,
+`DROPLET_SSH_USER`, `DROPLET_SSH_KEY` — the same key/IP as the local-only
+`ssh powerotp` alias, never committed to the repo). **A manual redeploy
+(steps 0–8 below) is still the way to add a brand-new node from scratch**
+(installing Asterisk, hardening, the systemd unit, `/etc/powerotp/*.env`,
+etc. — none of that is automated) or to recover an already-provisioned
+droplet if the automated job ever fails; it's just no longer required for
+routine "the agent's code changed" updates on `powerotpvoip1`.
+
+Manual steps (still needed for first-time setup, or as a fallback):
 
 0. **Confirm swap is present before running `npm ci`**: `swapon --show` on the droplet
    should report a 2GB `/swapfile`. The droplet has only ~961Mi of RAM, and installing
