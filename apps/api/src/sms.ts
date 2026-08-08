@@ -95,21 +95,45 @@ async function sendOnce(
       }),
       signal: AbortSignal.timeout(10_000),
     });
-  } catch {
+  } catch (error) {
+    logSmsFailure("fetch threw before a response was received", {
+      error: error instanceof Error ? error.message : String(error),
+    });
     throw new SmsProviderError("provider_unavailable");
   }
 
-  if (!response.ok) throw new SmsProviderError("provider_unavailable");
+  if (!response.ok) {
+    // Never contains credentials — VoIP.ms's own response body, at most.
+    // Logged (truncated, no headers) so a network-level block (e.g. a
+    // WAF/CDN in front of VoIP.ms serving an HTML challenge page instead
+    // of JSON) is diagnosable from App Platform's own log viewer without
+    // needing to reproduce it from another network.
+    const bodyPreview = await response.text().then(
+      (text) => text.slice(0, 300),
+      () => "<unreadable>",
+    );
+    logSmsFailure("VoIP.ms returned a non-2xx response", { status: response.status, bodyPreview });
+    throw new SmsProviderError("provider_unavailable");
+  }
 
   let result: unknown;
   try {
     result = await response.json();
   } catch {
+    logSmsFailure("VoIP.ms's response body was not valid JSON (possible WAF/challenge page)", {
+      status: response.status,
+      contentType: response.headers.get("content-type"),
+    });
     throw new SmsProviderError("provider_unavailable");
   }
   if (!isSuccessfulResponse(result)) {
+    logSmsFailure("VoIP.ms rejected the request", { result });
     throw new SmsProviderError("provider_rejected");
   }
+}
+
+function logSmsFailure(msg: string, extra: Record<string, unknown>) {
+  console.error(JSON.stringify({ service: "powerotp-api", component: "sms", msg, ...extra }));
 }
 
 function isSuccessfulResponse(value: unknown): value is { status: "success"; sms: string | number } {
