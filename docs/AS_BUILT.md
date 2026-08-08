@@ -103,19 +103,23 @@ server at all. This is the one to keep building on.
   deployed and running there as the hardened systemd service `powerotp-agent` — see
   "Phase 4 node identity" and "Telephony droplet" below for full detail. **Confirmed
   live**: it authenticates to the control plane with the shared `NODE_SECRET`, pulls its
-  outbound trunk config, and the `call_reachability` trunk is `Registered` against
-  VoIP.ms.
-- **VoIP.ms**: account exists, three SIP subaccounts (`334140_power1/power2/power3`).
-  As of the trunk-pool redesign (see "Outbound trunk pool: rotation and failover"
-  below), trunk credentials are a flat pool (`TRUNK1_URL/USER/PASS` ..
-  `TRUNK6_URL/USER/PASS`), not tied to a verification type — `TRUNK1` (`power1`'s
-  credentials, renamed from `OUTBOUND1`) is set in App Platform and confirmed
-  `Registered`; `TRUNK2`/`TRUNK3` (renamed from `OUTBOUND2`/`OUTBOUND3`) register but
-  currently get `403 Forbidden` on every call attempt — see the "known-gap" incident
-  below, this needs VoIP.ms support, not further local debugging. SMS does not use a
-  trunk: its dedicated `VOIPMS_SMS_API_USERNAME/PASSWORD/DID` variables are a separate,
-  unrelated HTTPS credential set — check current status in App Platform before
-  assuming they're still unset.
+  flat trunk pool, and rotates/fails over across whichever trunks are currently
+  `Registered` — see "Outbound trunk pool: rotation and failover" below for the live
+  multi-trunk failover confirmation.
+- **VoIP.ms**: account exists, four SIP subaccounts as of this session
+  (`334140_power1/power2/power3` plus a 4th added mid-session). Trunk credentials are a
+  flat pool (`TRUNK1_URL/USER/PASS` .. `TRUNK6_URL/USER/PASS`, see "Outbound trunk pool:
+  rotation and failover" below), not tied to a verification type. **Confirmed live**:
+  `TRUNK1` and `TRUNK4` register and place calls successfully; `TRUNK2`/`TRUNK3`
+  (`334140_power2/power3`) still register but get `403 Forbidden` on every call
+  attempt (unchanged from the prior session's finding — see the "known-gap" incident
+  below, this needs VoIP.ms support, not further local debugging) — the trunk pool's
+  live failover was confirmed skipping both of them automatically. SMS uses a separate
+  credential pair: `VOIPMS_SMS_API_USERNAME`/`VOIPMS_SMS_API_PASSWORD` (VoIP.ms's
+  REST/JSON API account email + API key, not a SIP username/password) plus whichever
+  `TRUNKn_DID` values are set — **confirmed live and working end-to-end** this session
+  after fixing a real bug (see "Phase 6 SMS provider adapter" below for the
+  multipart/form-data incident).
 - **DigitalOcean Spaces**: not provisioned yet. `SPACES_ENDPOINT/BUCKET/ACCESS_KEY/
   SECRET_KEY` and the independent `MEDIA_MANIFEST_SECRET` are unset placeholders — see
   "Phase 5" below. The admin recording/challenge APIs and `voice_challenge` are
@@ -323,12 +327,26 @@ a full minute:
   second method needed them, rather than duplicating: `voice_code`
   (`apps/telephony-agent/src/voice-code-call.ts`) reuses the exact same
   originate/wait-for-answer flow, then — once answered — plays the five-digit code as
-  ARI digit playback (`media=digits:12345,digits:12345`, repeated per
-  `CODE_REPEAT_COUNT`, currently 2) and hangs up once `PlaybackFinished` fires,
-  resolving at `awaiting_response` (not a terminal state — the code is graded later by
-  the existing, unchanged `submitCode` flow from Phase 3, not by anything the node
-  does). `apps/telephony-agent/src/job-poller.ts` now tries each type this node has a
-  trunk for in turn (currently `call_reachability` then `voice_code`) each poll cycle.
+  ARI digit playback, repeated per `CODE_REPEAT_COUNT` (currently 2), and hangs up once
+  the final `PlaybackFinished` fires, resolving at `awaiting_response` (not a terminal
+  state — the code is graded later by the existing, unchanged `submitCode` flow from
+  Phase 3, not by anything the node does). `apps/telephony-agent/src/job-poller.ts` now
+  tries each type this node has a trunk for in turn (currently `call_reachability` then
+  `voice_code`) each poll cycle. **Confirmed working end-to-end live** (see "Outbound
+  trunk pool" below for the exact trunk-failover log excerpt from that test).
+  **Live-reported UX issue, fixed**: each repetition was originally sent as one ARI
+  playback with both repeats joined by a comma (`media=digits:12345,digits:12345`),
+  which plays back with zero gap between them — indistinguishable from ten digits in a
+  row, with no way to tell where the first repetition ends and the second begins. Fixed
+  by issuing each repetition as its own ARI playback with a real 2-second silent pause
+  (`PAUSE_BETWEEN_REPEATS_MS`) in between (the call stays connected, just silent) —
+  confirmed audibly correct on a live re-test. A spoken word (e.g. "again") between
+  repetitions was considered but not implemented: Asterisk's stock sound library has no
+  isolated "again"/"repeat" word (only full voicemail-menu phrases like `vm-repeat.wav`,
+  "Press 5 to repeat the current message", which would be actively confusing spliced
+  into a code readout), and there is no TTS engine installed on the droplet. Revisit
+  only if the user wants to install a TTS engine (e.g. `espeak-ng`, robotic-sounding) or
+  supplies a real recorded "again" clip — not done speculatively.
 - **Security fix made alongside this**: a `voice_code` interaction's expected code was
   stored in plaintext (`VerificationRequestDocument#expectedCode`) since Phase 3, never
   actually exercised until now — direct violation of `docs/MVP_ACCEPTANCE.md` Type 2
@@ -483,6 +501,52 @@ then poll `GET https://powerotp.com/v1/demo/verifications/{interactionId}` until
 terminal-ish state. Check agent logs (`sudo journalctl -u powerotp-agent`) for which
 trunk id actually got used and whether a failover retry happened.
 
+### Live confirmation: rotation and mid-attempt failover, real broken trunks
+
+Confirmed end to end in the same session the pool was built, against the exact
+real-world scenario it was designed for. The droplet was redeployed with the new
+`apps/telephony-agent` code (`git archive` → `scp` → `npm ci` → `npm run build` →
+`chown` → `systemctl restart powerotp-agent`, per `infrastructure/asterisk/README.md`;
+swap confirmed present first) and the user added a 4th VoIP.ms subaccount/trunk
+(`TRUNK4`) mid-session. Post-redeploy, `pjsip show registrations` showed:
+
+```
+trunk-1/sip:sanjose2.voip.ms   Registered
+trunk-2/sip:sanjose2.voip.ms   Rejected
+trunk-3/sip:sanjose2.voip.ms   Rejected
+trunk-4/sip:sanjose2.voip.ms   Registered
+```
+
+A live `voice_code` demo request then produced this agent log sequence:
+
+```
+claimed call job ... type: voice_code
+provider-level failure on trunk; retrying on the next healthy trunk, trunkId: trunk-2, reasonCode: call_rejected
+provider-level failure on trunk; retrying on the next healthy trunk, trunkId: trunk-3, reasonCode: call_rejected
+call job finished ... state: awaiting_response, reasonCode: code_played
+```
+
+— i.e. `runJobWithFailover` tried `trunk-2` first (rotation order), got `call_rejected`
+(a provider-level failure per `isProviderLevelFailure`), immediately retried `trunk-3`
+(also `call_rejected`), then succeeded on the next healthy trunk in rotation order —
+all within one call attempt, zero manual intervention, and the interaction still
+resolved correctly (`awaiting_response`/`code_played`) from the customer's perspective.
+This is the literal live-world version of the design goal: two known-broken VoIP.ms
+subaccounts (`trunk-2`/`trunk-3`) were automatically skipped every time, with capacity
+spread across the two healthy ones (`trunk-1`/`trunk-4`).
+
+One operational note for a future redeploy: since `NodeConfigSchema.trunks` changed
+shape (type-keyed object → flat array) in this same session, a droplet running the
+*old* agent against the *new* control-plane response fails closed on **every** config
+poll (`"config sync failed","error":"... expected object, received array"`), which
+also means it can't resolve `configuredTypes` for **any** voice type, not just the
+newly-added ones — a full trunk-pool schema change like this always needs the droplet
+redeployed in the same sitting as the control-plane deploy, not "whenever's
+convenient". A job claimed before the redeploy is not lost, though — it just sits at
+`dispatching` until the redeployed agent's next poll cycle claims it (confirmed: the
+very first live test in this session appeared "stuck" at `dispatching` for a few
+minutes, then completed successfully the moment the redeployed agent came up).
+
 ## Phase 5 recording/challenge pipeline (`voice_challenge`, implemented)
 
 `voice_challenge` (Type 3) is code-complete and unit-tested end to end: admin-authored
@@ -632,10 +696,47 @@ the telephony-agent, a SIP trunk, or the node-facing job queue:
 - The existing `POST /v1/verifications/{interactionId}/response` endpoint now grades
   both `voice_code` and `sms_code`; browser-response interaction tokens use the same
   existing `submit_code` action.
-- Adapter and lifecycle behavior are unit-tested without live credentials. Live
-  provider validation remains deliberately deferred until all planned methods are
-  code-complete, when credentials will be supplied once for the combined end-to-end
-  validation pass.
+- **Confirmed working end-to-end live**: a demo-widget `sms_code` request against a
+  real destination number resolved `queued -> dispatching -> awaiting_response`
+  (`reasonCode: "code_sent"`) after VoIP.ms actually accepted the send.
+
+### Incident: SMS sends failed with a misleading `provider_unavailable` (wrong POST content-type)
+
+Live-testing `sms_code` for the first time (after `VOIPMS_SMS_API_USERNAME/PASSWORD`
+and at least one `TRUNKn_DID` were finally set in App Platform) consistently failed
+with `provider_unavailable` — which, per `sms.ts`'s error handling, only happens on a
+network-level failure (not a credential rejection, which would be the more specific
+`provider_rejected`). Two false leads were investigated and ruled out live before
+finding the real cause, recorded here so they aren't re-investigated from scratch:
+
+1. **VoIP.ms IP allowlist** ("SOAP and REST/JSON API" page in the portal): checked via
+   a user-provided screenshot — the `Enable IP Addresses` field already contained
+   VoIP.ms's own "allow all" wildcard notation, so the account wasn't restricting by
+   source IP. Not the cause.
+2. **Cloudflare blocking DigitalOcean's IP range**: `voip.ms` does sit behind
+   Cloudflare (confirmed via `Server: cloudflare` in response headers), and
+   datacenter-IP-blocking WAF rules are a real, common pattern — a plausible-sounding
+   theory that turned out to be wrong. Ruled out once the actual response was captured
+   (see below) instead of only theorizing.
+
+**Root cause, found by adding diagnostic logging** (`sms.ts#logSmsFailure`, logs HTTP
+status + a truncated response-body preview on every failure path, never credentials —
+this logging is a permanent, useful addition, not a one-off debug hack) **and then
+reading real App Platform runtime logs**: VoIP.ms returned a **`500` SOAP fault**
+(`env:Envelope`/`env:Fault`/`env:Sender`, reason "Bad Request") for a POST with an
+`application/x-www-form-urlencoded` body — even with otherwise-correct parameters and
+credentials. Reproduced independently (unrelated network, dummy credentials): the exact
+same URL-encoded POST got the same `500` SOAP fault, while switching only the body
+encoding to `multipart/form-data` got a clean `200` JSON response
+(`{"status":"invalid_credentials",...}` for the dummy creds — the *right* kind of
+rejection). **Conclusion**: VoIP.ms's REST endpoint only actually accepts
+`multipart/form-data` for POST (a GET with query params also works, but would put the
+API password in the URL/access logs, exactly what POST is meant to avoid). **Fixed**:
+`sms.ts` now builds the request body with `FormData` instead of `URLSearchParams`, and
+lets `fetch` set the `multipart/form-data; boundary=` header itself rather than setting
+`content-type` manually. If a future non-2xx VoIP.ms error appears again, check the new
+diagnostic log line first — it will show the actual status/body preview rather than
+requiring re-discovery of this same investigation.
 
 ## Telephony droplet (`powerotpvoip1`) — hardening and base install done
 
@@ -671,9 +772,12 @@ Real changes made directly on the droplet via `ssh powerotp` (see
   confusing). This is droplet-level infrastructure, not something the agent renders,
   because it doesn't vary per trunk.
 - **Confirmed live**: with real `TRUNK1_URL/USER/PASS` (San Jose VoIP.ms server, renamed
-  from `OUTBOUND1_*` in the trunk-pool redesign) set in App Platform, the agent rendered
-  the trunk and `pjsip show registrations` shows `trunk-1` as `Registered` against
-  VoIP.ms — outbound SIP registration works end-to-end.
+  from `OUTBOUND1_*` in the trunk-pool redesign) and, as of this session, `TRUNK4_*`
+  (a 4th subaccount) set in App Platform, the agent rendered all four trunks and
+  `pjsip show registrations` shows `trunk-1` and `trunk-4` as `Registered` against
+  VoIP.ms (`trunk-2`/`trunk-3` register too but get rejected on calls — see "Outbound
+  trunk pool" above) — outbound SIP registration and rotation/failover both work
+  end-to-end.
 - **Node.js 22** installed from NodeSource for running the agent.
 - **`apps/telephony-agent` is deployed and running.** Transfer mechanism: `git archive`
   at a committed `main` commit → `scp` → extract to `/opt/powerotp` → `npm ci` → `npm run
@@ -693,13 +797,16 @@ Real changes made directly on the droplet via `ssh powerotp` (see
   fetches config, and reloads Asterisk on every change (see the "Incident" notes below
   for two issues hit and fixed along the way).
 
-**Status as of the last session: fully working end-to-end.** `NODE_SECRET` and the
-`TRUNK1..3_*` voice-trunk pool variables (renamed from `OUTBOUND1..3_*`) are set in App
-Platform and deployed; `powerotp-agent` on
-`powerotpvoip1` authenticates, fetches config, renders `pjsip_trunks.conf`, and
-successfully reloads Asterisk (`"trunk configuration changed; reloaded pjsip"` in its
-logs). One deploy-time incident and its fix are recorded below so they aren't
-re-discovered the hard way.
+**Status as of this session: fully working end-to-end, including live multi-trunk
+failover.** `NODE_SECRET` and `TRUNK1..4_*` (a 4th subaccount was added mid-session) are
+set in App Platform and deployed; `powerotp-agent` on `powerotpvoip1` was redeployed
+twice this session (once for the trunk-pool/SMS-DID-pool refactor, once for the
+voice_code pause fix), authenticates, fetches its flat trunk-pool config, renders
+`pjsip_trunks.conf`, and successfully reloads Asterisk
+(`"trunk configuration changed; reloaded pjsip"` in its logs). Deploy-time incidents and
+their fixes (including one from this session — see "Live confirmation" under "Outbound
+trunk pool" above for the schema-change/old-agent incompatibility) are recorded below so
+they aren't re-discovered the hard way.
 
 ### Incident: empty-string optional env vars crashed the whole app
 
@@ -733,30 +840,33 @@ comes after the socket is created.
 
 ## Known gaps / next steps
 
-1. `TRUNK1` (`334140_power1`, renamed from `OUTBOUND1`) has real VoIP.ms credentials, is
-   confirmed `Registered`, and its ARI call-control logic is **confirmed working
-   end-to-end** against one real live answered call (see "Phase 4 (voice types 1 and 2 /
-   telephony)" above). Not yet observed live: a busy/no-answer/rejected/invalid
-   outcome (the Q.850 cause-code mapping is only unit-tested so far), and there is no
-   automated canary/synthetic-check running this periodically — a regression would
-   currently only be caught manually or by real customer traffic.
-2. `voice_code`'s and `voice_challenge`'s call-control logic is built and unit-tested,
-   and — thanks to the trunk pool — both can now use `TRUNK1` the same way
-   `call_reachability` does; the two dedicated subaccounts originally intended for them
-   (`TRUNK2`/`TRUNK3`, `334140_power2`/`334140_power3`) register but get `403 Forbidden`
-   on every call — a VoIP.ms account-side issue pending their support, see the
+1. `call_reachability` and `voice_code` are both **confirmed working end-to-end live**,
+   including the trunk pool's rotation and mid-attempt failover against two real broken
+   VoIP.ms subaccounts (see "Outbound trunk pool" above's "Live confirmation"
+   subsection). Not yet observed live: a busy/no-answer/rejected/invalid outcome (the
+   Q.850 cause-code mapping is only unit-tested so far), and there is no automated
+   canary/synthetic-check running this periodically — a regression would currently only
+   be caught manually or by real customer traffic.
+2. `TRUNK2`/`TRUNK3` (`334140_power2/power3`) still register but get `403 Forbidden` on
+   every call — a VoIP.ms account-side issue pending their support (unchanged finding
+   from the prior session, still true as of this session's live retest), see the
    "Outbound trunk pool" section's incident note above; not blocking, since the pool
-   just rotates onto `TRUNK1` while waiting.
-3. `sms_code` (Type 4) is built and unit-tested but its dedicated
-   `VOIPMS_SMS_API_USERNAME/PASSWORD/DID` variables' status should be reconfirmed each
-   session — check via the demo endpoint before assuming either way. Country/prefix
+   rotates onto `TRUNK1`/`TRUNK4` while waiting.
+3. `sms_code` (Type 4) is **confirmed working end-to-end live** as of this session, after
+   fixing a real `multipart/form-data` POST-encoding bug (see "Phase 6 SMS provider
+   adapter" above's incident note) — do not assume that bug is still present if
+   `sms_code` fails again; check the new diagnostic log line first. Country/prefix
    limits, opt-out suppression, and provider delivery callbacks remain pre-public-launch
    policy/hardening work; the current adapter normalizes synchronous `sendSMS`
    acceptance or rejection only.
 4. `voice_challenge` (Type 3) is code-complete and unit-tested (see "Phase 5
-   recording/challenge pipeline" above) but not yet validated against a real droplet:
-   DigitalOcean Spaces is not provisioned, and `powerotpvoip1` has not yet been
-   redeployed with the media-sync/challenge-call code.
+   recording/challenge pipeline" above) but still not validated against a real droplet:
+   DigitalOcean Spaces is still not provisioned, so there is no published recording/
+   challenge to select — it still fails closed correctly with `no_published_challenges`.
+   The droplet *has* been redeployed with the media-sync/challenge-call code this
+   session (same redeploy that shipped the trunk pool), so once Spaces is provisioned
+   and a challenge is published, no further droplet redeploy should be needed just for
+   this.
 5. The agent currently places one call at a time, serially (across every type it
    handles), whichever type it tries first each poll cycle — there is no concurrency
    limit to configure yet because there is no concurrency. Revisit once real traffic
