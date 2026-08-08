@@ -10,7 +10,7 @@ const config = {
 };
 
 describe("VoIP.ms SMS service", () => {
-  it("sends the code as POST form data without credentials in the URL", async () => {
+  it("sends the code as multipart/form-data POST without credentials in the URL", async () => {
     let request: { url: string; init?: RequestInit } | undefined;
     const service = createVoipMsSmsService(config, async (input, init) => {
       request = { url: String(input), init };
@@ -21,12 +21,20 @@ describe("VoIP.ms SMS service", () => {
 
     assert.equal(request!.url, "https://voip.ms/api/v1/rest.php");
     assert.equal(request!.init?.method, "POST");
-    const body = new URLSearchParams(String(request!.init?.body));
+    // Deliberately FormData (multipart/form-data), not URLSearchParams —
+    // VoIP.ms's REST endpoint returns a 500 SOAP fault for a
+    // application/x-www-form-urlencoded POST body (live-confirmed).
+    const body = request!.init?.body as FormData;
+    assert.ok(body instanceof FormData);
     assert.equal(body.get("api_username"), config.VOIPMS_SMS_API_USERNAME);
     assert.equal(body.get("api_password"), config.VOIPMS_SMS_API_PASSWORD);
     assert.equal(body.get("did"), config.TRUNK1_DID);
     assert.equal(body.get("dst"), "+15551234567");
-    assert.match(body.get("message")!, /04219/);
+    assert.match(String(body.get("message")), /04219/);
+    assert.equal(
+      request!.init && "content-type" in (request!.init.headers as Record<string, string>),
+      false,
+    );
   });
 
   it("returns no service until all dedicated credentials and at least one DID are configured", () => {
@@ -79,7 +87,7 @@ describe("VoIP.ms SMS service", () => {
     };
     const usedDids: string[] = [];
     const service = createVoipMsSmsService(multiDidConfig, async (_input, init) => {
-      usedDids.push(new URLSearchParams(String(init?.body)).get("did")!);
+      usedDids.push(String((init?.body as FormData).get("did")));
       return Response.json({ status: "success", sms: "12345" });
     });
 
@@ -99,7 +107,7 @@ describe("VoIP.ms SMS service", () => {
     };
     const attempts: string[] = [];
     const service = createVoipMsSmsService(multiDidConfig, async (_input, init) => {
-      const did = new URLSearchParams(String(init?.body)).get("did")!;
+      const did = String((init?.body as FormData).get("did"));
       attempts.push(did);
       return did === "+15551230001"
         ? Response.json({ status: "invalid_did" })

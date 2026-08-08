@@ -20,9 +20,17 @@ export class SmsProviderError extends Error {
 }
 
 /**
- * VoIP.ms accepts REST parameters through POST form data. Keeping the API
- * password in the request body instead of the query string prevents it
- * from appearing in URLs, access logs, or thrown fetch errors.
+ * VoIP.ms accepts REST parameters through POST form data — specifically
+ * `multipart/form-data`, not `application/x-www-form-urlencoded`.
+ * Live-confirmed: sending the same parameters as a URL-encoded body gets
+ * misrouted into VoIP.ms's SOAP handler and returns a `500` SOAP fault
+ * (`env:Sender`/"Bad Request"), even though the parameters and
+ * credentials are otherwise fine — `multipart/form-data` is the only POST
+ * shape their REST endpoint actually accepts (a GET with query params
+ * also works, but would put the API password in the URL/access logs,
+ * which is exactly what POST is meant to avoid here). Using `FormData` as
+ * the body lets `fetch` set the correct `multipart/form-data; boundary=`
+ * header itself — do not set `content-type` manually here.
  *
  * The sending DID is not a single hardcoded number: `sendSMS` still
  * requires exactly one origin DID per call (every SMS needs a single
@@ -76,23 +84,21 @@ async function sendOnce(
   targetNumber: string,
   code: string,
 ): Promise<void> {
+  const form = new FormData();
+  form.set("api_username", username);
+  form.set("api_password", password);
+  form.set("method", "sendSMS");
+  form.set("did", did);
+  form.set("dst", targetNumber);
+  form.set("message", `Your POWEROTP verification code is ${code}.`);
+  form.set("format", "json");
+
   let response: Response;
   try {
     response = await fetchImpl(VOIPMS_API_URL, {
       method: "POST",
-      headers: {
-        accept: "application/json",
-        "content-type": "application/x-www-form-urlencoded",
-      },
-      body: new URLSearchParams({
-        api_username: username,
-        api_password: password,
-        method: "sendSMS",
-        did,
-        dst: targetNumber,
-        message: `Your POWEROTP verification code is ${code}.`,
-        format: "json",
-      }),
+      headers: { accept: "application/json" },
+      body: form,
       signal: AbortSignal.timeout(10_000),
     });
   } catch (error) {
@@ -104,10 +110,10 @@ async function sendOnce(
 
   if (!response.ok) {
     // Never contains credentials — VoIP.ms's own response body, at most.
-    // Logged (truncated, no headers) so a network-level block (e.g. a
-    // WAF/CDN in front of VoIP.ms serving an HTML challenge page instead
-    // of JSON) is diagnosable from App Platform's own log viewer without
-    // needing to reproduce it from another network.
+    // Logged (truncated, no headers) so any future non-2xx (a real outage,
+    // a request-shape regression, VoIP.ms API changes, etc.) is
+    // diagnosable from App Platform's own log viewer without needing to
+    // reproduce it from another network.
     const bodyPreview = await response.text().then(
       (text) => text.slice(0, 300),
       () => "<unreadable>",
