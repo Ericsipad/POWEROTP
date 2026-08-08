@@ -10,9 +10,22 @@ import { originateAndWaitForAnswer } from "./originate-call.js";
  */
 const CODE_REPEAT_COUNT = 2;
 
-/** Generous upper bound on how long a two-repetition five-digit playback can
- * take, so a lost `PlaybackFinished` event can't stall the job loop forever. */
-const PLAYBACK_SAFETY_TIMEOUT_MS = 20_000;
+/**
+ * Silent gap between repetitions. Without this, playing the five digits
+ * twice back-to-back in one ARI playback (`digits:12345,digits:12345`)
+ * sounds like ten digits in a row with no way to tell where the first
+ * repetition ends and the second begins — live-reported by the user.
+ * Fixed by issuing each repetition as its own ARI playback and waiting
+ * out this real silence between them (the call stays connected, just
+ * silent) instead of relying on any Asterisk-specific "silence" media
+ * type, which keeps this correct without depending on ARI/Asterisk
+ * version-specific media URI support.
+ */
+const PAUSE_BETWEEN_REPEATS_MS = 2_000;
+
+/** Generous upper bound on how long a single five-digit playback can take,
+ * so a lost `PlaybackFinished` event can't stall the job loop forever. */
+const SINGLE_PLAYBACK_SAFETY_TIMEOUT_MS = 10_000;
 
 export interface VoiceCodeResult {
   state: "awaiting_response" | "failed";
@@ -21,11 +34,11 @@ export interface VoiceCodeResult {
 
 /**
  * Places one outbound call for `voice_code`: once answered, it speaks the
- * five-digit code (as digits, repeated) and hangs up. It never collects a
- * response over the phone — the customer's own UI/server submits the code
- * separately through the existing `/v1/verifications/{id}/response`
- * endpoint, which is why this resolves at `awaiting_response`, not a
- * terminal state.
+ * five-digit code (as digits, repeated, with a pause between repetitions)
+ * and hangs up. It never collects a response over the phone — the
+ * customer's own UI/server submits the code separately through the
+ * existing `/v1/verifications/{id}/response` endpoint, which is why this
+ * resolves at `awaiting_response`, not a terminal state.
  */
 export async function placeVoiceCodeCall(
   ari: AriClient,
@@ -53,12 +66,21 @@ export async function placeVoiceCodeCall(
   return { state: "awaiting_response", reasonCode: "code_played" };
 }
 
-function playCodeAndWait(ari: AriClient, channelId: string, code: string): Promise<void> {
+async function playCodeAndWait(ari: AriClient, channelId: string, code: string): Promise<void> {
+  for (let repeat = 0; repeat < CODE_REPEAT_COUNT; repeat += 1) {
+    await playOnceAndWait(ari, channelId, `digits:${code}`);
+    if (repeat < CODE_REPEAT_COUNT - 1) {
+      await sleep(PAUSE_BETWEEN_REPEATS_MS);
+    }
+  }
+}
+
+function playOnceAndWait(ari: AriClient, channelId: string, media: string): Promise<void> {
   return new Promise((resolve) => {
     const playbackId = `potp-play-${randomUUID()}`;
     let settled = false;
 
-    const timeout = setTimeout(finish, PLAYBACK_SAFETY_TIMEOUT_MS);
+    const timeout = setTimeout(finish, SINGLE_PLAYBACK_SAFETY_TIMEOUT_MS);
 
     function finish() {
       if (settled) return;
@@ -73,8 +95,10 @@ function playCodeAndWait(ari: AriClient, channelId: string, code: string): Promi
     }
 
     ari.on("event", onEvent);
-
-    const media = Array.from({ length: CODE_REPEAT_COUNT }, () => `digits:${code}`).join(",");
     ari.play(channelId, media, playbackId).catch(finish);
   });
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
