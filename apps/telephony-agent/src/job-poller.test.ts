@@ -4,6 +4,7 @@ import { afterEach, describe, it } from "node:test";
 
 import type { AgentConfig } from "./config.js";
 import { pollAndRunOneJob } from "./job-poller.js";
+import { TrunkPool } from "./trunk-pool.js";
 
 /** Minimal fake standing in for AriClient's event/originate/hangup surface. */
 class FakeAriClient extends EventEmitter {
@@ -81,7 +82,14 @@ describe("pollAndRunOneJob", () => {
     }) as typeof fetch;
 
     const ari = new FakeAriClient();
-    const jobPromise = pollAndRunOneJob(config, ari as never, new Set(["call_reachability"]), () => undefined);
+    const trunkPool = new TrunkPool(["trunk-1"]);
+    const jobPromise = pollAndRunOneJob(
+      config,
+      ari as never,
+      new Set(["call_reachability"]),
+      () => undefined,
+      trunkPool,
+    );
 
     await new Promise((resolve) => setImmediate(resolve));
     const channelId = ari.originated?.channelId;
@@ -95,5 +103,121 @@ describe("pollAndRunOneJob", () => {
       eventBodies.map((body) => (body as { state: string }).state),
       ["ringing", "answered", "succeeded"],
     );
+  });
+});
+
+/**
+ * Fake ARI client whose `originate` resolves per-endpoint outcomes on the
+ * next tick, driven by a caller-supplied map, so tests can control what
+ * happens on each trunk attempt without a real Asterisk/ARI dependency.
+ */
+class ScriptedAriClient extends EventEmitter {
+  readonly attemptedEndpoints: string[] = [];
+
+  constructor(private readonly outcomeByEndpoint: Record<string, { cause?: number } | "answer">) {
+    super();
+  }
+
+  isOpen() {
+    return true;
+  }
+
+  async originate(endpoint: string, channelId: string) {
+    this.attemptedEndpoints.push(endpoint);
+    const trunkEndpoint = endpoint.split("@")[1];
+    const outcome = trunkEndpoint ? this.outcomeByEndpoint[trunkEndpoint] : undefined;
+    setImmediate(() => {
+      if (outcome === "answer") {
+        this.emit("event", { type: "StasisStart", channel: { id: channelId } });
+      } else {
+        this.emit("event", { type: "ChannelDestroyed", channel: { id: channelId }, cause: outcome?.cause });
+      }
+    });
+  }
+
+  async hangup(_channelId: string) {
+    // no-op
+  }
+}
+
+function fetchStubIgnoringEvents(job: { interactionId: string; type: string; targetNumber: string }) {
+  return (async (url: string | URL) => {
+    const href = url.toString();
+    if (href.includes("/jobs/next")) {
+      return new Response(JSON.stringify(job), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }
+    if (href.includes(`/jobs/${job.interactionId}/events`)) {
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }
+    throw new Error(`unexpected fetch to ${href}`);
+  }) as typeof fetch;
+}
+
+describe("pollAndRunOneJob multi-trunk failover", () => {
+  const job = {
+    interactionId: "int_0000000000000test",
+    type: "call_reachability",
+    targetNumber: "+15005550006",
+  };
+
+  it("retries the same job on the next healthy trunk when the first one fails with a provider-level reason", async () => {
+    globalThis.fetch = fetchStubIgnoringEvents(job);
+
+    // Cause 34 -> provider_unavailable (a provider-level failure).
+    const ari = new ScriptedAriClient({ "trunk-1": { cause: 34 }, "trunk-2": "answer" });
+    const trunkPool = new TrunkPool(["trunk-1", "trunk-2"]);
+
+    await pollAndRunOneJob(config, ari as never, new Set(["call_reachability"]), () => undefined, trunkPool);
+
+    assert.deepEqual(ari.attemptedEndpoints, [
+      "PJSIP/+15005550006@trunk-1",
+      "PJSIP/+15005550006@trunk-2",
+    ]);
+  });
+
+  it("does not retry when the first trunk fails with a legitimate outcome like busy", async () => {
+    globalThis.fetch = fetchStubIgnoringEvents(job);
+
+    // Cause 17 -> busy (proves the trunk reached the network fine).
+    const ari = new ScriptedAriClient({ "trunk-1": { cause: 17 }, "trunk-2": "answer" });
+    const trunkPool = new TrunkPool(["trunk-1", "trunk-2"]);
+
+    await pollAndRunOneJob(config, ari as never, new Set(["call_reachability"]), () => undefined, trunkPool);
+
+    assert.deepEqual(ari.attemptedEndpoints, ["PJSIP/+15005550006@trunk-1"]);
+  });
+
+  it("reports failed when every healthy trunk has been tried once and all failed with provider-level reasons", async () => {
+    globalThis.fetch = fetchStubIgnoringEvents(job);
+
+    const ari = new ScriptedAriClient({ "trunk-1": { cause: 34 }, "trunk-2": { cause: 38 } });
+    const trunkPool = new TrunkPool(["trunk-1", "trunk-2"]);
+
+    await pollAndRunOneJob(config, ari as never, new Set(["call_reachability"]), () => undefined, trunkPool);
+
+    assert.deepEqual(ari.attemptedEndpoints, [
+      "PJSIP/+15005550006@trunk-1",
+      "PJSIP/+15005550006@trunk-2",
+    ]);
+  });
+
+  it("reports method_not_available without dialing anything when there are zero healthy trunks", async () => {
+    let dialed = false;
+    globalThis.fetch = fetchStubIgnoringEvents(job);
+    const ari = new ScriptedAriClient({});
+    ari.originate = async () => {
+      dialed = true;
+    };
+    const trunkPool = new TrunkPool([]);
+
+    await pollAndRunOneJob(config, ari as never, new Set(["call_reachability"]), () => undefined, trunkPool);
+
+    assert.equal(dialed, false);
   });
 });

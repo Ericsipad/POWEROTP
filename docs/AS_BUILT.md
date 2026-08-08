@@ -105,12 +105,17 @@ server at all. This is the one to keep building on.
   live**: it authenticates to the control plane with the shared `NODE_SECRET`, pulls its
   outbound trunk config, and the `call_reachability` trunk is `Registered` against
   VoIP.ms.
-- **VoIP.ms**: account exists; `OUTBOUND1_URL/USER/PASS` (call_reachability) has real
-  credentials set in App Platform and is confirmed registering successfully.
-  `OUTBOUND2..3_*` (voice_code and voice_challenge) are still unset SIP placeholders —
-  see `apps/api/src/outbound-trunks.ts`. SMS does not use a trunk: its dedicated
-  `VOIPMS_SMS_API_USERNAME/PASSWORD/DID` variables are currently unset pending the
-  planned combined live-credential validation pass.
+- **VoIP.ms**: account exists, three SIP subaccounts (`334140_power1/power2/power3`).
+  As of the trunk-pool redesign (see "Outbound trunk pool: rotation and failover"
+  below), trunk credentials are a flat pool (`TRUNK1_URL/USER/PASS` ..
+  `TRUNK6_URL/USER/PASS`), not tied to a verification type — `TRUNK1` (`power1`'s
+  credentials, renamed from `OUTBOUND1`) is set in App Platform and confirmed
+  `Registered`; `TRUNK2`/`TRUNK3` (renamed from `OUTBOUND2`/`OUTBOUND3`) register but
+  currently get `403 Forbidden` on every call attempt — see the "known-gap" incident
+  below, this needs VoIP.ms support, not further local debugging. SMS does not use a
+  trunk: its dedicated `VOIPMS_SMS_API_USERNAME/PASSWORD/DID` variables are a separate,
+  unrelated HTTPS credential set — check current status in App Platform before
+  assuming they're still unset.
 - **DigitalOcean Spaces**: not provisioned yet. `SPACES_ENDPOINT/BUCKET/ACCESS_KEY/
   SECRET_KEY` and the independent `MEDIA_MANIFEST_SECRET` are unset placeholders — see
   "Phase 5" below. The admin recording/challenge APIs and `voice_challenge` are
@@ -166,7 +171,9 @@ server at all. This is the one to keep building on.
   end — admin recording upload/normalization, immutable challenge authoring, per-
   interaction opaque option materialization and grading, signed media manifest, node
   media sync, and ARI recording playback. See "Phase 5 recording/challenge pipeline"
-  below. Live Spaces/OUTBOUND3 credentials are deliberately deferred, same as Phase 4/6.
+  below. Live Spaces credentials are deliberately deferred, same as Phase 4/6 — trunk
+  credentials themselves are shared with the other voice methods via the pool (see
+  "Outbound trunk pool: rotation and failover").
 - **Phase 6 (SMS)**: provider adapter implemented and unit-tested; live VoIP.ms SMS API
   credentials are deliberately deferred until the combined validation pass.
 - **Phases 7–9**: not started.
@@ -228,8 +235,9 @@ Platform and redeploying every node with the new value — identical in spirit t
 - `apps/api/src/node-service.ts` (`NodeService`): `list` (admin visibility),
   `authenticate` (constant-time compare of the `Authorization: Bearer` header against
   `config.NODE_SECRET`; on success, upserts a connection-log row keyed by source IP as a
-  liveness heartbeat), `configFor` (returns whichever `OUTBOUND1..3_*` voice trunks are
-  currently configured — identical response for every node, never any other app secret).
+  liveness heartbeat), `configFor` (returns every fully-configured `TRUNK1..6_*` trunk in
+  the pool as a flat array — identical response for every node, never any other app
+  secret; see "Outbound trunk pool: rotation and failover" below for the full design).
 - Routes: `GET /v1/admin/nodes` (admin session, read-only — nothing to create or revoke),
   `GET /v1/nodes/config` (shared secret, no admin session — the droplet-facing endpoint).
 - `/admin`'s "Telephony nodes" panel is now read-only: it lists whichever source IPs have
@@ -287,7 +295,7 @@ a full minute:
   `apps/telephony-agent/src/reachability-call.ts`, using
   `apps/telephony-agent/src/ari-client.ts` (a small wrapper over ARI's REST + WebSocket
   using Node 22's built-in `fetch`/`WebSocket`, no new dependency):
-  - Originates `PJSIP/{targetNumber}@trunk-call-reachability` directly into a Stasis app
+  - Originates `PJSIP/{targetNumber}@{trunkId}` directly into a Stasis app
     (`app` param on `POST /channels`) with a self-generated `channelId` (so event
     filtering can start before the HTTP response returns, closing a race where a fast
     busy/reject could otherwise arrive over the WebSocket first) and ARI's own `timeout`
@@ -335,6 +343,145 @@ a full minute:
   omitted code could never actually succeed a submission; `VerificationService#create`
   now generates a cryptographically random five-digit code
   (`apps/api/src/security.ts#createFiveDigitCode`) when one isn't supplied.
+
+## Outbound trunk pool: rotation and failover (implemented)
+
+Originally each voice verification type dialed out on its own dedicated VoIP.ms trunk
+(`OUTBOUND1`=`call_reachability`, `OUTBOUND2`=`voice_code`, `OUTBOUND3`=`voice_challenge`).
+Live-tested against real VoIP.ms in a prior session: `OUTBOUND1` (subaccount
+`334140_power1`) worked end-to-end, but `OUTBOUND2`/`OUTBOUND3` (`334140_power2`/
+`334140_power3`) registered fine yet got `403 Forbidden` on every outbound call — a
+provider-side issue (see the incident note below), not a code bug, but it meant two of
+three voice methods were blocked in production while waiting on VoIP.ms support. The user
+explicitly asked for a redesign so numbers are pooled and rotated rather than pinned
+one-per-type: *"these numbers are better used as a rotation failover ... any number
+appears down it just uses the next number ... we can also keep working here while we
+only have the one number working."*
+
+**Design:**
+
+1. **Config shape**: `TRUNK1_URL/USER/PASS` through `TRUNK6_URL/USER/PASS` (App Platform
+   env vars, all optional, same empty-string-is-unset convention as every other optional
+   field) replace the old per-type `OUTBOUND1..3_*` vars. `apps/api/src/outbound-trunks.ts#allOutboundTrunks`
+   returns every fully-configured trunk (`TRUNKn` where url/user/pass are all present) as
+   a flat array tagged with a stable id (`trunk-1`, `trunk-2`, ...), in numeric order.
+   `hasAnyOutboundTrunk` gates voice-method dispatch in `apps/api/src/transport.ts` — any
+   trunk can serve any of the three voice types now, so dispatch only checks "does at
+   least one trunk exist at all", not a type-specific one. `libraries/contracts/src/nodes.ts#NodeConfigSchema.trunks`
+   is the same flat, id-tagged array shape on the wire. Each `TRUNKn` also has an
+   optional 4th field, `TRUNKn_DID` — that trunk's own phone number — which is *not*
+   part of `allOutboundTrunks`'/`NodeConfig`'s shape (a telephony node never needs a
+   DID, only SIP credentials) but is read independently by `apps/api/src/outbound-trunks.ts#allTrunkDids`
+   as the pool of sender numbers `sms_code` rotates across (see "Phase 6 SMS provider
+   adapter" below) — one flat `TRUNKn_*` env var group now covers both what a node
+   dials out with and what the control plane can text from, instead of a separate,
+   easy-to-forget `VOIPMS_SMS_DID`.
+2. **Selection happens on the telephony-agent (droplet) side**, not the control plane —
+   only the agent can see live call outcomes over each trunk's registration, and this
+   keeps the control plane's job unchanged ("please do a call_reachability call", never
+   "please use trunk N"). `apps/api/src/node-service.ts#configFor` just hands over the
+   full pool; `apps/telephony-agent/src/pjsip-config.ts#renderPjsipTrunks` renders one
+   PJSIP registration/auth/aor/endpoint/identify block per trunk id (`trunk-1`, `trunk-2`,
+   ...) — no longer named after a verification type at all.
+3. **`apps/telephony-agent/src/trunk-pool.ts`** (`TrunkPool`, new module) tracks health
+   and rotation in-process on the agent:
+   - `pickHealthyTrunks()` returns currently-healthy trunk ids in round-robin order,
+     starting from the least-recently-tried — with exactly one healthy trunk configured
+     (today's real-world state) it always wins, zero special-casing needed.
+   - `reportOutcome(trunkId, reasonCode)` updates a per-trunk consecutive-failure streak.
+     `isProviderLevelFailure(reasonCode)` names which reason codes count as a
+     circuit/account-level trunk problem (`provider_unavailable`, `call_rejected`) versus
+     which prove the call reached the network fine and must reset the streak to 0
+     (`busy`, `no_answer`, `invalid_number`, or a real success) — a destination declining
+     or not answering must never falsely blacklist a healthy trunk.
+   - After 3 consecutive provider-level failures a trunk is marked "down" for a cool-down
+     window (starts at 5 minutes, doubles on each further failure once retried, capped at
+     60 minutes, resets to 5 minutes after a success) — a half-open retry model, so a
+     trunk VoIP.ms fixes server-side becomes eligible again automatically, no redeploy.
+   - `updateTrunkIds(trunkIds)` is called every config poll so trunks added/removed in
+     App Platform take effect on the running agent within one poll cycle.
+4. **Within one call attempt**, `apps/telephony-agent/src/job-poller.ts#runJobWithFailover`
+   tries the job against every currently-healthy trunk in rotation order: a
+   provider-level failure immediately retries the *same* job on the next healthy trunk
+   (calling `reportOutcome` after every attempt, before deciding whether to retry) — the
+   literal "if any number appears down, it just uses the next number" behavior, applied
+   within one customer's verification attempt, not just across separate ones. A
+   legitimate destination-side outcome (busy/no_answer/invalid_number) is never retried
+   on another trunk — it's not the trunk's fault, and it would just re-ring the same
+   recipient. Retrying stops once an attempt succeeds/reaches `awaiting_response`, every
+   currently-healthy trunk has been tried once, or there are zero healthy trunks at all
+   (reports `method_not_available`, same as today's "no trunk configured" behavior). The
+   job-poller race fix from commit `20cc038` (chaining every progress/result report for
+   one job through a single promise, regardless of which trunk attempt it came from) is
+   unchanged by this refactor — still exactly one `/events` request in flight at a time.
+5. **Geo-diverse servers**: no special-casing needed — the design already treats trunks
+   generically regardless of which VoIP.ms server/region backs them. Adding a
+   geo-diverse number later is purely a `TRUNKn_*` env var addition, no code change. Not
+   built in this pass: multi-node routing across droplets (that's Phase 9, out of scope
+   here) — this is single-droplet, multi-trunk rotation.
+
+**Env var rename required in App Platform** (values unchanged, only the names — App
+Platform requires manually renaming a variable, not just editing a value):
+
+| Old name            | New name         |
+| -------------------- | ---------------- |
+| `OUTBOUND1_URL`      | `TRUNK1_URL`      |
+| `OUTBOUND1_USER`     | `TRUNK1_USER`     |
+| `OUTBOUND1_PASS`     | `TRUNK1_PASS`     |
+| `OUTBOUND2_URL`      | `TRUNK2_URL`      |
+| `OUTBOUND2_USER`     | `TRUNK2_USER`     |
+| `OUTBOUND2_PASS`     | `TRUNK2_PASS`     |
+| `OUTBOUND3_URL`      | `TRUNK3_URL`      |
+| `OUTBOUND3_USER`     | `TRUNK3_USER`     |
+| `OUTBOUND3_PASS`     | `TRUNK3_PASS`     |
+
+A redeploy (App Platform, for the control plane) and a droplet redeploy (see
+`infrastructure/asterisk/README.md`) are both required for this to take effect —
+`pjsip show registrations` on the droplet should then show `trunk-1`/`trunk-2`/`trunk-3`
+(or however many are configured) instead of the old `trunk-call-reachability`/
+`trunk-voice-code`/`trunk-voice-challenge` names.
+
+### Known gap / incident: VoIP.ms `403 Forbidden` on two of three subaccounts
+
+Live-tested against real VoIP.ms in a prior session. Canary destination:
+`+14034701805`. `OUTBOUND1`/`334140_power1` (now `TRUNK1`): confirmed working
+end-to-end, multiple times. `OUTBOUND2`/`334140_power2` and `OUTBOUND3`/`334140_power3`
+(now `TRUNK2`/`TRUNK3`): the trunk **registers fine**, but every outbound call attempt
+gets `403 Forbidden` from VoIP.ms — confirmed via a live SIP packet capture
+(`pjsip set logger on`) that this happens *after* successful digest authentication
+(VoIP.ms challenges with a 401, Asterisk retries with a valid digest, VoIP.ms responds
+403 directly on the authenticated `INVITE`) — this rules out a credentials problem.
+Already ruled out, in this order, so don't re-litigate without new evidence:
+
+1. CallerID Number setting on the affected subaccounts (changed to match the working
+   one — no effect).
+2. "Allow International Calls" toggle (turned off to match the working one — no effect).
+3. Full side-by-side comparison of both subaccounts' Edit Sub Account pages in the
+   VoIP.ms portal — visually identical to the working one, still 403.
+
+Also observed (from Asterisk's own historical logs, predating the session that found
+this): both affected subaccounts got an outright fatal 403 on **registration itself**
+one night, before self-resolving — a stronger signal than a settings mismatch, and
+consistent with a VoIP.ms account-side hold/flag on those two subaccounts specifically.
+Also: after an agent restart, the affected subaccounts get a much shorter registration
+expiry window (~7 min) than the working one (~54 min) — another server-side difference.
+**Conclusion**: this needs VoIP.ms support to resolve on their account backend; nothing
+in the subaccount settings UI explains it. If VoIP.ms fixes it, just retest via the demo
+endpoint below — no code change needed. This exact scenario (temporarily working with
+only one healthy trunk while others are blocked by the provider) is precisely why the
+trunk pool above was built — it makes the system resilient to it automatically.
+
+How to live-test any voice type via the public anonymous demo widget backing endpoint
+(gated by `DEMO_PROJECT_SLUG` being set):
+
+```
+POST https://powerotp.com/v1/demo/verifications
+Body: {"type":"call_reachability","targetNumber":"+14034701805"}
+```
+
+then poll `GET https://powerotp.com/v1/demo/verifications/{interactionId}` until a
+terminal-ish state. Check agent logs (`sudo journalctl -u powerotp-agent`) for which
+trunk id actually got used and whether a failover retry happened.
 
 ## Phase 5 recording/challenge pipeline (`voice_challenge`, implemented)
 
@@ -394,9 +541,9 @@ machinery already proven for `voice_code` rather than introducing anything new.
   mirrors `codeForDelivery()` for the claiming node.
 - **`apps/api/src/transport.ts`**: `voice_challenge` now uses
   `createNodeDispatchTransport`, identical in shape to `call_reachability`/`voice_code` —
-  it still fails immediately with `method_not_available` if `OUTBOUND3` isn't
-  configured; the challenge-content precondition above is checked earlier, at creation,
-  not here.
+  it still fails immediately with `method_not_available` if no trunk is configured in
+  the pool at all; the challenge-content precondition above is checked earlier, at
+  creation, not here.
 - **Admin routes** (`apps/web/app/v1/admin/recordings/route.ts` + `[id]/route.ts`,
   `apps/web/app/v1/admin/challenges/route.ts` + `[id]/route.ts`): session + CSRF gated
   exactly like `/v1/admin/demo-project` (`requireAdminSession` + `verifyCsrfHeader`; IP
@@ -421,8 +568,8 @@ machinery already proven for `voice_code` rather than introducing anything new.
   `sound: playback` (not digit playback) and resolves at `awaiting_response` once
   `PlaybackFinished` fires — grading happens later via the unchanged `submitChallenge`
   flow, not by anything the node does. `job-poller.ts` tries `voice_challenge` in the
-  same per-poll-cycle loop as the other two voice types, only when this node has an
-  `OUTBOUND3` trunk and its media-sync loop is enabled.
+  same per-poll-cycle loop as the other two voice types, only when this node has at
+  least one trunk in the pool and its media-sync loop is enabled.
 - **Response route**: `POST /v1/verifications/{interactionId}/response` now branches on
   verification type to accept `ChallengeSubmissionSchema` (opaque option IDs) alongside
   the existing code path; the browser-response interaction token reuses the existing
@@ -461,10 +608,21 @@ the telephony-agent, a SIP trunk, or the node-facing job queue:
   and stores only `expectedCodeEncrypted`, using the same authenticated encryption and
   response-grading path as `voice_code`. The customer cannot supply an SMS code.
 - `apps/api/src/sms.ts#createVoipMsSmsService` calls VoIP.ms's `sendSMS` REST method
-  over HTTPS. Credentials use dedicated `VOIPMS_SMS_API_USERNAME`,
-  `VOIPMS_SMS_API_PASSWORD`, and `VOIPMS_SMS_DID` App Platform variables rather than
-  the SIP-shaped `OUTBOUND4_*` variables. Parameters are sent as POST form data so the
-  API password never appears in a request URL.
+  over HTTPS. Credentials (`VOIPMS_SMS_API_USERNAME`/`VOIPMS_SMS_API_PASSWORD`) are
+  VoIP.ms's REST/JSON API account email + API key — a different credential pair from
+  the SIP trunk credentials, entered separately in App Platform. Parameters are sent
+  as POST form data so the API password never appears in a request URL. **The sending
+  DID is not a separate hardcoded variable** (there was originally a single
+  `VOIPMS_SMS_DID`, replaced during the trunk-pool session below): `sendSMS` still
+  requires exactly one origin DID per call — every SMS needs a single "from" number,
+  the same as everywhere else — but `apps/api/src/outbound-trunks.ts#allTrunkDids`
+  reuses whichever `TRUNKn_DID` values are configured (see "Outbound trunk pool"
+  below) as the pool of numbers `sms_code` can send from, and `sms.ts` rotates
+  round-robin across all of them, falling over to the next one if a send is rejected
+  for a provider-level reason — so every SMS-capable number is usable, not just one.
+  `TRUNKn_DID` is deliberately never sent to a telephony node (`allOutboundTrunks`,
+  used for node config, never includes it) — nodes only need SIP credentials to dial
+  out, never a DID.
 - `apps/api/src/transport.ts#createSmsCodeTransport` drives
   `queued -> dispatching -> awaiting_response` after provider acceptance and normalizes
   provider/API failures to stable `provider_rejected` or `provider_unavailable` reason
@@ -512,10 +670,10 @@ Real changes made directly on the droplet via `ssh powerotp` (see
   endpoint/aor/auth/identify objects from the same file load fine, which is what made this
   confusing). This is droplet-level infrastructure, not something the agent renders,
   because it doesn't vary per trunk.
-- **Confirmed live**: with real `OUTBOUND1_URL/USER/PASS` (San Jose VoIP.ms server) set in
-  App Platform, the agent rendered the trunk and `pjsip show registrations` shows
-  `trunk-call-reachability` as `Registered` against VoIP.ms — outbound SIP registration
-  works end-to-end. Actual call dialplan/ARI logic is still not built (next step).
+- **Confirmed live**: with real `TRUNK1_URL/USER/PASS` (San Jose VoIP.ms server, renamed
+  from `OUTBOUND1_*` in the trunk-pool redesign) set in App Platform, the agent rendered
+  the trunk and `pjsip show registrations` shows `trunk-1` as `Registered` against
+  VoIP.ms — outbound SIP registration works end-to-end.
 - **Node.js 22** installed from NodeSource for running the agent.
 - **`apps/telephony-agent` is deployed and running.** Transfer mechanism: `git archive`
   at a committed `main` commit → `scp` → extract to `/opt/powerotp` → `npm ci` → `npm run
@@ -536,7 +694,8 @@ Real changes made directly on the droplet via `ssh powerotp` (see
   for two issues hit and fixed along the way).
 
 **Status as of the last session: fully working end-to-end.** `NODE_SECRET` and the
-`OUTBOUND1..3_*` voice-trunk placeholders are set in App Platform and deployed; `powerotp-agent` on
+`TRUNK1..3_*` voice-trunk pool variables (renamed from `OUTBOUND1..3_*`) are set in App
+Platform and deployed; `powerotp-agent` on
 `powerotpvoip1` authenticates, fetches config, renders `pjsip_trunks.conf`, and
 successfully reloads Asterisk (`"trunk configuration changed; reloaded pjsip"` in its
 logs). One deploy-time incident and its fix are recorded below so they aren't
@@ -574,38 +733,39 @@ comes after the socket is created.
 
 ## Known gaps / next steps
 
-1. `OUTBOUND1` (call_reachability) has real VoIP.ms credentials, is confirmed
-   `Registered`, and its ARI call-control logic is **confirmed working end-to-end**
-   against one real live answered call (see "Phase 4 (voice types 1 and 2 /
+1. `TRUNK1` (`334140_power1`, renamed from `OUTBOUND1`) has real VoIP.ms credentials, is
+   confirmed `Registered`, and its ARI call-control logic is **confirmed working
+   end-to-end** against one real live answered call (see "Phase 4 (voice types 1 and 2 /
    telephony)" above). Not yet observed live: a busy/no-answer/rejected/invalid
    outcome (the Q.850 cause-code mapping is only unit-tested so far), and there is no
    automated canary/synthetic-check running this periodically — a regression would
    currently only be caught manually or by real customer traffic.
-2. `voice_code`'s call-control logic (speak the code, then defer to the existing
-   `submitCode` flow) is **built and unit-tested but not yet exercised against a real
-   live call** — `OUTBOUND2` has no real VoIP.ms credentials yet, so its transport
-   still fails immediately with `method_not_available` in production today, same as
-   before this session. **Deliberately deferred, per explicit instruction**: get
-   `OUTBOUND2`'s real VoIP.ms credentials from the user only once the rest of the
-   planned work is code-complete, then do one full pass validating every wired-up
-   method end-to-end together, rather than one live-credential round-trip per method.
+2. `voice_code`'s and `voice_challenge`'s call-control logic is built and unit-tested,
+   and — thanks to the trunk pool — both can now use `TRUNK1` the same way
+   `call_reachability` does; the two dedicated subaccounts originally intended for them
+   (`TRUNK2`/`TRUNK3`, `334140_power2`/`334140_power3`) register but get `403 Forbidden`
+   on every call — a VoIP.ms account-side issue pending their support, see the
+   "Outbound trunk pool" section's incident note above; not blocking, since the pool
+   just rotates onto `TRUNK1` while waiting.
 3. `sms_code` (Type 4) is built and unit-tested but its dedicated
-   `VOIPMS_SMS_API_USERNAME/PASSWORD/DID` variables are still unset, so production
-   correctly returns `method_not_available` today. Live sending and response grading
-   remain part of the deliberately deferred combined end-to-end validation pass.
-   Country/prefix limits, opt-out suppression, and provider delivery callbacks remain
-   pre-public-launch policy/hardening work; the current adapter normalizes synchronous
-   `sendSMS` acceptance or rejection only.
+   `VOIPMS_SMS_API_USERNAME/PASSWORD/DID` variables' status should be reconfirmed each
+   session — check via the demo endpoint before assuming either way. Country/prefix
+   limits, opt-out suppression, and provider delivery callbacks remain pre-public-launch
+   policy/hardening work; the current adapter normalizes synchronous `sendSMS`
+   acceptance or rejection only.
 4. `voice_challenge` (Type 3) is code-complete and unit-tested (see "Phase 5
    recording/challenge pipeline" above) but not yet validated against a real droplet:
-   DigitalOcean Spaces is not provisioned, `OUTBOUND3` has no real VoIP.ms credentials,
-   and `powerotpvoip1` has not yet been redeployed with the media-sync/challenge-call
-   code. Same deliberately-deferred pattern as `voice_code`/`sms_code` above.
+   DigitalOcean Spaces is not provisioned, and `powerotpvoip1` has not yet been
+   redeployed with the media-sync/challenge-call code.
 5. The agent currently places one call at a time, serially (across every type it
    handles), whichever type it tries first each poll cycle — there is no concurrency
    limit to configure yet because there is no concurrency. Revisit once real traffic
    needs more than one simultaneous call per node.
-6. Everything else in Phases 4–9 per `docs/PLAN.md`.
+6. The trunk pool (`TrunkPool`) currently lives entirely in one agent process's memory —
+   health/rotation state is not shared across nodes and resets on an agent restart. Not
+   a problem yet (one droplet, `powerotpvoip1`); would need externalizing (e.g. into
+   Valkey) if multi-node routing (Phase 9) is ever built.
+7. Everything else in Phases 4–9 per `docs/PLAN.md`.
 
 ### Incident: `npm ci` OOM-killed on the droplet during the Phase 5 redeploy (fixed with a permanent swap file)
 

@@ -60,16 +60,32 @@ and do not create a repository `.env` file.
   widget on the marketing site — use `demo`. After deploy, sign in at `/admin` and click
   "Provision demo project" once to create it at that exact slug. Leave the variable
   unset to keep the demo endpoints disabled.
-- `OUTBOUND1_URL` / `OUTBOUND1_USER` / `OUTBOUND1_PASS` through `OUTBOUND3_*`: optional
-  VoIP.ms trunk credentials, one dedicated outbound per voice verification method
-  (`OUTBOUND1`=`call_reachability`, `OUTBOUND2`=`voice_code`,
-  `OUTBOUND3`=`voice_challenge`) — see
-  `apps/api/src/outbound-trunks.ts`. Leave unset until Phase 4 telephony wiring.
-- `VOIPMS_SMS_API_USERNAME` / `VOIPMS_SMS_API_PASSWORD` / `VOIPMS_SMS_DID`: optional
-  VoIP.ms REST API credentials and SMS-enabled sender DID for `sms_code`. These are
-  deliberately separate from the SIP-shaped `OUTBOUND*` variables because the control
-  plane sends SMS directly over HTTPS; no Asterisk node receives them. The adapter uses
-  POST form data so the API password is never placed in a request URL. Leave all three
+- `TRUNK1_URL` / `TRUNK1_USER` / `TRUNK1_PASS` through `TRUNK6_*`: optional VoIP.ms trunk
+  credentials, a flat numbered pool — any configured trunk can serve any of the three
+  voice verification methods (`call_reachability`, `voice_code`, `voice_challenge`); the
+  telephony-agent rotates across whichever trunks are currently healthy and fails over to
+  the next one on a provider-level error. See `apps/api/src/outbound-trunks.ts` and the
+  "Outbound trunk pool" section of `docs/AS_BUILT.md` for the full design. `TRUNK1..6`
+  gives headroom beyond the 3 numbers in use today; raising the cap later (e.g.
+  `TRUNK7_*`) is a one-line change. Leave unset until telephony wiring, or add/remove
+  numbers at any time — the agent picks up pool changes within one poll cycle, no
+  redeploy needed.
+- `TRUNK1_DID` through `TRUNK6_DID`: optional, a 4th value per trunk — that trunk's own
+  phone number. Independent of that trunk's url/user/pass (a DID doesn't need SIP
+  credentials to send SMS) and never sent to a telephony node — its only consumer is
+  `sms_code` (see next bullet), which rotates across every `TRUNKn_DID` you set instead
+  of needing a separate dedicated SMS number.
+- `VOIPMS_SMS_API_USERNAME` / `VOIPMS_SMS_API_PASSWORD`: optional VoIP.ms REST API
+  credentials for `sms_code` (your VoIP.ms account email + a distinct API key generated
+  on the "SOAP and REST/JSON API" page in the VoIP.ms portal — not your portal login
+  password, and not the same thing as a SIP trunk's username/password). These are
+  deliberately separate from the SIP-shaped `TRUNKn_URL/USER/PASS` variables because the
+  control plane sends SMS directly over HTTPS; no Asterisk node receives them. The
+  actual sending number(s) come from `TRUNKn_DID` above, not a dedicated SMS-only
+  variable — `apps/api/src/sms.ts` rotates round-robin across every configured
+  `TRUNKn_DID` and falls over to the next one if a send is rejected, so `sms_code`
+  isn't limited to one number. The adapter uses POST form data so the API password is
+  never placed in a request URL. Leave the two credentials and every `TRUNKn_DID`
   unset until the provider account is ready; `sms_code` then fails closed with
   `method_not_available`.
 - `NODE_SECRET`: at least 32 random bytes, the single shared secret every telephony

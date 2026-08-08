@@ -1,7 +1,7 @@
 import type { VerificationState, VerificationType } from "@powerotp/contracts";
 
 import type { ProductionConfig } from "./config.js";
-import { outboundTrunkFor, type VoiceVerificationType } from "./outbound-trunks.js";
+import { hasAnyOutboundTrunk } from "./outbound-trunks.js";
 import { createVoipMsSmsService, SmsProviderError, type SmsService } from "./sms.js";
 
 export interface TransportContext {
@@ -48,23 +48,28 @@ export type TransportRegistry = Record<VerificationType, VerificationTransport>;
  * (`GET /v1/nodes/jobs/next`, see `apps/api/src/node-service.ts` and the
  * route under `apps/web/app/v1/nodes/jobs`). This process never talks to
  * Asterisk/ARI directly — only a droplet's `apps/telephony-agent` does,
- * over localhost-only ARI — so all this transport does is confirm a trunk
- * is actually configured for the method (still `unavailableTransport`
- * otherwise, unchanged from before) and advance to `dispatching`, which is
- * the signal a node polls for.
+ * over localhost-only ARI — so all this transport does is confirm at
+ * least one trunk exists in the pool at all (still `unavailableTransport`
+ * otherwise, unchanged behavior from before) and advance to `dispatching`,
+ * which is the signal a node polls for. Any configured trunk can serve
+ * any of the three voice methods now, so gating is no longer type-specific
+ * (see `apps/telephony-agent/src/trunk-pool.ts` for how a node actually
+ * picks a trunk per call).
  */
 function createNodeDispatchTransport(
   config: Pick<
     ProductionConfig,
-    "OUTBOUND1_URL" | "OUTBOUND1_USER" | "OUTBOUND1_PASS" |
-    "OUTBOUND2_URL" | "OUTBOUND2_USER" | "OUTBOUND2_PASS" |
-    "OUTBOUND3_URL" | "OUTBOUND3_USER" | "OUTBOUND3_PASS"
+    "TRUNK1_URL" | "TRUNK1_USER" | "TRUNK1_PASS" |
+    "TRUNK2_URL" | "TRUNK2_USER" | "TRUNK2_PASS" |
+    "TRUNK3_URL" | "TRUNK3_USER" | "TRUNK3_PASS" |
+    "TRUNK4_URL" | "TRUNK4_USER" | "TRUNK4_PASS" |
+    "TRUNK5_URL" | "TRUNK5_USER" | "TRUNK5_PASS" |
+    "TRUNK6_URL" | "TRUNK6_USER" | "TRUNK6_PASS"
   >,
-  type: VoiceVerificationType,
 ): VerificationTransport {
   return {
     async dispatch(context, handle) {
-      if (!outboundTrunkFor(config, type)) {
+      if (!hasAnyOutboundTrunk(config)) {
         await handle.advance("failed", "method_not_available");
         return;
       }
@@ -107,13 +112,14 @@ export function createSmsCodeTransport(
 export function productionTransportRegistry(config: ProductionConfig): TransportRegistry {
   return {
     // All three voice methods now have real dialplan/ARI call-control
-    // logic on the droplet (see apps/telephony-agent/src/job-poller.ts).
-    // `voice_challenge`'s content precondition (a published challenge)
-    // is checked synchronously at creation, not here — this transport
-    // only gates on the OUTBOUND3 trunk, same as the other two.
-    call_reachability: createNodeDispatchTransport(config, "call_reachability"),
-    voice_code: createNodeDispatchTransport(config, "voice_code"),
-    voice_challenge: createNodeDispatchTransport(config, "voice_challenge"),
+    // logic on the droplet (see apps/telephony-agent/src/job-poller.ts)
+    // and share the same trunk pool — any configured trunk can serve any
+    // of them, so all three gate on the same "at least one trunk exists"
+    // check. `voice_challenge`'s content precondition (a published
+    // challenge) is checked synchronously at creation, not here.
+    call_reachability: createNodeDispatchTransport(config),
+    voice_code: createNodeDispatchTransport(config),
+    voice_challenge: createNodeDispatchTransport(config),
     sms_code: createSmsCodeTransport(config),
   };
 }

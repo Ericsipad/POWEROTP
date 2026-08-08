@@ -2,7 +2,7 @@ import type { Node, NodeConfig } from "@powerotp/contracts";
 import type { Db } from "mongodb";
 
 import type { ProductionConfig } from "./config.js";
-import { outboundTrunkFor } from "./outbound-trunks.js";
+import { allOutboundTrunks } from "./outbound-trunks.js";
 import type { NodeDocument } from "./persistence.js";
 import { createId, safeEqual } from "./security.js";
 
@@ -67,13 +67,7 @@ export class NodeService {
   }
 
   configFor(): NodeConfig {
-    return {
-      trunks: {
-        call_reachability: outboundTrunkFor(this.config, "call_reachability"),
-        voice_code: outboundTrunkFor(this.config, "voice_code"),
-        voice_challenge: outboundTrunkFor(this.config, "voice_challenge"),
-      },
-    };
+    return { trunks: allOutboundTrunks(this.config) };
   }
 
   #toResponse(node: NodeDocument): Node {

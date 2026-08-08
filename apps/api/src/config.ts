@@ -43,28 +43,64 @@ const ProductionConfigSchema = z.object({
    */
   DEMO_PROJECT_SLUG: z.string().min(3).max(48).optional(),
   /**
-   * VoIP.ms trunk credentials, one dedicated outbound per voice method so
-   * a limit, suspension, or compromise on one method's trunk cannot affect
-   * the others. See `outbound-trunks.ts` for the mapping.
-   * All optional: the API starts fine before Phase 4 telephony wiring.
+   * A flat, numbered, type-agnostic pool of VoIP.ms trunk credentials.
+   * Any configured trunk can serve any of the three voice verification
+   * methods (`call_reachability`, `voice_code`, `voice_challenge`) — the
+   * telephony-agent rotates across whichever trunks are currently healthy
+   * and fails over to the next one on a provider-level error (see
+   * `apps/telephony-agent/src/trunk-pool.ts` and the "Outbound trunk
+   * pool" section of `docs/AS_BUILT.md`). `TRUNK1..6` gives headroom
+   * beyond the 3 numbers in use today without overengineering a
+   * dynamic-key schema; raising the cap later (e.g. adding `TRUNK7_*`) is
+   * a one-line change per trunk. All optional: the API starts fine before
+   * any trunk is configured, and `outbound-trunks.ts#allOutboundTrunks`
+   * skips any `TRUNKn` where url/user/pass aren't all present.
    */
-  OUTBOUND1_URL: z.string().min(1).optional(),
-  OUTBOUND1_USER: z.string().min(1).optional(),
-  OUTBOUND1_PASS: z.string().min(1).optional(),
-  OUTBOUND2_URL: z.string().min(1).optional(),
-  OUTBOUND2_USER: z.string().min(1).optional(),
-  OUTBOUND2_PASS: z.string().min(1).optional(),
-  OUTBOUND3_URL: z.string().min(1).optional(),
-  OUTBOUND3_USER: z.string().min(1).optional(),
-  OUTBOUND3_PASS: z.string().min(1).optional(),
+  /**
+   * `TRUNKn_DID` is that trunk's own phone number (the VoIP.ms DID whose
+   * Caller ID/registration this trunk's SIP credentials belong to) —
+   * optional and independent of url/user/pass. It is never sent to a
+   * telephony node (see `apps/api/src/outbound-trunks.ts#allTrunkDids`
+   * vs. `allOutboundTrunks`): nodes only need SIP credentials to dial
+   * out, never the DID itself. `apps/api/src/sms.ts` is the only
+   * consumer — it reuses whichever `TRUNKn_DID`s are set as the pool of
+   * numbers `sms_code` can send from, instead of a separate single
+   * `VOIPMS_SMS_DID` (every DID with SMS enabled can send, not just one).
+   */
+  TRUNK1_URL: z.string().min(1).optional(),
+  TRUNK1_USER: z.string().min(1).optional(),
+  TRUNK1_PASS: z.string().min(1).optional(),
+  TRUNK1_DID: z.string().min(1).optional(),
+  TRUNK2_URL: z.string().min(1).optional(),
+  TRUNK2_USER: z.string().min(1).optional(),
+  TRUNK2_PASS: z.string().min(1).optional(),
+  TRUNK2_DID: z.string().min(1).optional(),
+  TRUNK3_URL: z.string().min(1).optional(),
+  TRUNK3_USER: z.string().min(1).optional(),
+  TRUNK3_PASS: z.string().min(1).optional(),
+  TRUNK3_DID: z.string().min(1).optional(),
+  TRUNK4_URL: z.string().min(1).optional(),
+  TRUNK4_USER: z.string().min(1).optional(),
+  TRUNK4_PASS: z.string().min(1).optional(),
+  TRUNK4_DID: z.string().min(1).optional(),
+  TRUNK5_URL: z.string().min(1).optional(),
+  TRUNK5_USER: z.string().min(1).optional(),
+  TRUNK5_PASS: z.string().min(1).optional(),
+  TRUNK5_DID: z.string().min(1).optional(),
+  TRUNK6_URL: z.string().min(1).optional(),
+  TRUNK6_USER: z.string().min(1).optional(),
+  TRUNK6_PASS: z.string().min(1).optional(),
+  TRUNK6_DID: z.string().min(1).optional(),
   /**
    * VoIP.ms REST API credentials for `sms_code`. SMS is sent directly by
-   * the control plane over HTTPS and never passes through Asterisk, so it
-   * intentionally does not reuse the SIP-shaped OUTBOUND4_* variables.
+   * the control plane over HTTPS and never passes through Asterisk, so
+   * these are intentionally separate from the SIP-shaped `TRUNKn_URL/
+   * USER/PASS` variables — but the sending DID pool itself is *not*
+   * separate: see `TRUNKn_DID` above, which doubles as both "this
+   * trunk's own number" and "an SMS-capable number sms_code can use".
    */
   VOIPMS_SMS_API_USERNAME: z.string().min(1).optional(),
   VOIPMS_SMS_API_PASSWORD: z.string().min(1).optional(),
-  VOIPMS_SMS_DID: z.string().min(1).optional(),
   /**
    * Private DigitalOcean Spaces bucket holding `voice_challenge` (Type 3)
    * recordings, and the independent secret used to sign the manifest

@@ -27,27 +27,28 @@ export const OutboundTrunkConfigSchema = z.object({
 });
 
 /**
- * What a node pulls from the control plane once its IP is allowlisted:
- * the outbound VoIP.ms trunk credentials for whichever verification
- * methods currently have credentials configured in App Platform. Every
+ * What a node pulls from the control plane once its IP is allowlisted: a
+ * flat pool of outbound VoIP.ms trunk credentials, each tagged with a
+ * stable id. Trunk identity is no longer tied to a verification type —
+ * any configured trunk can serve any of the three voice verification
+ * methods (`call_reachability`, `voice_code`, `voice_challenge`); the
+ * node itself decides which trunk to use per call via rotation and
+ * failover (see `apps/telephony-agent/src/trunk-pool.ts`). Every
  * allowlisted node receives the same full configuration — there is no
  * per-node scoping, so any node can be added or replaced at any time
  * without a separate assignment step.
  */
 export const NodeConfigSchema = z.object({
-  trunks: z.object({
-    call_reachability: OutboundTrunkConfigSchema.optional(),
-    voice_code: OutboundTrunkConfigSchema.optional(),
-    voice_challenge: OutboundTrunkConfigSchema.optional(),
-  }),
+  trunks: z.array(OutboundTrunkConfigSchema.extend({ id: z.string().min(1) })),
 });
 
 /**
  * One unit of call-control work a node can claim and execute: an
  * interaction that is waiting for a node to actually place the call over
- * its already-registered trunk. Never carries credentials — a node
- * resolves its own dial string locally from the type (see
- * `apps/telephony-agent/src/pjsip-config.ts`'s `trunk-<type>` naming).
+ * one of its already-registered trunks. Never carries credentials or a
+ * specific trunk — the node picks a currently-healthy trunk itself, by
+ * id, from its own pool (see `apps/telephony-agent/src/trunk-pool.ts`
+ * and `apps/telephony-agent/src/pjsip-config.ts`'s `trunk-<id>` naming).
  */
 export const NodeJobSchema = z.object({
   interactionId: z.string().min(16),

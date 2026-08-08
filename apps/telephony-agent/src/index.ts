@@ -8,15 +8,23 @@ import { loadAgentConfig } from "./config.js";
 import { pollAndRunOneJob } from "./job-poller.js";
 import { syncMediaOnce } from "./media-sync.js";
 import { renderPjsipTrunks } from "./pjsip-config.js";
+import { TrunkPool } from "./trunk-pool.js";
 
 const run = promisify(execFile);
 const config = loadAgentConfig();
 let lastRenderedConfig: string | undefined;
+// Every voice type is "configured" as soon as at least one trunk exists in
+// the pool — any trunk can serve any of the three voice methods now (see
+// docs/AS_BUILT.md's "Outbound trunk pool" section), so this is no longer
+// a per-type set keyed by trunk identity, just "is the pool non-empty".
 let configuredTypes = new Set<string>();
+const trunkPool = new TrunkPool();
 
 function log(msg: string, extra: Record<string, unknown> = {}) {
   console.info(JSON.stringify({ service: "powerotp-telephony-agent", msg, ...extra }));
 }
+
+const voiceVerificationTypes = ["call_reachability", "voice_code", "voice_challenge"] as const;
 
 /**
  * Renders any configured outbound trunks into a local PJSIP include file
@@ -24,18 +32,21 @@ function log(msg: string, extra: Record<string, unknown> = {}) {
  * credentials take effect on the next poll — including the very first one,
  * right after the process starts. It only writes the file and reloads when
  * the rendered config actually changed, so an unattended node doesn't
- * reload Asterisk every poll interval for no reason. `configuredTypes` is
- * also the set `jobLoop` consults so it never polls for job types this
- * node has no trunk to actually dial with.
+ * reload Asterisk every poll interval for no reason. Also refreshes the
+ * shared `TrunkPool` with the current trunk id list, so a trunk added or
+ * removed in App Platform takes effect within one poll cycle, no restart
+ * needed. `configuredTypes` (now just "is the pool non-empty", since any
+ * trunk can serve any voice type) is the set `jobLoop` consults so it
+ * never polls for job types this node has no trunk to actually dial with.
  */
 async function syncOnce() {
   const nodeConfig = await fetchNodeConfig(config);
-  configuredTypes = new Set(
-    Object.entries(nodeConfig.trunks)
-      .filter(([, trunk]) => Boolean(trunk))
-      .map(([type]) => type),
-  );
-  log("fetched node config", { configuredTypes: [...configuredTypes] });
+  trunkPool.updateTrunkIds(nodeConfig.trunks.map((trunk) => trunk.id));
+  configuredTypes = nodeConfig.trunks.length > 0 ? new Set(voiceVerificationTypes) : new Set();
+  log("fetched node config", {
+    configuredTypes: [...configuredTypes],
+    trunkIds: nodeConfig.trunks.map((trunk) => trunk.id),
+  });
 
   if (!config.ASTERISK_PJSIP_TRUNKS_PATH) return;
 
@@ -75,7 +86,7 @@ async function configLoop() {
 async function jobLoop(ari: AriClient) {
   for (;;) {
     try {
-      await pollAndRunOneJob(config, ari, configuredTypes, log);
+      await pollAndRunOneJob(config, ari, configuredTypes, log, trunkPool);
     } catch (error) {
       if (error instanceof ControlPlaneAuthError) {
         log("NODE_SECRET rejected by the control plane; check it matches App Platform");

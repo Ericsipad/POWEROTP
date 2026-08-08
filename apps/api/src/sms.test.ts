@@ -6,7 +6,7 @@ import { createVoipMsSmsService, SmsProviderError } from "./sms.js";
 const config = {
   VOIPMS_SMS_API_USERNAME: "api@example.com",
   VOIPMS_SMS_API_PASSWORD: "test-password",
-  VOIPMS_SMS_DID: "+15551230000",
+  TRUNK1_DID: "+15551230000",
 };
 
 describe("VoIP.ms SMS service", () => {
@@ -24,13 +24,20 @@ describe("VoIP.ms SMS service", () => {
     const body = new URLSearchParams(String(request!.init?.body));
     assert.equal(body.get("api_username"), config.VOIPMS_SMS_API_USERNAME);
     assert.equal(body.get("api_password"), config.VOIPMS_SMS_API_PASSWORD);
-    assert.equal(body.get("did"), config.VOIPMS_SMS_DID);
+    assert.equal(body.get("did"), config.TRUNK1_DID);
     assert.equal(body.get("dst"), "+15551234567");
     assert.match(body.get("message")!, /04219/);
   });
 
-  it("returns no service until all dedicated credentials are configured", () => {
+  it("returns no service until all dedicated credentials and at least one DID are configured", () => {
     assert.equal(createVoipMsSmsService({}), undefined);
+    assert.equal(
+      createVoipMsSmsService({
+        VOIPMS_SMS_API_USERNAME: "api@example.com",
+        VOIPMS_SMS_API_PASSWORD: "test-password",
+      }),
+      undefined,
+    );
   });
 
   it("normalizes provider rejection without exposing its response", async () => {
@@ -61,5 +68,64 @@ describe("VoIP.ms SMS service", () => {
           error.reasonCode === "provider_unavailable",
       );
     }
+  });
+
+  it("rotates round-robin across every configured TRUNKn_DID", async () => {
+    const multiDidConfig = {
+      VOIPMS_SMS_API_USERNAME: "api@example.com",
+      VOIPMS_SMS_API_PASSWORD: "test-password",
+      TRUNK1_DID: "+15551230001",
+      TRUNK2_DID: "+15551230002",
+    };
+    const usedDids: string[] = [];
+    const service = createVoipMsSmsService(multiDidConfig, async (_input, init) => {
+      usedDids.push(new URLSearchParams(String(init?.body)).get("did")!);
+      return Response.json({ status: "success", sms: "12345" });
+    });
+
+    await service!.sendVerificationCode("+15551234567", "11111");
+    await service!.sendVerificationCode("+15551234567", "22222");
+    await service!.sendVerificationCode("+15551234567", "33333");
+
+    assert.deepEqual(usedDids, ["+15551230001", "+15551230002", "+15551230001"]);
+  });
+
+  it("falls over to the next configured DID when a send is rejected", async () => {
+    const multiDidConfig = {
+      VOIPMS_SMS_API_USERNAME: "api@example.com",
+      VOIPMS_SMS_API_PASSWORD: "test-password",
+      TRUNK1_DID: "+15551230001",
+      TRUNK2_DID: "+15551230002",
+    };
+    const attempts: string[] = [];
+    const service = createVoipMsSmsService(multiDidConfig, async (_input, init) => {
+      const did = new URLSearchParams(String(init?.body)).get("did")!;
+      attempts.push(did);
+      return did === "+15551230001"
+        ? Response.json({ status: "invalid_did" })
+        : Response.json({ status: "success", sms: "12345" });
+    });
+
+    await service!.sendVerificationCode("+15551234567", "12345");
+
+    assert.deepEqual(attempts, ["+15551230001", "+15551230002"]);
+  });
+
+  it("fails closed once every configured DID has been tried", async () => {
+    const multiDidConfig = {
+      VOIPMS_SMS_API_USERNAME: "api@example.com",
+      VOIPMS_SMS_API_PASSWORD: "test-password",
+      TRUNK1_DID: "+15551230001",
+      TRUNK2_DID: "+15551230002",
+    };
+    const service = createVoipMsSmsService(multiDidConfig, async () =>
+      Response.json({ status: "invalid_did" }),
+    );
+
+    await assert.rejects(
+      service!.sendVerificationCode("+15551234567", "12345"),
+      (error: unknown) =>
+        error instanceof SmsProviderError && error.reasonCode === "provider_rejected",
+    );
   });
 });
