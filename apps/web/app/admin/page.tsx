@@ -5,6 +5,18 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { ChallengesPanel } from "./challenges-panel";
+import { OpsPanel } from "./ops-panel";
+
+/**
+ * A node polls `/v1/nodes/config` every `POLL_INTERVAL_MS` (60s default, see
+ * `apps/telephony-agent/src/config.ts`) — 3x that is a reasonable buffer
+ * before treating a node as unexpectedly quiet rather than just between polls.
+ */
+const STALE_THRESHOLD_MS = 3 * 60_000;
+
+function isNodeStale(lastSeenAt: string): boolean {
+  return Date.now() - new Date(lastSeenAt).getTime() > STALE_THRESHOLD_MS;
+}
 
 export default function AdminPage() {
   const router = useRouter();
@@ -123,15 +135,57 @@ export default function AdminPage() {
             {nodes.length === 0 && <li>No node has connected yet.</li>}
             {nodes.map((node) => (
               <li key={node.id}>
-                <strong>{node.ip}</strong>
-                {" — first seen "}
-                {new Date(node.firstSeenAt).toLocaleString()}
-                {", last seen "}
-                {new Date(node.lastSeenAt).toLocaleString()}
+                <div>
+                  <strong>{node.ip}</strong>{" "}
+                  <span className={isNodeStale(node.lastSeenAt) ? "statusBadge statusBadgeDown" : "statusBadge statusBadgeUp"}>
+                    {isNodeStale(node.lastSeenAt) ? "stale" : "live"}
+                  </span>
+                  {" — first seen "}
+                  {new Date(node.firstSeenAt).toLocaleString()}
+                  {", last seen "}
+                  {new Date(node.lastSeenAt).toLocaleString()}
+                </div>
+                {node.trunkStatus && node.trunkStatus.length > 0 && (
+                  <table className="opsTable">
+                    <thead>
+                      <tr>
+                        <th>Trunk</th>
+                        <th>Registration</th>
+                        <th>Failover health</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {node.trunkStatus.map((trunk) => (
+                        <tr key={trunk.id}>
+                          <td>{trunk.id}</td>
+                          <td>
+                            <span
+                              className={
+                                trunk.registrationState === "Registered"
+                                  ? "statusBadge statusBadgeUp"
+                                  : trunk.registrationState === "Unknown"
+                                    ? "statusBadge statusBadgeUnknown"
+                                    : "statusBadge statusBadgeDown"
+                              }
+                            >
+                              {trunk.registrationState}
+                            </span>
+                          </td>
+                          <td>
+                            {trunk.healthy
+                              ? "healthy"
+                              : `down (${trunk.consecutiveFailures} consecutive failures)`}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
               </li>
             ))}
           </ul>
         </article>
+        <OpsPanel />
         {session && <ChallengesPanel csrfToken={session.csrfToken} />}
       </section>
     </main>

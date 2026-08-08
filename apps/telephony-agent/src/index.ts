@@ -3,10 +3,11 @@ import { writeFile } from "node:fs/promises";
 import { promisify } from "node:util";
 
 import { AriClient } from "./ari-client.js";
-import { ControlPlaneAuthError, fetchNodeConfig } from "./control-plane-client.js";
+import { ControlPlaneAuthError, fetchNodeConfig, reportTrunkStatus } from "./control-plane-client.js";
 import { loadAgentConfig } from "./config.js";
 import { pollAndRunOneJob } from "./job-poller.js";
 import { syncMediaOnce } from "./media-sync.js";
+import { currentPjsipRegistrations } from "./pjsip-status.js";
 import { renderPjsipTrunks } from "./pjsip-config.js";
 import { TrunkPool } from "./trunk-pool.js";
 
@@ -48,6 +49,8 @@ async function syncOnce() {
     trunkIds: nodeConfig.trunks.map((trunk) => trunk.id),
   });
 
+  await reportTrunkStatusOnce();
+
   if (!config.ASTERISK_PJSIP_TRUNKS_PATH) return;
 
   const rendered = renderPjsipTrunks(nodeConfig);
@@ -60,6 +63,32 @@ async function syncOnce() {
     log("trunk configuration changed; reloaded pjsip");
   } catch (error) {
     log("pjsip reload failed", { error: error instanceof Error ? error.message : "unknown" });
+  }
+}
+
+/**
+ * Combines real SIP registration state (`pjsip show registrations`) with
+ * `TrunkPool`'s own call-outcome health into one report per trunk id, and
+ * posts it to the control plane for the admin "operator health" view — see
+ * `docs/AS_BUILT.md`'s "Admin operator health dashboard" section. Failure
+ * here is logged, never thrown: it must not stop the trunk-config sync it's
+ * piggybacked on in `syncOnce`.
+ */
+async function reportTrunkStatusOnce() {
+  try {
+    const registrations = await currentPjsipRegistrations();
+    const registrationById = new Map(registrations.map((r) => [r.id, r.registrationState]));
+    const trunks = trunkPool.snapshot().map((health) => ({
+      id: health.id,
+      registrationState: registrationById.get(health.id) ?? ("Unknown" as const),
+      healthy: health.healthy,
+      consecutiveFailures: health.consecutiveFailures,
+      downUntil: health.downUntil,
+    }));
+    await reportTrunkStatus(config, trunks);
+  } catch (error) {
+    if (error instanceof ControlPlaneAuthError) throw error;
+    log("trunk status report failed", { error: error instanceof Error ? error.message : "unknown" });
   }
 }
 

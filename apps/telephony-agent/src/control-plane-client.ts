@@ -6,6 +6,7 @@ import {
   type NodeConfig,
   type NodeJob,
   type reportableNodeJobStates,
+  type TrunkStatus,
 } from "@powerotp/contracts";
 
 import type { AgentConfig } from "./config.js";
@@ -77,6 +78,30 @@ export async function fetchMediaManifest(config: AgentConfig): Promise<MediaMani
     throw new Error(`Control plane returned ${response.status}`);
   }
   return MediaManifestResponseSchema.parse(await response.json());
+}
+
+/**
+ * Self-reports this node's current trunk status (real SIP registration
+ * state plus `TrunkPool`'s own call-outcome health) for the admin
+ * "operator health" view — see `apps/telephony-agent/src/pjsip-status.ts`,
+ * `trunk-pool.ts#snapshot`, and `docs/AS_BUILT.md`'s "Admin operator health
+ * dashboard" section. Never throws: a status-report failure must not stop
+ * `syncOnce`'s own trunk-config sync, which it's piggybacked on — logged by
+ * the caller instead.
+ */
+export async function reportTrunkStatus(config: AgentConfig, trunks: TrunkStatus[]): Promise<void> {
+  const response = await fetch(new URL("/v1/nodes/trunk-status", config.CONTROL_PLANE_URL), {
+    method: "POST",
+    headers: { ...authHeaders(config), "content-type": "application/json" },
+    body: JSON.stringify({ trunks }),
+  });
+
+  if (response.status === 401) {
+    throw new ControlPlaneAuthError("Node secret was rejected by the control plane");
+  }
+  if (!response.ok) {
+    throw new Error(`Control plane returned ${response.status}`);
+  }
 }
 
 /**

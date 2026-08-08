@@ -109,4 +109,36 @@ describe("TrunkPool", () => {
     pool.reportOutcome("trunk-1", "busy");
     assert.deepEqual(pool.pickHealthyTrunks(), ["trunk-1"]);
   });
+
+  it("snapshot() reports every configured trunk as healthy before any outcome is recorded", () => {
+    const pool = new TrunkPool(["trunk-1", "trunk-2"]);
+    assert.deepEqual(pool.snapshot(), [
+      { id: "trunk-1", healthy: true, consecutiveFailures: 0, downUntil: undefined },
+      { id: "trunk-2", healthy: true, consecutiveFailures: 0, downUntil: undefined },
+    ]);
+  });
+
+  it("snapshot() reflects consecutive failures and a down trunk's cool-down, without affecting rotation", () => {
+    const pool = new TrunkPool(["trunk-1", "trunk-2"]);
+    pool.reportOutcome("trunk-1", "provider_unavailable");
+    pool.reportOutcome("trunk-1", "provider_unavailable");
+
+    let snapshot = pool.snapshot();
+    assert.deepEqual(snapshot.find((t) => t.id === "trunk-1"), {
+      id: "trunk-1",
+      healthy: true,
+      consecutiveFailures: 2,
+      downUntil: undefined,
+    });
+
+    pool.reportOutcome("trunk-1", "provider_unavailable");
+    snapshot = pool.snapshot();
+    const trunk1 = snapshot.find((t) => t.id === "trunk-1")!;
+    assert.equal(trunk1.healthy, false);
+    assert.equal(trunk1.consecutiveFailures, 3);
+    assert.ok(trunk1.downUntil !== undefined && trunk1.downUntil > Date.now());
+
+    // Reading a snapshot never mutates rotation/health state itself.
+    assert.deepEqual(pool.pickHealthyTrunks(), ["trunk-2"]);
+  });
 });

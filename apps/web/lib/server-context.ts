@@ -13,6 +13,7 @@ import {
   createDispatchWorker,
   createVerificationQueues,
   toQueueConnectionOptions,
+  type VerificationQueues,
 } from "@powerotp/api/verification-queue.js";
 import { VerificationService } from "@powerotp/api/verification-service.js";
 
@@ -24,6 +25,7 @@ export interface ServerContext {
   verifications: VerificationService;
   nodes: NodeService;
   challenges: ChallengeService;
+  queues: VerificationQueues;
 }
 
 /**
@@ -80,7 +82,7 @@ async function buildServerContext(): Promise<ServerContext> {
   process.on("SIGINT", () => void shutdown("SIGINT"));
   process.on("SIGTERM", () => void shutdown("SIGTERM"));
 
-  return { config, dataStores, auth, projects, verifications, nodes, challenges };
+  return { config, dataStores, auth, projects, verifications, nodes, challenges, queues };
 }
 
 export function getServerContext(): Promise<ServerContext> {

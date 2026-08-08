@@ -1,4 +1,4 @@
-import type { Node, NodeConfig } from "@powerotp/contracts";
+import type { Node, NodeConfig, TrunkStatus } from "@powerotp/contracts";
 import type { Db } from "mongodb";
 
 import type { ProductionConfig } from "./config.js";
@@ -70,12 +70,30 @@ export class NodeService {
     return { trunks: allOutboundTrunks(this.config) };
   }
 
+  /**
+   * Stores a node's self-reported trunk status (real SIP registration
+   * state plus `TrunkPool`'s own call-outcome health, see
+   * `apps/telephony-agent/src/pjsip-status.ts` and `trunk-pool.ts#snapshot`)
+   * for admin visibility — matched by `ip`, the same identity used by
+   * `authenticate`, since a node has no other stable identifier. A report
+   * from an IP that has never authenticated is a no-op (`matchedCount ===
+   * 0`), not an error — it just means nothing to update yet.
+   */
+  async reportTrunkStatus(ip: string, trunks: TrunkStatus[]): Promise<void> {
+    await this.#nodes.updateOne(
+      { ip },
+      { $set: { trunkStatus: trunks, trunkStatusReportedAt: new Date() } },
+    );
+  }
+
   #toResponse(node: NodeDocument): Node {
     return {
       id: node._id,
       ip: node.ip,
       firstSeenAt: node.firstSeenAt.toISOString(),
       lastSeenAt: node.lastSeenAt.toISOString(),
+      trunkStatus: node.trunkStatus,
+      trunkStatusReportedAt: node.trunkStatusReportedAt?.toISOString(),
     };
   }
 }

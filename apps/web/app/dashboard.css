@@ -192,6 +192,50 @@
   text-align: center;
 }
 
+.statusBadge {
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  padding: 2px 9px;
+  text-transform: uppercase;
+}
+
+.statusBadgeUp {
+  background: #e3f3e9;
+  color: #1d7a45;
+}
+
+.statusBadgeDown {
+  background: #fbe6e6;
+  color: #b3261e;
+}
+
+.statusBadgeUnknown {
+  background: #eef0ee;
+  color: var(--muted);
+}
+
+.opsTable {
+  border-collapse: collapse;
+  font-size: 12px;
+  margin-top: 10px;
+  width: 100%;
+}
+
+.opsTable th,
+.opsTable td {
+  border-bottom: 1px solid var(--line);
+  padding: 7px 8px;
+  text-align: left;
+}
+
+.opsTable th {
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
 .modalBackdrop {
   align-items: center;
   background: rgb(16 35 29 / 55%);

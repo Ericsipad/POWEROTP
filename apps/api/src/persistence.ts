@@ -61,11 +61,25 @@ export interface ApiKeyDocument {
  * IPs have successfully authenticated, not an access-control record
  * itself.
  */
+export interface NodeTrunkStatus {
+  id: string;
+  registrationState: "Registered" | "Rejected" | "Unregistered" | "Unknown";
+  healthy: boolean;
+  consecutiveFailures: number;
+  downUntil?: number;
+}
+
 export interface NodeDocument {
   _id: string;
   ip: string;
   firstSeenAt: Date;
   lastSeenAt: Date;
+  /** Last self-reported trunk status from this node — see
+   * `NodeService#reportTrunkStatus` and `docs/AS_BUILT.md`'s "Admin
+   * operator health dashboard" section. Absent until an agent build new
+   * enough to report it has polled at least once. */
+  trunkStatus?: NodeTrunkStatus[];
+  trunkStatusReportedAt?: Date;
 }
 
 export interface AuditDocument {

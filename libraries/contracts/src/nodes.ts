@@ -13,11 +13,36 @@ import { TargetNumberSchema, VerificationTypeSchema } from "./verification.js";
  * access is rotating `NODE_SECRET` in App Platform and redeploying every
  * node with the new value. See `apps/api/src/node-service.ts`.
  */
+/**
+ * Real SIP registration state for one trunk id, as last reported by a node
+ * (see `apps/telephony-agent/src/pjsip-status.ts`), plus that trunk's
+ * separate call-outcome-based health/rotation state (see
+ * `apps/telephony-agent/src/trunk-pool.ts#snapshot`) — two independent
+ * signals surfaced together for the admin "operator health" view (see
+ * `docs/AS_BUILT.md`'s "Admin operator health dashboard" section). Neither
+ * ever fed the other; a trunk can be `Registered` but still `healthy: false`
+ * if recent call attempts over it were provider-rejected, or vice versa.
+ */
+export const TrunkStatusSchema = z.object({
+  id: z.string().min(1),
+  registrationState: z.enum(["Registered", "Rejected", "Unregistered", "Unknown"]),
+  healthy: z.boolean(),
+  consecutiveFailures: z.number().int().nonnegative(),
+  /** Epoch ms until this trunk is skipped by rotation, if currently down. */
+  downUntil: z.number().optional(),
+});
+
+export const TrunkStatusReportSchema = z.object({
+  trunks: z.array(TrunkStatusSchema),
+});
+
 export const NodeSchema = z.object({
   id: z.string().min(16),
   ip: z.string().min(1),
   firstSeenAt: z.string().datetime(),
   lastSeenAt: z.string().datetime(),
+  trunkStatus: z.array(TrunkStatusSchema).optional(),
+  trunkStatusReportedAt: z.string().datetime().optional(),
 });
 
 export const OutboundTrunkConfigSchema = z.object({
@@ -102,8 +127,30 @@ export const NodeJobEventSchema = z.object({
   trunkId: z.string().min(1).optional(),
 });
 
+/**
+ * BullMQ job counts for one queue (`Queue#getJobCounts`), surfaced read-only
+ * on the admin "operator health" view (see `apps/api/src/verification-queue.ts#getQueueCounts`)
+ * so a stuck/backed-up queue is visible without a direct Valkey connection.
+ */
+export const QueueCountsSchema = z.object({
+  name: z.string().min(1),
+  waiting: z.number().int().nonnegative(),
+  active: z.number().int().nonnegative(),
+  delayed: z.number().int().nonnegative(),
+  failed: z.number().int().nonnegative(),
+  completed: z.number().int().nonnegative(),
+});
+
+export const QueueCountsResponseSchema = z.object({
+  queues: z.array(QueueCountsSchema),
+});
+
 export type Node = z.infer<typeof NodeSchema>;
 export type OutboundTrunkConfig = z.infer<typeof OutboundTrunkConfigSchema>;
 export type NodeConfig = z.infer<typeof NodeConfigSchema>;
 export type NodeJob = z.infer<typeof NodeJobSchema>;
 export type NodeJobEvent = z.infer<typeof NodeJobEventSchema>;
+export type TrunkStatus = z.infer<typeof TrunkStatusSchema>;
+export type TrunkStatusReport = z.infer<typeof TrunkStatusReportSchema>;
+export type QueueCounts = z.infer<typeof QueueCountsSchema>;
+export type QueueCountsResponse = z.infer<typeof QueueCountsResponseSchema>;

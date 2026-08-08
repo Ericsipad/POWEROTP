@@ -936,6 +936,28 @@ the existing document, never a new collection).
   outage — kept distinct from `"not_found"` so the two failure modes
   aren't confused later). `"pending"` is set the moment reconciliation is
   scheduled so a document's state is always inspectable mid-flight.
+- **Confirmed live** (this session, against real VoIP.ms `getCDR`/`getSMS`,
+  canary destination `+14034701805`): a `call_reachability`, a `voice_code`,
+  and an `sms_code` demo verification were placed in the same run.
+  All three reached `providerRecordStatus: "matched"` within one reconcile
+  cycle (no `not_found` retries needed) with the exact real, non-guessed
+  field names from the confirmed schema:
+  - `call_reachability` (`trunk-1`, answered/hung-up immediately): matched
+    a `getCDR` row with `durationSeconds: 1`, `providerCostUsd: 0.0009`
+    (VoIP.ms `rate: 0.009`/min × 1s).
+  - `voice_code` (`trunk-4`, real ~10s of code playback): matched a
+    `getCDR` row with `durationSeconds: 10`, `providerCostUsd: 0.0018` —
+    confirms duration/cost extraction is correct for a non-trivial call,
+    not just an instant one.
+  - `sms_code`: matched a `getSMS` row and applied the flat
+    `SMS_OUTBOUND_RATE_USD` ($0.0075), confirming `getSMS` still carries no
+    per-message cost field as expected.
+  No field-name or extraction fix was needed — the schema sourced from
+  VoIP.ms's official docs and the `ecliptical/voip-ms` client last session
+  was correct on the first live attempt. This closes out the "not yet
+  live-tested" gap noted below; the remaining open item in this area is
+  purely the customer-facing balance-tiered billing rule, not this
+  reconciliation mechanism itself.
 - **Deliberately not built yet, per the user's own framing**: any notion
   of a *customer's* cost or account balance. There is no `customerCostUsd`
   field, no balance collection, and no pricing-tier logic anywhere yet —
@@ -951,6 +973,76 @@ the existing document, never a new collection).
   price gets computed from, and only front-end customer-facing UI cards
   are meant to display the resulting customer cost (never expose raw
   provider cost/trunk/DID details to a customer).
+
+## Admin operator health dashboard (implemented)
+
+`/admin` gained three read-only "operator health" additions, closing part of
+Phase 7's "operator health views" item — deliberately kept minimal (no
+auto-polling, no charts/history, no alerting) per an explicit scope check
+during this session:
+
+- **Node staleness badge**: purely client-side in
+  `apps/web/app/admin/page.tsx` — a node that hasn't polled `/v1/nodes/config`
+  in more than `STALE_THRESHOLD_MS` (3x the agent's 60s default
+  `POLL_INTERVAL_MS`) shows a "stale" badge instead of "live", computed from
+  the same `lastSeenAt` the nodes panel already fetched. No backend change.
+- **Trunk status** (the only real new backend capability): today's real SIP
+  registration state (`pjsip show registrations`) was previously only
+  visible over SSH, and `TrunkPool`'s call-outcome health/circuit-breaker
+  state (see "Outbound trunk pool" above) lived entirely in the agent's
+  memory, never reported anywhere. Both are now self-reported by the agent
+  each trunk-config poll cycle (`POLL_INTERVAL_MS`, no new loop):
+  - `apps/telephony-agent/src/pjsip-status.ts#currentPjsipRegistrations`
+    shells out to `asterisk -rx "pjsip show registrations"` (same
+    `execFile` pattern already used for `pjsip reload`) and parses each
+    `trunk-N` row's real registration state
+    (`Registered`/`Rejected`/`Unregistered`/`Unknown`) — the parser's test
+    fixture is real captured CLI output from this project's own droplet,
+    not a guessed format.
+  - `apps/telephony-agent/src/trunk-pool.ts#snapshot` is a new read-only
+    method (never mutates rotation/failover state) exposing each
+    configured trunk's `healthy`/`consecutiveFailures`/`downUntil`.
+  - `apps/telephony-agent/src/index.ts#syncOnce` combines both (matched by
+    trunk id) and posts them via the new
+    `apps/telephony-agent/src/control-plane-client.ts#reportTrunkStatus` to
+    a new node-facing route, `POST /v1/nodes/trunk-status`
+    (`apps/web/app/v1/nodes/trunk-status/route.ts`), `NODE_SECRET`-
+    authenticated exactly like `/v1/nodes/config`. A report failure is
+    logged, never thrown — it must not block the trunk-config sync it's
+    piggybacked on.
+  - `apps/api/src/node-service.ts#reportTrunkStatus` stores it on the
+    existing `nodes` collection document (matched by `ip`, the same
+    identity `authenticate` already uses), extending `NodeDocument`
+    (`apps/api/src/persistence.ts`) with optional `trunkStatus`/
+    `trunkStatusReportedAt`. `NodeSchema`/`TrunkStatusSchema`/
+    `TrunkStatusReportSchema` are new contracts
+    (`libraries/contracts/src/nodes.ts`).
+  - Registration state and `TrunkPool` health are two genuinely independent
+    signals surfaced side by side, not merged into one status — a trunk can
+    be `Registered` but recently provider-rejected on calls (`healthy:
+    false`), or vice versa (registration briefly dropped, no recent call
+    attempts to prove call-level health either way).
+  - Rendered in `/admin`'s existing "Telephony nodes" panel as a per-node
+    sub-table (registration badge + failover health), reusing the already-
+    fetched `nodes` list — no separate fetch.
+  - **Requires the droplet's agent to be redeployed to actually start
+    reporting** — happens automatically on the next push to `main` per the
+    existing `deploy-droplet` CI job (see "Droplet auto-deploy" above), no
+    manual step. Until then, `/admin` simply shows no trunk-status
+    sub-table for that node (treated as "not yet reported", not an error).
+- **Queue depth**: `apps/api/src/verification-queue.ts#getQueueCounts` adds
+  a thin wrapper over BullMQ's own `Queue#getJobCounts()` for all three
+  queues this app runs (`verification-jobs`, `verification-callbacks`,
+  `verification-provider-reconcile`), exposed via a new admin-session-gated
+  route, `GET /v1/admin/queues`
+  (`apps/web/app/v1/admin/queues/route.ts`) — `queues` is now retained on
+  `ServerContext` (`apps/web/lib/server-context.ts`) rather than only used
+  locally inside `buildServerContext`. Rendered as a manual-refresh table in
+  the new `apps/web/app/admin/ops-panel.tsx`. Not unit-tested directly (it's
+  a thin passthrough to BullMQ's own well-tested method, same as this
+  project's existing `enqueueDispatch`/`enqueueCallback` helpers, which
+  aren't unit-tested against a real Redis either) — verify live via
+  `/admin` once deployed.
 
 ## Known gaps / next steps
 
@@ -990,12 +1082,10 @@ the existing document, never a new collection).
    a problem yet (one droplet, `powerotpvoip1`); would need externalizing (e.g. into
    Valkey) if multi-node routing (Phase 9) is ever built.
 7. Provider cost/duration reconciliation (see "Provider cost reconciliation" above) is
-   code-complete and unit-tested against VoIP.ms's own confirmed, real `getCDR`/`getSMS`
-   response schema (sourced from VoIP.ms's official API docs, not guessed — see that
-   section), and the droplet has already auto-deployed the trunk-reporting change (see
-   "Droplet auto-deploy" above) — but it's **not yet live-tested against the real API**;
-   that needs a real completed call/SMS to confirm end-to-end, the same as every other
-   provider integration in this project. Customer-facing
+   **confirmed working end-to-end live** as of this session — a `call_reachability`,
+   `voice_code`, and `sms_code` demo verification all correctly matched a real VoIP.ms
+   `getCDR`/`getSMS` row with correct duration/cost extraction on the first attempt (see
+   that section's "Confirmed live" subsection for the exact figures). Customer-facing
    cost calculation and the balance-tiered pricing rule (≥$100/$50–99.99/&lt;$50 tiers,
    plus a daily charge — exact rates not yet given) and the customer-balance database
    itself are **not started at all** — don't build either speculatively; see that

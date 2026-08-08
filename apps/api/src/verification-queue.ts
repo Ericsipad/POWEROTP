@@ -49,6 +49,15 @@ export interface ProviderReconcileJobData {
   interactionId: string;
 }
 
+export interface QueueCounts {
+  name: string;
+  waiting: number;
+  active: number;
+  delayed: number;
+  failed: number;
+  completed: number;
+}
+
 export interface VerificationQueues {
   jobsQueue: Queue<DispatchJobData | TimeoutJobData>;
   callbacksQueue: Queue<CallbackJobData>;
@@ -57,6 +66,13 @@ export interface VerificationQueues {
   enqueueTimeout(interactionId: string, delayMs: number): Promise<void>;
   enqueueCallback(interactionId: string, eventId: string): Promise<void>;
   enqueueProviderReconcile(interactionId: string): Promise<void>;
+  /**
+   * Current job counts for every queue this app runs — for the admin
+   * "operator health" view (see `docs/AS_BUILT.md`'s "Admin operator health
+   * dashboard" section), so a stuck/backed-up queue is visible without a
+   * direct Valkey connection.
+   */
+  getQueueCounts(): Promise<QueueCounts[]>;
   close(): Promise<void>;
 }
 
@@ -118,6 +134,26 @@ export function createVerificationQueues(connection: ConnectionOptions): Verific
           removeOnComplete: true,
           removeOnFail: { age: 7 * 24 * 60 * 60 },
         },
+      );
+    },
+    async getQueueCounts() {
+      const named: Array<[string, Queue]> = [
+        [JOBS_QUEUE_NAME, jobsQueue],
+        [CALLBACKS_QUEUE_NAME, callbacksQueue],
+        [PROVIDER_RECONCILE_QUEUE_NAME, providerReconcileQueue],
+      ];
+      return Promise.all(
+        named.map(async ([name, queue]) => {
+          const counts = await queue.getJobCounts("waiting", "active", "delayed", "failed", "completed");
+          return {
+            name,
+            waiting: counts.waiting ?? 0,
+            active: counts.active ?? 0,
+            delayed: counts.delayed ?? 0,
+            failed: counts.failed ?? 0,
+            completed: counts.completed ?? 0,
+          };
+        }),
       );
     },
     async close() {

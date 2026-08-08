@@ -109,4 +109,32 @@ export class TrunkPool {
   #lastTriedAt(id: string): number {
     return this.#health.get(id)?.lastTriedAt ?? 0;
   }
+
+  /**
+   * Read-only view of every currently-configured trunk's call-outcome
+   * health, for reporting to the control plane (see `docs/AS_BUILT.md`'s
+   * "Admin operator health dashboard" section) — never used for rotation
+   * itself, and never mutates `#health`. A trunk with no recorded outcome
+   * yet (never tried since the last config poll) reports healthy with zero
+   * failures, matching `pickHealthyTrunks()`'s own default.
+   */
+  snapshot(): TrunkHealthSnapshot[] {
+    const now = Date.now();
+    return this.#trunkIds.map((id) => {
+      const health = this.#health.get(id);
+      return {
+        id,
+        healthy: !this.#isDown(id, now),
+        consecutiveFailures: health?.consecutiveFailures ?? 0,
+        downUntil: health?.downUntil,
+      };
+    });
+  }
+}
+
+export interface TrunkHealthSnapshot {
+  id: string;
+  healthy: boolean;
+  consecutiveFailures: number;
+  downUntil: number | undefined;
 }
