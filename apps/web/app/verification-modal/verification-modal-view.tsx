@@ -33,6 +33,15 @@ export interface VerificationModalViewProps {
    * `postMessage` to its parent window); this component's own celebration
    * animation always renders regardless. */
   onTerminal?(status: VerificationStatus): void;
+  /**
+   * When provided, "Try a phone call instead" (shown once an `sms_code`
+   * interaction is `awaiting_response`) becomes a real action instead of
+   * plain text: the caller starts a brand-new `voice_code` attempt for the
+   * same phone number and swaps this component's `interactionId` — pass a
+   * changing `key` from the caller so this remounts cleanly as its own
+   * fresh "operation" rather than reusing this one's state.
+   */
+  onRetryAsVoiceCall?(): void;
 }
 
 /**
@@ -51,6 +60,7 @@ export function VerificationModalView({
   fetchStatus,
   submitResponse,
   onTerminal,
+  onRetryAsVoiceCall,
 }: VerificationModalViewProps) {
   const [status, setStatus] = useState<VerificationStatus>();
   const [codeInput, setCodeInput] = useState("");
@@ -161,16 +171,16 @@ export function VerificationModalView({
           </label>
         )}
         {status.type === "sms_code" && (
-          // Shown unconditionally today (no bot-detection exists yet). Per
-          // the user's explicit note: once the future bot-blocker phase can
-          // tell a detected bot from a suspected real human, this specific
-          // hint should only render for the detected-bot case — a real
-          // human getting an SMS delivery hiccup shouldn't be nudged toward
-          // "prove you're human a second way" copy. Not gated on anything
-          // now, since there's nothing to gate on yet.
           <p className="widgetNote">
-            Didn&apos;t get a text? Try a phone call instead. Some carriers block
-            international SMS.
+            Didn&apos;t get a text?{" "}
+            {onRetryAsVoiceCall ? (
+              <button type="button" className="widgetNoteLink" onClick={onRetryAsVoiceCall}>
+                Try a phone call instead.
+              </button>
+            ) : (
+              "Try a phone call instead."
+            )}{" "}
+            Some carriers block international SMS.
           </p>
         )}
         <button className="button" type="submit">

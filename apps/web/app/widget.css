@@ -22,7 +22,32 @@
   gap: 16px;
   max-width: 420px;
   padding: 28px;
+  position: relative;
   width: 100%;
+}
+
+.widgetCardClose {
+  align-items: center;
+  background: transparent;
+  border: none;
+  border-radius: 50%;
+  color: var(--muted);
+  cursor: pointer;
+  display: flex;
+  font-size: 20px;
+  height: 28px;
+  justify-content: center;
+  line-height: 1;
+  padding: 0;
+  position: absolute;
+  right: 14px;
+  top: 14px;
+  width: 28px;
+}
+
+.widgetCardClose:hover {
+  background: var(--paper);
+  color: var(--ink);
 }
 
 .widgetBrand {
@@ -73,6 +98,18 @@
   font-size: 12px;
   line-height: 1.5;
   margin: -4px 0 0;
+}
+
+.widgetNoteLink {
+  background: none;
+  border: none;
+  color: var(--green-dark);
+  cursor: pointer;
+  display: inline;
+  font: inherit;
+  font-weight: 800;
+  padding: 0;
+  text-decoration: underline;
 }
 
 .widgetProgress {
@@ -164,14 +201,28 @@
   position: relative;
 }
 
-.tryItNowModalPreview {
+.tryItNowModalPreviewWrap {
   animation: tryItNowModalPopIn 0.35s ease-out;
-  box-shadow: 0 24px 70px rgba(16, 35, 29, 0.28);
+  display: grid;
+  gap: 10px;
   position: absolute;
   right: calc(100% + 24px);
   top: 0;
   width: 340px;
   z-index: 20;
+}
+
+.tryItNowModalPreview {
+  box-shadow: 0 24px 70px rgba(16, 35, 29, 0.28);
+}
+
+.tryItNowBotNote {
+  color: var(--muted);
+  font-size: 10px;
+  font-style: italic;
+  line-height: 1.5;
+  margin: 0;
+  text-align: center;
 }
 
 .tryItNowModalBadge {
@@ -192,10 +243,10 @@
 /* Not enough room to the left for a floating overlay without clipping off
    the viewport or the nav — fall back to stacking it below the card. */
 @media (max-width: 1400px) {
-  .tryItNowModalPreview {
+  .tryItNowModalPreviewWrap {
     animation: none;
-    position: static;
     margin-top: 20px;
+    position: static;
     right: auto;
     width: 100%;
   }

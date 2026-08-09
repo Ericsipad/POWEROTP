@@ -163,6 +163,24 @@ export function TryItNow() {
     return (await response.json()) as { succeeded: boolean };
   }
 
+  /** "Try a phone call instead" on the demo's sms_code preview — starts a
+   * brand-new voice_code attempt for the same number, as its own separate
+   * operation, replacing the previewed interaction entirely. */
+  async function retryDemoAsVoiceCall() {
+    const response = await fetch("/v1/demo/verifications", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ type: "voice_code" as VerificationType, targetNumber }),
+    }).catch(() => undefined);
+    if (!response?.ok) return;
+    const data = await response.json();
+    setLiveInteractionId(data.interactionId);
+  }
+
+  function closeModalPreview() {
+    setLiveInteractionId(undefined);
+  }
+
   return (
     <div className="tryItNowRow">
       <div className="tryItNow">
@@ -229,19 +247,35 @@ export function TryItNow() {
       </div>
 
       {liveInteractionId && (
-        <section className="widgetCard tryItNowModalPreview">
-          <div className="widgetBrand">
-            <span className="brandMark">P</span>
-            POWEROTP
-          </div>
-          <span className="readOnly tryItNowModalBadge">THE MODAL YOUR CUSTOMERS SEE</span>
-          <VerificationModalView
-            interactionId={liveInteractionId}
-            targetNumber={targetNumber}
-            fetchStatus={() => fetchDemoStatus(liveInteractionId)}
-            submitResponse={(body) => submitDemoResponse(liveInteractionId, body)}
-          />
-        </section>
+        <div className="tryItNowModalPreviewWrap">
+          <p className="tryItNowBotNote">
+            Note: for Bot Blocker, this hint will only be shown to detected bots, not suspected
+            real humans.
+          </p>
+          <section className="widgetCard tryItNowModalPreview">
+            <button
+              className="widgetCardClose"
+              type="button"
+              onClick={closeModalPreview}
+              aria-label="Close"
+            >
+              ×
+            </button>
+            <div className="widgetBrand">
+              <span className="brandMark">P</span>
+              POWEROTP
+            </div>
+            <span className="readOnly tryItNowModalBadge">THE MODAL YOUR CUSTOMERS SEE</span>
+            <VerificationModalView
+              key={liveInteractionId}
+              interactionId={liveInteractionId}
+              targetNumber={targetNumber}
+              fetchStatus={() => fetchDemoStatus(liveInteractionId)}
+              submitResponse={(body) => submitDemoResponse(liveInteractionId, body)}
+              onRetryAsVoiceCall={retryDemoAsVoiceCall}
+            />
+          </section>
+        </div>
       )}
     </div>
   );

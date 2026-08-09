@@ -40,6 +40,7 @@ export function WidgetClient({ sessionId }: WidgetClientProps) {
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState("");
   const [accepted, setAccepted] = useState<ModalSessionVerificationAccepted>();
+  const [closed, setClosed] = useState(false);
 
   useEffect(() => {
     void loadConfig();
@@ -67,32 +68,48 @@ export function WidgetClient({ sessionId }: WidgetClientProps) {
     }
   }
 
-  async function submitPhoneNumber(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!type) return;
+  /** Shared by the initial submission and "try a phone call instead" —
+   * both are just "start a new attempt for this same session/number with
+   * a given method", the only difference being which type. */
+  async function createAttempt(attemptType: VerificationType): Promise<boolean> {
     setFormError("");
     setSubmitting(true);
     try {
       const response = await fetch(`/v1/modal-sessions/${sessionId}/verifications`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ type, targetNumber }),
+        body: JSON.stringify({ type: attemptType, targetNumber }),
       });
       const data = await response.json();
       if (!response.ok) {
         setFormError(
           response.status === 429
             ? "Too many attempts for this verification. Please request a new link."
-            : "That phone number could not be accepted.",
+            : "That request could not be accepted.",
         );
         setSubmitting(false);
-        return;
+        return false;
       }
       setAccepted(data as ModalSessionVerificationAccepted);
+      return true;
     } catch {
       setFormError("This verification could not reach POWEROTP.");
       setSubmitting(false);
+      return false;
     }
+  }
+
+  async function submitPhoneNumber(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!type) return;
+    await createAttempt(type);
+  }
+
+  /** "Try a phone call instead" on an `sms_code` attempt — closes the
+   * current attempt's card and opens a fresh one for a brand-new
+   * `voice_code` attempt against the same number, as its own operation. */
+  async function retryAsVoiceCall() {
+    await createAttempt("voice_code");
   }
 
   async function fetchStatus(current: ModalSessionVerificationAccepted): Promise<VerificationStatus | null> {
@@ -133,9 +150,26 @@ export function WidgetClient({ sessionId }: WidgetClientProps) {
     );
   }
 
+  function handleClose() {
+    setClosed(true);
+    window.parent.postMessage({ source: "powerotp-widget", sessionId, type: "closed" }, "*");
+  }
+
+  if (closed) {
+    return (
+      <section className="widgetCard">
+        <WidgetBrand />
+        <p className="widgetProgress">Closed.</p>
+      </section>
+    );
+  }
+
   if (configError) {
     return (
       <section className="widgetCard">
+        <button className="widgetCardClose" type="button" onClick={handleClose} aria-label="Close">
+          ×
+        </button>
         <WidgetBrand />
         <p className="formError">{configError}</p>
       </section>
@@ -154,13 +188,18 @@ export function WidgetClient({ sessionId }: WidgetClientProps) {
   if (accepted) {
     return (
       <section className="widgetCard">
+        <button className="widgetCardClose" type="button" onClick={handleClose} aria-label="Close">
+          ×
+        </button>
         <WidgetBrand />
         <VerificationModalView
+          key={accepted.interactionId}
           interactionId={accepted.interactionId}
           targetNumber={targetNumber}
           fetchStatus={() => fetchStatus(accepted)}
           submitResponse={(body) => submitResponse(accepted, body)}
           onTerminal={handleTerminal}
+          onRetryAsVoiceCall={config.allowedTypes.includes("voice_code") ? retryAsVoiceCall : undefined}
         />
       </section>
     );
@@ -168,6 +207,9 @@ export function WidgetClient({ sessionId }: WidgetClientProps) {
 
   return (
     <section className="widgetCard">
+      <button className="widgetCardClose" type="button" onClick={handleClose} aria-label="Close">
+        ×
+      </button>
       <WidgetBrand />
       <p className="widgetCopy">Verify you&apos;re a real person to continue.</p>
       <form className="widgetForm" onSubmit={submitPhoneNumber}>

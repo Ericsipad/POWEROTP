@@ -1387,7 +1387,7 @@ scoring, rate limiting by IP, or any other logic is attached to this data
 yet — if a concrete use for it comes up, that's a future, separately-scoped
 addition, not something to build speculatively now.
 
-## SMS fallback hint (unconditional today; scoped for future bot-only visibility)
+## SMS fallback hint, retry-as-call, and card close buttons
 
 `VerificationModalView` (`apps/web/app/verification-modal/verification-modal-view.tsx`)
 shows "Didn't get a text? Try a phone call instead. Some carriers block
@@ -1396,15 +1396,36 @@ interaction reaches `awaiting_response` — added after live-testing an SMS
 to a Thailand number that was accepted by VoIP.ms (`code_sent`) but likely
 never actually delivered by the carrier (no delivery-receipt integration
 exists yet to confirm either way; see the git history around this commit
-for the live investigation). **Shown unconditionally today, to every
-visitor, since no bot-detection exists yet.** The user was explicit about
-future intent: once the future bot-blocker phase can distinguish a
-detected bot from a suspected real human, this specific hint should only
-ever render for the detected-bot case — a real human hitting an ordinary
-international-SMS delivery hiccup shouldn't be nudged with bot-oriented
-"prove it another way" framing. Not gated on anything now (there is
-nothing to gate on); a future session wiring up bot detection should
-revisit this exact spot rather than re-deriving the intent from scratch.
+for the live investigation). **This exact hint text is shown identically
+on both the real hosted modal and the marketing-site demo, and never
+mentions bots or anything forward-looking** — the user was explicit that
+the actual UI copy end users see must not reference future plans.
+
+- **"Try a phone call instead" is a real action**, via a new optional
+  `onRetryAsVoiceCall` prop: the caller (either `widget-client.tsx` or
+  `try-it-now.tsx`) starts a brand-new `voice_code` attempt for the same
+  phone number, then re-renders `VerificationModalView` with a changed
+  `key={interactionId}` — React fully remounts it, so the new attempt is
+  its own clean "operation" (fresh progress states, its own eventual
+  celebration) rather than continuing the old one's state. `widget-client.tsx`
+  only offers this when the session's `allowedTypes` actually includes
+  `voice_code`.
+- **Every widget card gained a close (`×`) button**
+  (`.widgetCardClose`, top-right of `.widgetCard`) — on the real hosted
+  modal this both hides the card locally and `postMessage`s
+  `{ source: "powerotp-widget", type: "closed" }` to the parent window (a
+  UX signal only, same non-authoritative caveat as the terminal-state
+  message); on the demo preview it just removes the floating card from the
+  page.
+- **A separate, demo-only explanatory note — the one place "bot" language
+  appears in any UI at all**: "Note: for Bot Blocker, this hint will only
+  be shown to detected bots, not suspected real humans." rendered above
+  (not inside) the demo's floating modal-preview card
+  (`.tryItNowBotNote`, `apps/web/app/try-it-now.tsx`) — explicitly per the
+  user's instruction that this framing belongs on the marketing demo for
+  evaluators, never inside the real widget a real end user sees. No bot
+  detection exists to gate this on; it's a static explanatory caption on
+  the demo page only.
 
 ## Known gaps / next steps
 
