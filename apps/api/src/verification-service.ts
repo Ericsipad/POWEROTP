@@ -65,6 +65,18 @@ export interface EnqueueProviderReconcile {
   (interactionId: string): Promise<void>;
 }
 
+/** See `apps/api/src/balance-service.ts#requireNonNegativeBalance` — kept
+ * as a plain injected function (like the `enqueue*` callbacks above) so
+ * this module never depends directly on the billing module. */
+export interface RequireNonNegativeBalance {
+  (customerId: string): Promise<void>;
+}
+
+/** See `apps/api/src/billing-charge-service.ts#chargeCompletedInteraction`. */
+export interface ChargeCompletedInteraction {
+  (interaction: VerificationRequestDocument): Promise<void>;
+}
+
 export class VerificationService {
   readonly #requests;
   readonly #events;
@@ -79,6 +91,8 @@ export class VerificationService {
     private readonly enqueueTimeout: EnqueueTimeout,
     private readonly enqueueCallback: EnqueueCallback,
     private readonly enqueueProviderReconcile: EnqueueProviderReconcile,
+    private readonly requireNonNegativeBalance: RequireNonNegativeBalance = async () => {},
+    private readonly chargeCompletedInteraction: ChargeCompletedInteraction = async () => {},
   ) {
     this.#requests = db.collection<VerificationRequestDocument>("verificationRequests");
     this.#events = db.collection<VerificationEventDocument>("verificationEvents");
@@ -106,6 +120,12 @@ export class VerificationService {
       const verification = await this.#requests.findOne({ _id: existing.interactionId });
       if (verification) return this.#toAccepted(verification);
     }
+
+    // A hard `balance <= 0` gate, checked before any new interaction is
+    // created — see `apps/api/src/balance-service.ts#requireNonNegativeBalance`
+    // for why this is a coarse gate rather than a per-call cost estimate.
+    // Exempts the platform-admin-owned demo project.
+    await this.requireNonNegativeBalance(customerId);
 
     // Voice clients may supply their own code; SMS codes are always generated
     // by the platform. Both use the same encrypted-at-rest representation.
@@ -261,6 +281,14 @@ export class VerificationService {
         { $set: { providerRecordStatus: "pending" } },
       );
       await this.enqueueProviderReconcile(updated._id);
+      // Charge the customer's balance for this real, completed delivery
+      // attempt at the same moment — see
+      // `apps/api/src/billing-charge-service.ts#chargeCompletedInteraction`.
+      // Deliberately not gated on success/failure: a busy/no-answer call
+      // still bills $0 (no `answered` event ever recorded), but a real SMS
+      // send that VoIP.ms accepted is billed regardless of confirmed
+      // delivery, matching real incurred provider cost either way.
+      await this.chargeCompletedInteraction(updated);
     }
 
     return true;

@@ -966,21 +966,148 @@ the existing document, never a new collection).
   live-tested" gap noted below; the remaining open item in this area is
   purely the customer-facing balance-tiered billing rule, not this
   reconciliation mechanism itself.
-- **Deliberately not built yet, per the user's own framing**: any notion
-  of a *customer's* cost or account balance. There is no `customerCostUsd`
-  field, no balance collection, and no pricing-tier logic anywhere yet —
-  the user described the intended rule (a customer's **current balance**
-  determines which flat per-transaction pricing tier applies: **&ge;$100 →
-  tier 1, $50–$99.99 → tier 2, &lt;$50 → tier 3**, plus a separate daily
-  charge) but has not yet specified the actual tier rates or daily-charge
-  amount, and the customer-balance database itself does not exist yet
-  either. **Do not build either of those speculatively** — the plan is to
-  add them once the exact charge logic is given, at which point
-  `providerRecord.providerCostUsd` (this platform's real, actual cost per
-  transaction, already being captured) is the input the tiered customer
-  price gets computed from, and only front-end customer-facing UI cards
-  are meant to display the resulting customer cost (never expose raw
-  provider cost/trunk/DID details to a customer).
+- **Customer balance billing is now implemented** — see the new "Customer
+  balance billing" section below for the full design.
+  `providerRecord.providerCostUsd` (this platform's own real cost, captured
+  here) and the customer-facing tiered price the balance-billing system
+  charges are deliberately two separate numbers computed two separate ways
+  (VoIP.ms's own CDR/SMS cost vs. an admin-entered rate-chart lookup) — the
+  former is never used as a direct input to the latter, since the tiered
+  price must be known immediately at charge time, long before VoIP.ms's own
+  CDR reconciliation (which can take 10+ minutes) resolves.
+
+## Customer balance billing (implemented)
+
+Built after direct Q&A with the user scoped down the original balance-tiered
+billing idea (see "Provider cost reconciliation" above) into something
+concrete enough to build: admin-editable per-country rate charts (gathered
+by hand from VoIP.ms's own published per-minute/per-message rates, never
+fetched automatically), a per-tier monthly/daily plan fee, a real,
+transactional running-balance ledger, and Stripe fixed-amount top-ups.
+
+- **Tiers** (a correction from the placeholder framing in the "Provider
+  cost reconciliation" section above, which had the direction backwards):
+  tier1 = balance $0–$49.99 (most expensive), tier2 = $50–$99.99, tier3 =
+  $100+ (cheapest) — more money on deposit gets a better rate, the reverse
+  of an earlier draft. The dollar boundaries are a fixed product decision
+  (`apps/api/src/balance-service.ts#tierForBalance`), not admin-configurable;
+  only the *rates* charged per tier are.
+- **Rate charts** (`apps/api/src/rate-chart-service.ts`,
+  `callRateCards`/`smsRateCards` collections, `_id` = ISO 3166-1 alpha-2
+  country code): one row per country, three tier columns each, for calls
+  (USD/minute, shared by `call_reachability`/`voice_code`/`voice_challenge`
+  — a VoIP.ms per-minute cost doesn't depend on which OTP type placed the
+  call) and SMS (USD/message, `sms_code`) separately. Edited via
+  `GET/PUT /v1/admin/billing/call-rates` and `.../sms-rates` and rendered
+  as editable grids in `apps/web/app/admin/billing-rates-panel.tsx`. A
+  country with no rate entered yet bills $0, never a guessed default.
+- **Plan charge chart** (`planCharges` collection, exactly 3 documents):
+  `monthlyDisplayUsd` (the "$10/month" a customer sees) and
+  `dailyChargedUsd` (what is actually deducted once/day) are two
+  independently admin-entered numbers, never one derived from the other —
+  matching the user's own framing ("we show it as a monthly $10 ... charged
+  daily"). Edited via `GET/PUT /v1/admin/billing/plan-charges`.
+- **The ledger** (`financialTransactions` collection, append-only, no TTL —
+  a permanent financial record, unlike the 18-month-TTL'd verification
+  collections): one row per balance-affecting event —
+  `userId`/`projectId`/`interactionId`/`stripePaymentId` (whichever apply),
+  `type` (`otp1`..`otp4` map 1:1 to
+  `call_reachability`/`voice_code`/`voice_challenge`/`sms_code` via
+  `otpChargeTypeFor` in `libraries/contracts/src/billing.ts`;
+  `daily_charge`; `topup`; `visit` is reserved but unused, see below),
+  `country` where applicable, and `openingBalanceUsd`/`tierAtTransaction`/
+  `amountUsd`/`closingBalanceUsd` — every row carries its own before/after
+  balance, so any date-range total is independently verifiable without
+  recomputing anything. A materialized `customerBalances` cache
+  (`{ _id: userId, balanceUsd, tier }`) is always written in the same
+  MongoDB multi-document transaction as the ledger insert
+  (`apps/api/src/balance-service.ts#applyLedgerEntry`, using
+  `client.startSession()` — Atlas is always a replica set, so real
+  transactions are always available), so concurrent charges/credits can
+  never corrupt the running balance. A tier-dependent charge amount is
+  resolved *inside* that same transaction (an `amountUsd` resolver function
+  given the opening tier), not computed ahead of time, so a concurrent
+  top-up can't leave a charge using a stale tier.
+- **Charge trigger**: `VerificationService#transition` calls
+  `BillingChargeService#chargeCompletedInteraction`
+  (`apps/api/src/billing-charge-service.ts`) at the exact same moment
+  provider-cost reconciliation is already scheduled from — the first time
+  an interaction crosses into "delivery is done" — never waiting on
+  VoIP.ms's own CDR reconciliation. Billed quantity comes from **this
+  platform's own** event timeline, never a guessed provider field:
+  - Calls: `computeBillableMinutes` finds the interaction's own `answered`
+    event and its terminal event, bills `ceil(seconds / 60)` with a
+    1-minute minimum once answered — a busy/no-answer/rejected call that
+    never answered bills $0, matching real telephony billing norms.
+  - SMS: a flat 1-message charge whenever a real send was accepted by
+    VoIP.ms (`smsDid` recorded), regardless of confirmed delivery.
+  - Country is resolved from the interaction's own E.164 `targetNumber` via
+    `apps/api/src/country-lookup.ts` (`libphonenumber-js`, a real
+    maintained library) — deliberately not a hand-rolled calling-code
+    prefix table, which would misattribute countries that share one (e.g.
+    NANP's `+1`: this project's own real canary number, `+14034701805`,
+    is actually Canadian, not American).
+  - Never charged for the platform-admin-owned demo project
+    (`PLATFORM_ADMIN_USER_ID`, `apps/api/src/persistence.ts`) —
+    `applyLedgerEntry`/`requireNonNegativeBalance` both exempt it, since
+    there is no real customer balance behind the public marketing demo.
+- **Insufficient balance**: `VerificationService#create` calls
+  `BalanceService#requireNonNegativeBalance` before creating any new
+  interaction — a hard `balance <= 0` gate (`insufficient_balance`, HTTP
+  402), not a per-call cost pre-estimate (real cost isn't known until after
+  the attempt completes). Applies uniformly to every creation path
+  (customer-backend, the hosted modal, the demo — exempted as above).
+- **Daily plan charge**: `apps/api/src/billing-daily-charge-worker.ts`, a
+  BullMQ repeatable job (`billing-daily-charges` queue, once/day) charges
+  every *active project* ("website install"/card) its owning customer's
+  current-tier `dailyChargedUsd` — one row per project per day, not one per
+  customer account. Per-project idempotency is a direct query ("does a
+  `daily_charge` row already exist for this project since the start of
+  today, UTC?"), not just the repeatable job's stable `jobId` — a mid-tick
+  restart re-running the same calendar day's pass can never double-charge
+  an already-charged project.
+- **Stripe top-ups** (`apps/api/src/stripe-service.ts`): fixed amounts only
+  — $5/$25/$50/$100, no arbitrary custom amount.
+  `POST /v1/billing/topups` (customer session-gated) creates a Stripe
+  Checkout session; the actual credit is only ever applied from
+  `POST /v1/billing/stripe/webhook` (public, authenticated entirely by
+  Stripe's own request signature) on a `checkout.session.completed` event —
+  never from the session-creation response itself, since the customer might
+  never complete payment. A `processedStripeEvents` collection (keyed by
+  Stripe's own event id, 90-day TTL) makes the webhook idempotent, since
+  Stripe retries on any non-2xx response. New optional config:
+  `STRIPE_SECRET_KEY`/`STRIPE_WEBHOOK_SECRET` — both empty-string-is-unset
+  like every other optional var; fails closed with `billing_not_configured`
+  until both are set, same deferred-credential convention as every other
+  provider in this project. **Not live-tested this session** — no real
+  Stripe test-mode keys were provided; ships code-complete and unit-tested
+  (webhook signature verification and idempotency are tested against a real
+  `Stripe` SDK instance with a dummy key, since signature verification is a
+  local HMAC check with no network call — only the actual Checkout-session
+  creation network call is untested, consistent with how this project never
+  unit-tests other live provider calls like VoIP.ms's `sendSMS`).
+- **Customer/admin visibility**: `GET /v1/billing/balance` and
+  `GET /v1/billing/ledger` (customer session-gated, own data only) back a
+  new dashboard section (`apps/web/app/dashboard/billing-panel.tsx`) showing
+  balance/tier, the 4 top-up buttons, and a recent-ledger table.
+  `GET /v1/admin/billing/ledger?userId=` (admin-only) backs
+  `apps/web/app/admin/billing-ledger-panel.tsx`, a manual look-up-by-user-id
+  panel for support, same convention as every other admin panel.
+- **Deliberately deferred, explicitly scoped down through this session's
+  Q&A rather than guessed at** — the "visit" ledger type is reserved in
+  `libraries/contracts/src/billing.ts`'s type enum but has **no real
+  charging logic wired to it**: it belongs to the future BotBlocker/
+  gate-adapter product (`docs/POWEROTP_BOTBLOCKER_PLAN.md`), which does not
+  exist yet. The user's own described rule for that future product,
+  recorded verbatim here so it isn't lost: *"when they hit 100,000 visitors
+  in the calendar month we charge another 100k amount to the account for
+  the tier they are at when they have the 100,001 visitor — each visit
+  count is when the gateway is hit and sends that signal to our backend
+  with the visitor behavior tracking (IP, mouse actions, click behavior,
+  browser type, etc., all coming from each visitor and pages
+  clicked/time on page/what was clicked, built into the middleware)."* Do
+  not build any part of this until the BotBlocker gate-adapter itself
+  exists to actually emit that signal.
 
 ## Admin operator health dashboard (implemented)
 
@@ -1465,14 +1592,20 @@ the actual UI copy end users see must not reference future plans.
    a problem yet (one droplet, `powerotpvoip1`); would need externalizing (e.g. into
    Valkey) if multi-node routing (Phase 9) is ever built.
 7. Provider cost/duration reconciliation (see "Provider cost reconciliation" above) is
-   **confirmed working end-to-end live** as of this session — a `call_reachability`,
-   `voice_code`, and `sms_code` demo verification all correctly matched a real VoIP.ms
-   `getCDR`/`getSMS` row with correct duration/cost extraction on the first attempt (see
-   that section's "Confirmed live" subsection for the exact figures). Customer-facing
-   cost calculation and the balance-tiered pricing rule (≥$100/$50–99.99/&lt;$50 tiers,
-   plus a daily charge — exact rates not yet given) and the customer-balance database
-   itself are **not started at all** — don't build either speculatively; see that
-   section for what's already been decided vs. still open.
+   **confirmed working end-to-end live** — a `call_reachability`, `voice_code`, and
+   `sms_code` demo verification all correctly matched a real VoIP.ms `getCDR`/`getSMS`
+   row with correct duration/cost extraction on the first attempt (see that section's
+   "Confirmed live" subsection for the exact figures). **Customer balance billing is now
+   implemented** (see "Customer balance billing" above) — tiers, per-country call/SMS
+   rate charts, the monthly/daily plan charge, the transactional ledger, insufficient-
+   balance enforcement, and Stripe fixed-amount top-ups. Not yet done: no rate has
+   actually been entered into the admin rate charts yet (every country bills $0 until an
+   admin does), no `STRIPE_SECRET_KEY`/`STRIPE_WEBHOOK_SECRET` are set yet (top-ups fail
+   closed with `billing_not_configured`), and this has not been live-tested end-to-end
+   against a real Stripe test-mode payment or a real customer balance actually reaching
+   $0 and blocking a request. The future BotBlocker "visit" per-visitor charge (100k/month
+   allowance then billed in 100k blocks) is explicitly deferred — see that section's last
+   bullet for the user's exact described rule, recorded so it isn't lost.
 8. **Phase 7 is now mostly done** (see the new "Phase 7: usage counters,
    callback diagnostics, alerting, retention" section above): usage
    counters (admin-wide and per-project), callback delivery diagnostics

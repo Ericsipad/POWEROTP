@@ -23,7 +23,9 @@
     "@powerotp/contracts": "*",
     "bullmq": "^5.81.3",
     "ioredis": "^6.0.0",
+    "libphonenumber-js": "^1.13.10",
     "mongodb": "^7.5.0",
+    "stripe": "^22.4.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {

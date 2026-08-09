@@ -1,5 +1,12 @@
 import { createAlertQueue, createAlertWorker, scheduleAlertChecks } from "@powerotp/api/alert-worker.js";
 import { AuthService } from "@powerotp/api/auth-service.js";
+import { BalanceService } from "@powerotp/api/balance-service.js";
+import { BillingChargeService } from "@powerotp/api/billing-charge-service.js";
+import {
+  createBillingDailyChargeQueue,
+  createBillingDailyChargeWorker,
+  scheduleBillingDailyCharges,
+} from "@powerotp/api/billing-daily-charge-worker.js";
 import { createCallbackWorker } from "@powerotp/api/callback-worker.js";
 import { ChallengeService } from "@powerotp/api/challenge-service.js";
 import { loadConfig, type ProductionConfig } from "@powerotp/api/config.js";
@@ -10,6 +17,8 @@ import { NodeService } from "@powerotp/api/node-service.js";
 import { ensureIndexes } from "@powerotp/api/persistence.js";
 import { createProviderReconcileWorker } from "@powerotp/api/provider-reconcile-worker.js";
 import { ProjectService } from "@powerotp/api/project-service.js";
+import { RateChartService } from "@powerotp/api/rate-chart-service.js";
+import { StripeTopupService } from "@powerotp/api/stripe-service.js";
 import { productionTransportRegistry } from "@powerotp/api/transport.js";
 import {
   createDispatchWorker,
@@ -29,6 +38,9 @@ export interface ServerContext {
   challenges: ChallengeService;
   modalSessions: ModalSessionService;
   queues: VerificationQueues;
+  balances: BalanceService;
+  rateCharts: RateChartService;
+  stripeTopups: StripeTopupService;
 }
 
 /**
@@ -50,6 +62,12 @@ async function buildServerContext(): Promise<ServerContext> {
   const challenges = new ChallengeService(dataStores.db, config);
   const queueConnection = toQueueConnectionOptions(config.VALKEY_URL);
   const queues = createVerificationQueues(queueConnection);
+
+  const balances = new BalanceService(dataStores.client, dataStores.db);
+  const rateCharts = new RateChartService(dataStores.db);
+  const billingCharges = new BillingChargeService(dataStores.db, balances, rateCharts);
+  const stripeTopups = new StripeTopupService(dataStores.db, config, balances);
+
   const verifications = new VerificationService(
     dataStores.db,
     config,
@@ -58,6 +76,8 @@ async function buildServerContext(): Promise<ServerContext> {
     queues.enqueueTimeout,
     queues.enqueueCallback,
     queues.enqueueProviderReconcile,
+    (customerId) => balances.requireNonNegativeBalance(customerId),
+    (verification) => billingCharges.chargeCompletedInteraction(verification),
   );
   const dispatchWorker = createDispatchWorker(
     queueConnection,
@@ -66,6 +86,18 @@ async function buildServerContext(): Promise<ServerContext> {
   );
   const callbackWorker = createCallbackWorker(queueConnection, dataStores.db, config);
   const providerReconcileWorker = createProviderReconcileWorker(queueConnection, dataStores.db, config);
+
+  // Daily per-project plan-charge tick — see
+  // `apps/api/src/billing-daily-charge-worker.ts` and docs/AS_BUILT.md's
+  // "Customer balance billing" section.
+  const billingDailyChargeQueue = createBillingDailyChargeQueue(queueConnection);
+  const billingDailyChargeWorker = createBillingDailyChargeWorker(
+    queueConnection,
+    dataStores.db,
+    balances,
+    rateCharts,
+  );
+  await scheduleBillingDailyCharges(billingDailyChargeQueue);
 
   const emailService = createBrevoEmailService(config);
   const auth = new AuthService(dataStores.db, config, emailService);
@@ -89,6 +121,8 @@ async function buildServerContext(): Promise<ServerContext> {
       providerReconcileWorker.close(),
       alertWorker.close(),
       alertQueue.close(),
+      billingDailyChargeWorker.close(),
+      billingDailyChargeQueue.close(),
       queues.close(),
     ]);
     await dataStores.close();
@@ -97,7 +131,20 @@ async function buildServerContext(): Promise<ServerContext> {
   process.on("SIGINT", () => void shutdown("SIGINT"));
   process.on("SIGTERM", () => void shutdown("SIGTERM"));
 
-  return { config, dataStores, auth, projects, verifications, nodes, challenges, modalSessions, queues };
+  return {
+    config,
+    dataStores,
+    auth,
+    projects,
+    verifications,
+    nodes,
+    challenges,
+    modalSessions,
+    queues,
+    balances,
+    rateCharts,
+    stripeTopups,
+  };
 }
 
 export function getServerContext(): Promise<ServerContext> {

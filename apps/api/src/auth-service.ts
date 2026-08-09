@@ -4,10 +4,11 @@ import type { Db } from "mongodb";
 import type { ProductionConfig } from "./config.js";
 import type { EmailService } from "./email.js";
 import { isIpAllowed } from "./ip-allowlist.js";
-import type {
-  EmailVerificationDocument,
-  SessionDocument,
-  UserDocument,
+import {
+  PLATFORM_ADMIN_USER_ID,
+  type EmailVerificationDocument,
+  type SessionDocument,
+  type UserDocument,
 } from "./persistence.js";
 import {
   createId,
@@ -157,7 +158,7 @@ export class AuthService {
 
     const now = new Date();
     const user: UserDocument = {
-      _id: "usr_platform_admin",
+      _id: PLATFORM_ADMIN_USER_ID,
       email: this.config.ADMIN_EMAIL.toLowerCase(),
       passwordHash: "",
       accountClass: "platform_admin",

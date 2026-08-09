@@ -7,10 +7,11 @@ import type {
 import type { Db } from "mongodb";
 
 import type { ProductionConfig } from "./config.js";
-import type {
-  ApiKeyDocument,
-  AuditDocument,
-  ProjectDocument,
+import {
+  PLATFORM_ADMIN_USER_ID,
+  type ApiKeyDocument,
+  type AuditDocument,
+  type ProjectDocument,
 } from "./persistence.js";
 import {
   createId,
@@ -232,7 +233,7 @@ export class ProjectService {
         },
         $setOnInsert: {
           _id: createId("prj"),
-          customerId: "usr_platform_admin",
+          customerId: PLATFORM_ADMIN_USER_ID,
           slug,
           createdAt: now,
         },

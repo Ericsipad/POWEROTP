@@ -9,6 +9,7 @@ import type {
 import { useRouter } from "next/navigation";
 import { useEffect, useState, type FormEvent } from "react";
 
+import { BillingPanel } from "./billing-panel";
 import { ProjectCard } from "./project-card";
 
 const methods: Array<{ id: VerificationType; label: string }> = [
@@ -163,6 +164,7 @@ export default function DashboardPage() {
       </header>
       <section className="dashboardGrid shell">
         {error && <div className="formError">{error}</div>}
+        {session && <BillingPanel authenticatedFetch={authenticatedFetch} />}
         {!projects.length && !error && (
           <div className="emptyState">Create your first POWEROTP project.</div>
         )}

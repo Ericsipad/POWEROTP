@@ -13,10 +13,12 @@ import type { InteractionChallenge } from "./challenge-service.js";
  * documented publicly, so keeping the whole row means nothing is lost if
  * the known-field extraction below needs adjusting later); `durationSeconds`/
  * `providerCostUsd` are this project's best-effort extraction from it.
- * There is deliberately no "customer cost" field yet — the balance-tiered
- * pricing rule that turns this into what a customer is actually charged
- * has not been specified; see `docs/AS_BUILT.md`'s "Provider cost
- * reconciliation" section.
+ * This is deliberately never the input to what a customer is actually
+ * charged — the customer-facing tiered price (see
+ * `apps/api/src/billing-charge-service.ts` and `docs/AS_BUILT.md`'s
+ * "Customer balance billing" section) is computed from an admin-entered
+ * rate chart at charge time, long before this provider record (which can
+ * take VoIP.ms 10+ minutes to reconcile) is even available.
  */
 export interface ProviderRecordSnapshot {
   source: "voipms_cdr" | "voipms_sms";

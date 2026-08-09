@@ -105,6 +105,13 @@ and do not create a repository `.env` file.
   `apps/api/src/challenge-service.ts#currentManifest`). Also written to each droplet's
   `/etc/powerotp/agent.env`, the exact same value, the same way `NODE_SECRET` is (see
   `infrastructure/asterisk/README.md`).
+- `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET`: optional, Stripe API credentials backing
+  fixed-amount ($5/$25/$50/$100) customer balance top-ups — see
+  `apps/api/src/stripe-service.ts` and `docs/AS_BUILT.md`'s "Customer balance billing"
+  section. `STRIPE_WEBHOOK_SECRET` is the signing secret for the specific webhook
+  endpoint configured in the Stripe dashboard to point at
+  `https://powerotp.com/v1/billing/stripe/webhook`, not the API secret key itself. Leave
+  both unset to keep top-ups failing closed with `billing_not_configured`.
 
 ## Domains
 

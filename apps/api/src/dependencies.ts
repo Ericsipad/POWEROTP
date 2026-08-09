@@ -5,6 +5,11 @@ import type { ProductionConfig } from "./config.js";
 
 export interface DataStores {
   db: Db;
+  /** The underlying `MongoClient`, exposed alongside `db` so services that
+   * need real multi-document transactions (e.g.
+   * `apps/api/src/balance-service.ts#applyLedgerEntry`) can call
+   * `client.startSession()` — `Db` itself doesn't expose session support. */
+  client: MongoClient;
   rateLimitStore: Redis;
   isReady(): Promise<boolean>;
   close(): Promise<void>;
@@ -33,6 +38,7 @@ export async function connectDataStores(
 
   return {
     db: mongo.db("powerotp"),
+    client: mongo,
     rateLimitStore: valkey,
     async isReady() {
       try {

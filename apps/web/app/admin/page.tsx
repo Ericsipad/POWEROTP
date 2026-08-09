@@ -4,6 +4,8 @@ import { NODE_STALE_THRESHOLD_MS, type Node, type SessionResponse } from "@power
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
+import { BillingLedgerPanel } from "./billing-ledger-panel";
+import { BillingRatesPanel } from "./billing-rates-panel";
 import { CallbackDeliveriesPanel } from "./callback-deliveries-panel";
 import { ChallengesPanel } from "./challenges-panel";
 import { OpsPanel } from "./ops-panel";
@@ -186,6 +188,8 @@ export default function AdminPage() {
         <CallbackDeliveriesPanel />
         <WidgetInteractionsPanel />
         {session && <ChallengesPanel csrfToken={session.csrfToken} />}
+        {session && <BillingRatesPanel csrfToken={session.csrfToken} />}
+        <BillingLedgerPanel />
       </section>
     </main>
   );

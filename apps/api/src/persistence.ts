@@ -1,9 +1,19 @@
 import type { AccountClass, VerificationType } from "@powerotp/contracts";
 import type { Db } from "mongodb";
 
+import { ensureBillingIndexes } from "./billing-persistence.js";
 import { ensureChallengeIndexes } from "./challenge-persistence.js";
 import { ensureModalSessionIndexes } from "./modal-session-persistence.js";
 import { ensureVerificationIndexes } from "./verification-persistence.js";
+
+/**
+ * The single platform admin's fixed user id (see `AuthService#loginAdmin`)
+ * and, separately, the owner of the operator-configured demo project (see
+ * `ProjectService#ensureDemoProject`). Also used by
+ * `apps/api/src/balance-service.ts` as the one customer id that is never
+ * billed — there is no real customer balance behind the marketing demo.
+ */
+export const PLATFORM_ADMIN_USER_ID = "usr_platform_admin";
 
 export interface UserDocument {
   _id: string;
@@ -138,4 +148,5 @@ export async function ensureIndexes(db: Db) {
   await ensureVerificationIndexes(db);
   await ensureChallengeIndexes(db);
   await ensureModalSessionIndexes(db);
+  await ensureBillingIndexes(db);
 }

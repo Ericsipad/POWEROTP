@@ -116,6 +116,19 @@ const ProductionConfigSchema = z.object({
   SPACES_ACCESS_KEY: z.string().min(1).optional(),
   SPACES_SECRET_KEY: z.string().min(1).optional(),
   MEDIA_MANIFEST_SECRET: z.string().min(32).optional(),
+  /**
+   * Stripe fixed-amount ($5/$25/$50/$100) customer balance top-ups (see
+   * `apps/api/src/stripe-service.ts` and `docs/AS_BUILT.md`'s "Customer
+   * balance billing" section). Both optional, same deferred-credential
+   * convention as every other provider in this project: `POST
+   * /v1/billing/topups` and the Stripe webhook route fail closed with
+   * `billing_not_configured` until both are set. `STRIPE_WEBHOOK_SECRET` is
+   * the signing secret for the specific webhook endpoint configured in the
+   * Stripe dashboard to point at `POST /v1/billing/stripe/webhook`, not the
+   * API secret key.
+   */
+  STRIPE_SECRET_KEY: z.string().min(1).optional(),
+  STRIPE_WEBHOOK_SECRET: z.string().min(1).optional(),
 });
 
 export type ProductionConfig = z.infer<typeof ProductionConfigSchema>;
