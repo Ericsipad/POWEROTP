@@ -9,6 +9,7 @@ import type {
 import { useRouter } from "next/navigation";
 import { useEffect, useState, type FormEvent } from "react";
 
+import { TopBanner } from "../top-banner";
 import { BillingPanel } from "./billing-panel";
 import { ProjectCard } from "./project-card";
 
@@ -32,9 +33,21 @@ export default function DashboardPage() {
   const [creating, setCreating] = useState(false);
   const [secrets, setSecrets] = useState<RevealedSecrets>();
   const [error, setError] = useState("");
+  const [topupBanner, setTopupBanner] = useState<"success" | "canceled">();
 
   useEffect(() => {
     void load();
+
+    // Stripe redirects back here after a top-up attempt (see
+    // apps/api/src/stripe-service.ts's success_url/cancel_url) — the
+    // redirect itself never credits anything, it's just this one-off
+    // confirmation banner. Strip the query param so a page refresh doesn't
+    // re-show it.
+    const topup = new URLSearchParams(window.location.search).get("topup");
+    if (topup === "success" || topup === "canceled") {
+      setTopupBanner(topup);
+      window.history.replaceState(null, "", window.location.pathname);
+    }
   }, []);
 
   async function load() {
@@ -144,6 +157,17 @@ export default function DashboardPage() {
 
   return (
     <main className="dashboardPage">
+      {topupBanner && (
+        <TopBanner
+          tone={topupBanner === "success" ? "success" : "info"}
+          message={
+            topupBanner === "success"
+              ? "Top-up successful — your balance will update within a few moments."
+              : "Top-up canceled."
+          }
+          onClose={() => setTopupBanner(undefined)}
+        />
+      )}
       <nav className="dashboardNav shell">
         <a className="brand" href="/">
           <span className="brandMark">P</span> POWEROTP

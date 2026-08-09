@@ -236,6 +236,48 @@
   text-transform: uppercase;
 }
 
+.topBanner {
+  align-items: center;
+  border-radius: 0 0 10px 10px;
+  cursor: pointer;
+  display: flex;
+  font-size: 14px;
+  font-weight: 700;
+  gap: 12px;
+  justify-content: center;
+  left: 50%;
+  padding: 14px 20px;
+  position: fixed;
+  top: 0;
+  transform: translateX(-50%);
+  width: min(92vw, 560px);
+  z-index: 20;
+}
+
+.topBannerSuccess {
+  background: #eff9e6;
+  border: 1px solid #b8d69d;
+  border-top: none;
+  color: #2f6e49;
+}
+
+.topBannerInfo {
+  background: #fff8e6;
+  border: 1px solid #e6cf8a;
+  border-top: none;
+  color: #8d6a18;
+}
+
+.topBannerClose {
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  padding: 0;
+}
+
 .modalBackdrop {
   align-items: center;
   background: rgb(16 35 29 / 55%);
