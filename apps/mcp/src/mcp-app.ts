@@ -10,6 +10,7 @@ import { z } from "zod";
 
 import {
   buildExample,
+  buildModalSessionExample,
   getCapabilities,
   integrationOverview,
   verificationGuides,
@@ -119,6 +120,27 @@ export function createMcpApp() {
     },
     async ({ type, language }) => ({
       content: [{ type: "text", text: buildExample(type, language) }],
+    }),
+  );
+
+  mcp.registerTool(
+    "generate_modal_session_example",
+    {
+      title: "Generate a POWEROTP hosted-modal example",
+      description:
+        "Generate a server-side curl or TypeScript example for creating a hosted verification modal session (no target phone number required from your backend; the end user types their own into the modal).",
+      inputSchema: z.object({
+        language: z.enum(["curl", "typescript"]),
+      }),
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+    async ({ language }) => ({
+      content: [{ type: "text", text: buildModalSessionExample(language) }],
     }),
   );
 

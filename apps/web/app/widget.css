@@ -1,0 +1,328 @@
+/*
+ * Styling for the hosted verification modal (`/widget/{sessionId}`), which
+ * is typically embedded in an iframe on a third-party site — deliberately
+ * self-contained (no site nav/footer chrome) and minimal, unlike the
+ * marketing/dashboard pages this stylesheet's siblings cover.
+ */
+
+.widgetPage {
+  align-items: flex-start;
+  display: flex;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 24px 16px;
+}
+
+.widgetCard {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: 0 8px 30px rgba(16, 35, 29, 0.08);
+  display: grid;
+  gap: 16px;
+  max-width: 420px;
+  padding: 28px;
+  width: 100%;
+}
+
+.widgetBrand {
+  align-items: center;
+  display: inline-flex;
+  font-size: 14px;
+  font-weight: 900;
+  gap: 10px;
+  letter-spacing: 0.06em;
+}
+
+.widgetCopy {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.widgetForm {
+  display: grid;
+  gap: 14px;
+}
+
+.widgetMethods {
+  display: grid;
+  gap: 8px;
+}
+
+.widgetMethod {
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  cursor: pointer;
+  display: flex;
+  font-size: 13px;
+  font-weight: 700;
+  gap: 10px;
+  padding: 10px 12px;
+}
+
+.widgetMethodActive {
+  background: #f4fbe8;
+  border-color: var(--green-dark);
+}
+
+.widgetProgress {
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 700;
+  margin: 0;
+  text-align: center;
+}
+
+.widgetResult {
+  border-radius: 12px;
+  padding: 20px;
+  text-align: center;
+}
+
+.widgetResult span {
+  display: block;
+  font-size: 16px;
+  font-weight: 900;
+  margin-bottom: 6px;
+}
+
+.widgetResult p {
+  color: var(--muted);
+  font-size: 13px;
+  margin: 0;
+}
+
+.widgetResultSuccess {
+  background: #f4fbe8;
+}
+
+.widgetResultFailure {
+  background: #fff1f0;
+}
+
+.challengeOptions {
+  display: grid;
+  gap: 8px;
+}
+
+.challengeOption {
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  display: flex;
+  font-size: 13px;
+  gap: 10px;
+  padding: 10px 12px;
+}
+
+.passportSection {
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 10px;
+  padding-top: 16px;
+}
+
+.passportCopy {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+/*
+ * Visually hidden from real visitors, but present in the DOM for a raw
+ * HTML/link-parsing crawler to find — see `widget-client.tsx`'s comment
+ * for why `display: none` is avoided (some scrapers skip it).
+ */
+.honeypotLink {
+  height: 1px;
+  left: -9999px;
+  overflow: hidden;
+  position: absolute;
+  top: auto;
+  width: 1px;
+}
+
+/*
+ * The marketing homepage's "try it now" demo: the existing request/response
+ * card plus a live preview of the exact same branded modal a real
+ * customer's end user would see, side by side on wide screens.
+ */
+.tryItNowRow {
+  align-items: start;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+}
+
+.tryItNowRow > .tryItNow {
+  flex: 1 1 320px;
+}
+
+.tryItNowModalPreview {
+  flex: 1 1 300px;
+  max-width: 420px;
+}
+
+.tryItNowModalBadge {
+  font-size: 9px;
+}
+
+/*
+ * The "verified" celebration: a green checkmark, then a spin/shrink/fade
+ * "poof" with a sparkle burst, then a large silhouette + "Verified" text
+ * fading in behind it. See `verification-modal/verified-celebration.tsx`.
+ */
+.celebration {
+  align-items: center;
+  display: grid;
+  justify-content: center;
+  min-height: 220px;
+  position: relative;
+  text-align: center;
+}
+
+.celebrationCard {
+  align-items: center;
+  animation: celebrationCardIn 0.4s ease-out;
+  display: grid;
+  gap: 10px;
+  justify-content: center;
+}
+
+.celebrationCardPoof {
+  animation: celebrationPoof 0.55s ease-in forwards;
+}
+
+.celebrationCheck {
+  height: 84px;
+  width: 84px;
+}
+
+.celebrationCheckCircle {
+  fill: none;
+  stroke: var(--green-dark);
+  stroke-width: 3;
+  stroke-dasharray: 151;
+  stroke-dashoffset: 151;
+  animation: celebrationCircleDraw 0.5s ease-out forwards;
+}
+
+.celebrationCheckMark {
+  stroke: var(--green-dark);
+  stroke-dasharray: 36;
+  stroke-dashoffset: 36;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 4;
+  animation: celebrationCheckDraw 0.35s 0.35s ease-out forwards;
+}
+
+.sparkleField {
+  height: 0;
+  left: 50%;
+  position: absolute;
+  top: 90px;
+  width: 0;
+}
+
+.sparkle {
+  background: var(--green);
+  border-radius: 50%;
+  box-shadow: 0 0 6px 1px rgba(184, 243, 74, 0.8);
+  left: 0;
+  position: absolute;
+  top: 0;
+  animation: sparkleBurst 0.6s var(--sparkle-delay) ease-out forwards;
+}
+
+.sparkle:nth-child(3n) {
+  background: #ffd76a;
+  box-shadow: 0 0 6px 1px rgba(255, 215, 106, 0.8);
+}
+
+.celebrationReveal {
+  align-items: center;
+  animation: celebrationRevealIn 0.6s ease-out;
+  display: grid;
+  gap: 12px;
+  justify-content: center;
+}
+
+.celebrationSilhouette {
+  fill: var(--green-dark);
+  filter: drop-shadow(0 0 18px rgba(47, 110, 73, 0.45));
+  height: 96px;
+  width: 96px;
+}
+
+.celebrationVerifiedText {
+  color: var(--green-dark);
+  font-size: 20px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+@keyframes celebrationCardIn {
+  from {
+    opacity: 0;
+    transform: scale(0.7);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes celebrationCircleDraw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes celebrationCheckDraw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes celebrationPoof {
+  0% {
+    opacity: 1;
+    transform: scale(1) rotate(0deg);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0) rotate(360deg);
+  }
+}
+
+@keyframes sparkleBurst {
+  0% {
+    opacity: 1;
+    transform: translate(0, 0) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(var(--tx), var(--ty)) scale(0.2);
+  }
+}
+
+@keyframes celebrationRevealIn {
+  0% {
+    opacity: 0;
+    transform: scale(0.5);
+  }
+  60% {
+    opacity: 1;
+    transform: scale(1.08);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}

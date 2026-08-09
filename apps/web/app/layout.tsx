@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import "./styles.css";
 import "./auth.css";
 import "./dashboard.css";
+import "./widget.css";
 
 export const metadata: Metadata = {
   title: "POWEROTP | Phone verification infrastructure",

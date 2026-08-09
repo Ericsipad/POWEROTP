@@ -66,7 +66,15 @@ export const VerificationAcceptedSchema = z.object({
 export const InteractionTokenClaimsSchema = z.object({
   projectId: z.string().min(16),
   interactionId: z.string().min(16),
-  action: z.enum(["submit_code", "submit_challenge"]),
+  /**
+   * `view_status` is read-only (never single-use consumed, unlike
+   * `submit_code`/`submit_challenge`) — see
+   * `apps/api/src/modal-session-service.ts` and `docs/AS_BUILT.md`'s
+   * "Hosted verification modal" section for why the hosted modal needs to
+   * poll status from the browser using only the session-scoped token, with
+   * no project API key ever reaching the browser.
+   */
+  action: z.enum(["submit_code", "submit_challenge", "view_status"]),
   audience: z.string().min(1),
   nonce: z.string().min(16),
   issuedAt: z.number().int().nonnegative(),

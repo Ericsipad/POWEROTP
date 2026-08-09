@@ -74,6 +74,20 @@ export interface VerificationRequestDocument {
   /** See `ProviderRecordSnapshot` above. */
   providerRecord?: ProviderRecordSnapshot;
   /**
+   * The end user's own IP/User-Agent, captured directly from their browser
+   * request to the hosted verification modal — never from a header a
+   * customer's site could set itself, since that's trivially spoofable.
+   * Only ever populated for verifications created through
+   * `POST /v1/modal-sessions/{sessionId}/verifications` (the actual
+   * "widget interaction"); a verification created by a customer's own
+   * backend has no meaningful end-user IP to capture (the request came
+   * from their server, not the end user's browser). Visibility/audit only
+   * for now, per explicit scope — see `docs/AS_BUILT.md`'s "Hosted
+   * verification modal" section; no fraud/risk logic attached to this yet.
+   */
+  endUserIp?: string;
+  endUserUserAgent?: string;
+  /**
    * `"pending"` once reconciliation has been scheduled, `"matched"` once
    * `providerRecord` is populated, `"not_found"` if VoIP.ms's own records
    * never produced a match after every retry, `"error"` if the lookup

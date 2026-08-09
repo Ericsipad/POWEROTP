@@ -1,19 +1,10 @@
 import { ApiError } from "@powerotp/api/errors.js";
-import type { ProjectDocument } from "@powerotp/api/persistence.js";
 import { NextResponse } from "next/server";
 
 import { apiRoute, clientIp } from "@/lib/api-route";
+import { requireDemoProject } from "@/lib/demo-project";
 import { enforceRateLimit } from "@/lib/rate-limit";
-import { getServerContext, type ServerContext } from "@/lib/server-context";
-
-async function requireDemoProject(context: ServerContext): Promise<ProjectDocument> {
-  if (!context.config.DEMO_PROJECT_SLUG) throw new ApiError("demo_not_configured", 404);
-  const project = await context.dataStores.db
-    .collection<ProjectDocument>("projects")
-    .findOne({ slug: context.config.DEMO_PROJECT_SLUG, active: true });
-  if (!project) throw new ApiError("demo_not_configured", 404);
-  return project;
-}
+import { getServerContext } from "@/lib/server-context";
 
 interface RouteParams {
   params: Promise<{ interactionId: string }>;

@@ -193,7 +193,15 @@ server at all. This is the one to keep building on.
   "Outbound trunk pool: rotation and failover").
 - **Phase 6 (SMS)**: provider adapter implemented and unit-tested; live VoIP.ms SMS API
   credentials are deliberately deferred until the combined validation pass.
-- **Phases 7–9**: not started.
+- **Phase 7**: implemented — see "Phase 7: usage counters, callback
+  diagnostics, alerting, retention" below.
+- **Phase 8 (integration surface)**: substantially implemented this
+  session — see "Hosted verification modal" below. MCP deepening and a
+  completed (private, unpublished) server SDK cover "API documentation"
+  and "SDK starters"; the hosted modal covers "widget loader". Not done:
+  publishing `@powerotp/server-sdk`/`@powerotp/widget-loader` to a public
+  registry (deliberately deferred — see that section).
+- **Phase 9**: not started.
 
 ## Platform admin auth (changed from the original TOTP design)
 
@@ -1134,6 +1142,251 @@ infrastructure:
   real data approaches that age, not before. Do not provision Wasabi
   credentials or build an export job speculatively.
 
+## Hosted verification modal (Phase 8, implemented)
+
+The remaining Phase 8 scope was clarified through direct Q&A with the user
+before any code was written (per the standing "ask before building" rule)
+into something more specific than `docs/PLAN.md`'s original wording: not a
+generic embeddable widget-loader script or a separate docs site, but a
+**POWEROTP-hosted, POWEROTP-branded verification modal** for customers who
+only need the plain OTP function (not the future bot-blocker middleware) —
+the end user types their own phone number directly into a page POWEROTP
+hosts and controls, so the customer's frontend never has to build call/SMS/
+code/challenge UI or handle a phone number at all. "API documentation" and
+"copy this to your AI" were confirmed to already be covered by the existing
+MCP server (deepened this session, see below) rather than needing a new
+artifact — the user's own words: "all the instructions are on the mcp and
+clients read powerotp.com/mcp ... the actual account connection is done
+when the user enters the API creds in their site."
+
+- **Why a new "session" concept was needed**: today's
+  `POST /v1/projects/{slug}/verifications` requires the caller to already
+  know `targetNumber` — it's designed for a customer's backend that already
+  has the number (e.g. from its own signup form). The hosted modal flips
+  that: the end user types the number *into the modal itself*, so a new,
+  more limited credential has to exist *before* any interaction does. A
+  "modal session" (`libraries/contracts/src/modal-sessions.ts`,
+  `apps/api/src/modal-session-persistence.ts`,
+  `apps/api/src/modal-session-service.ts#ModalSessionService`) is created
+  by a customer's own backend with its project API key
+  (`POST /v1/projects/{slug}/modal-sessions`, optionally narrowing
+  `allowedTypes` to a subset of the project's own `enabledMethods` — always
+  re-validated server-side, never trusted at face value) and is the *sole*
+  credential every subsequent public route accepts. It never carries a
+  project's API key, callback URL, or any other project secret — just
+  `allowedTypes`, an attempt counter (capped at
+  `MODAL_SESSION_MAX_ATTEMPTS = 3`, generous enough to retry a busy/
+  no-answer call, tight enough that one session can't become a call-spam
+  vector), and a 24-hour TTL (`modalSessions` collection, same
+  `{ expiresAt: 1 }, { expireAfterSeconds: 0 }` pattern as `sessions`/
+  `emailVerifications`). `ModalSessionService#requireActive` also checks
+  `expiresAt` manually on every read, since Mongo's TTL sweep only runs
+  periodically, not the instant a document expires.
+- **The hosted page**: `apps/web/app/widget/[sessionId]/page.tsx` +
+  `widget-client.tsx` — a customer embeds
+  `modalUrl` (returned alongside `sessionId`/`expiresAt` from session
+  creation) directly, typically in an iframe. On load it fetches
+  `GET /v1/modal-sessions/{sessionId}` (public — the session id itself is
+  the credential) for `allowedTypes`/`attemptsRemaining`/the project's
+  display name, renders a phone-number field (plus a method choice if more
+  than one type is allowed), and on submit calls
+  `POST /v1/modal-sessions/{sessionId}/verifications`, which internally
+  calls the same, unchanged `VerificationService.create()` every other path
+  already uses (`browserResponse` forced `true` server-side) — no
+  duplicated verification-creation logic.
+- **Status polling needed a real (small) change to the existing status
+  route, not zero changes as first assumed while planning this**: the
+  modal has no project API key, so it cannot poll
+  `GET /v1/verifications/{interactionId}` the way it worked before this
+  session (API-key-only). Fixed by adding a second, `view_status`-scoped
+  interaction-token action (`libraries/contracts/src/verification.ts`'s
+  `InteractionTokenClaimsSchema.action` enum gained `"view_status"`
+  alongside the existing `submit_code`/`submit_challenge`) that the status
+  route now also accepts via the same `x-interaction-token` header the
+  response route already used — but, unlike those two, **never single-use
+  consumed**, since polling the same interaction repeatedly is expected,
+  not a replay. This token's `audience` is a fixed constant
+  (`apps/api/src/interaction-tokens.ts#WIDGET_STATUS_TOKEN_AUDIENCE`, not
+  the request's `Origin` header) — deliberately different from the
+  existing submit-action tokens, which must match a customer's own
+  allowlisted origin: a same-origin `GET` fetch isn't guaranteed to always
+  carry an `Origin` header across browsers, and the modal is always served
+  from this one control-plane origin regardless, so there's nothing extra
+  an origin check would defend against here beyond what the token's own
+  signature/expiry/project/interaction-id scoping already covers. The
+  session-scoped verification-creation route always issues this
+  `view_status` token (even for `call_reachability`, which has no response
+  step at all) alongside the normal submit-action token when one applies,
+  returned together as `ModalSessionVerificationAcceptedSchema`'s
+  `statusToken`/`interactionToken` — a new response shape distinct from the
+  plain `VerificationAcceptedSchema`, since the customer-facing create route
+  never needs a status token (its caller already has an API key).
+- **The customer's backend still gets the authoritative result the exact
+  same way it always has**: the existing signed HMAC callback
+  (unchanged — see "Signed callbacks" throughout this document). The
+  modal's own `window.parent.postMessage({ source: "powerotp-widget",
+  state, reasonCode, ... })` on a terminal state is a same-page UX
+  convenience only (so an embedding page can e.g. close the modal
+  immediately) — **explicitly documented, in the MCP content and here, as
+  never authoritative**: it's plain `postMessage` from a page whose script
+  a customer doesn't control, trivially spoofable by anything else running
+  in that browser tab, and must never be the basis for a security-sensitive
+  decision.
+- **`@powerotp/widget-loader`** (`libraries/widget-loader/src/index.ts`,
+  repurposed this session): `mountPowerOtpWidget({ container, modalUrl,
+  onEvent })` mounts the iframe and relays `message` events to a
+  caller-supplied callback — previously took a raw `interactionToken`
+  before this session's design, which didn't fit the "end user hasn't
+  entered a number yet" flow at all.
+- **`@powerotp/server-sdk`** (`libraries/sdk-js/src/index.ts`, completed
+  this session): `PowerOtpClient` gained `createModalSession(allowedTypes?)`
+  (posts to the sibling `.../modal-sessions` path of the configured project
+  URL), `getVerificationStatus(interactionId)`, and
+  `submitResponse(interactionId, body)` (both against the top-level
+  `/v1/verifications/...` paths on the project URL's origin) — previously
+  create-only. Also exports a standalone `verifyCallbackSignature` function
+  mirroring `apps/api/src/callback-signing.ts`'s algorithm exactly (a
+  deliberate, documented duplication rather than an `@powerotp/api`
+  dependency — that package is server-internal, pulling in BullMQ/MongoDB/
+  the AWS SDK, nothing a customer's own backend should ever need to
+  install). **Both packages remain `private: true`, unpublished** — the
+  user's own framing was to complete them now and defer publishing to a
+  public registry as a separate decision (needs an npm org/token that
+  doesn't exist yet); revisit only if asked.
+- **MCP deepened** (`apps/mcp/src/content.ts`/`mcp-app.ts`): fixed a
+  real, previously-shipped bug (`integration-overview.creation` was missing
+  the `/v1` prefix on the creation path — never actually reachable if a
+  reader tried to use it literally), added `status`/`callbacks`/
+  `hostedModal` fields to `integrationOverview` (previously silent on the
+  status endpoint, callback signature format, and this whole hosted-modal
+  option), and a new `generate_modal_session_example` tool/
+  `buildModalSessionExample` function alongside the existing
+  `generate_example`. Still fully read-only/public — no new tool touches
+  live project data.
+- **Power Passport (placeholder UI only, no backend this session)**: a
+  separate section on the same `/widget` page, aimed at AI agents/bots
+  rather than the human OTP flow — conceptually the seed of a future
+  bot-blocker middleware phase, added at the user's specific request this
+  session but deliberately not built out: a "Power Passport key" text
+  field, explanatory copy about sites letting compliant AI agents pay to
+  access protected data instead of completing human verification, and a
+  link to purchase one at `powerotp.com` (mentioning example agent names
+  like ClaudeBot/Hermes Agent). Submitting the field does nothing real yet
+  (a "coming soon" notice) — no key format, no server-side validation, no
+  purchase/billing flow. Same treatment as the deferred customer-balance
+  billing and Wasabi archival elsewhere in this document: placeholder now,
+  real logic only once fully specified by the user. **Documented eventual
+  intent, not built**: a valid passport key would let the requester skip
+  human phone verification entirely and access the protected content
+  directly.
+- **Bot-signal honeypot (built for real, since it's simple and
+  self-contained)**: a "Website AI index summary" link on the same page,
+  visually hidden from real visitors (off-screen CSS positioning, not
+  `display: none` — some scrapers skip elements hidden that way — plus
+  `aria-hidden`/`tabIndex={-1}` so it's also invisible to assistive tech, not
+  just sighted users) but present in the raw DOM, so only something parsing
+  markup directly (not a rendered page) would ever find and follow it.
+  Hitting it (`GET /v1/modal-sessions/{sessionId}/ai-index-summary`) logs a
+  raw `"possible bot"` signal (timestamp, best-effort project/session
+  context, IP, user agent) to a new `botSignals` collection
+  (`apps/api/src/bot-signal-service.ts`,
+  `apps/api/src/modal-session-persistence.ts#BotSignalDocument`, 90-day TTL
+  — a detection primitive's data doesn't need the 18-month billing-record
+  retention the verification collections have) and returns a harmless
+  `{ summary: "coming_soon" }` body. Deliberately minimal: no scoring, no
+  blocking, no relationship yet to the Power Passport concept above — a
+  future bot-blocker phase is what would actually consume this signal.
+  Never rate-limited and never fails the request on a logging error, on
+  purpose: throttling a honeypot would just teach a scraper to slow down,
+  and a broken signal pipeline must never become a visible bug for whatever
+  triggered it.
+
+## Shared verification UI: the "verified" celebration and the public demo response route
+
+Added right after the hosted modal above, in the same session, at the
+user's request that the "try it now" marketing demo actually show the same
+branded modal experience a real end user gets, and that a successful
+verification play a polished animated moment ("spin the modal ... pop
+sound ... sparkles ... a big green human face silhouette and verified
+text") **on both surfaces** — the demo and every real customer's hosted
+modal.
+
+- **`apps/web/app/verification-modal/verification-modal-view.tsx`**
+  (`VerificationModalView`, new, shared): the "a verification is running"
+  view — live progress text, code/challenge entry once
+  `awaiting_response`, and the terminal result. Deliberately agnostic of
+  *how* status is fetched or a response is submitted (passed in as
+  `fetchStatus`/`submitResponse` callbacks) since the two callers need
+  different auth: the hosted modal's `widget-client.tsx` uses interaction
+  tokens, the public demo (`try-it-now.tsx`) uses nothing at all. Extracted
+  from `widget-client.tsx`, which now renders it instead of duplicating
+  that logic once a session's phone number step is done.
+- **`apps/web/app/verification-modal/verified-celebration.tsx`**
+  (`VerifiedCelebration`, new): the actual animated success moment,
+  three phases — (1) a green checkmark draws in (SVG stroke animation) while
+  a short synthesized "pop" plays (`pop-sound.ts`, a Web Audio API
+  oscillator + gain envelope, not an embedded audio file — nothing to host
+  or ship as a binary asset); (2) the checkmark card spins, shrinks, and
+  fades while ~16 small sparkles burst outward (each a `<span>` with a
+  precomputed `--tx`/`--ty` CSS custom property, randomized angle/distance/
+  delay in JS, animated via one shared keyframe); (3) a large green human
+  silhouette (inline SVG, not a photo) fades/scales in with "Verified"
+  text. A failed verification renders the existing plain "Not verified"
+  panel instead — no celebration. Runs identically wherever
+  `VerificationModalView` renders a terminal `succeeded` state, so this is
+  automatically consistent between the demo and every real hosted modal by
+  construction, not by copying the animation twice.
+- **New public route,
+  `POST /v1/demo/verifications/{interactionId}/response`**
+  (`apps/web/app/v1/demo/verifications/[interactionId]/response/route.ts`):
+  the demo previously only ever watched status, never let a visitor
+  actually submit the code/challenge answer they received — this was a
+  real functional gap the new "show the actual modal in the demo" request
+  exposed, not just a UI change. Scoped exactly like the existing demo
+  create/status routes (anonymous, but only for the one
+  operator-configured demo project — `apps/web/lib/demo-project.ts#requireDemoProject`,
+  extracted this session so a third demo route didn't triplicate that
+  same project-lookup logic). Reuses `VerificationService#submitCode`/
+  `#submitChallenge` unchanged — same grading logic as the real,
+  API-key/interaction-token-gated response route.
+- **`apps/web/app/try-it-now.tsx`**: once a demo verification is created,
+  renders a second card next to the existing request/response JSON panel
+  (`.tryItNowRow`, flex-wrap so it stacks on narrow screens) — the exact
+  same `VerificationModalView` a real customer's end user sees, prefilled
+  with the phone number the visitor already typed (no separate number entry
+  in this preview; it's driven by the same interaction the main form
+  already created, not a second one).
+
+## Widget interaction visibility: end-user IP/User-Agent (visibility only)
+
+Added right after the hosted modal above, at the user's explicit request,
+scoped to exactly what was asked: capture, not act on. The end user's own
+IP and User-Agent are now captured directly from their browser's request to
+`POST /v1/modal-sessions/{sessionId}/verifications` (the actual "widget
+interaction" — the only point where the *end user's* own browser talks to
+POWEROTP, as opposed to a customer's backend) and stored as new optional
+`endUserIp`/`endUserUserAgent` fields on `VerificationRequestDocument`
+(`apps/api/src/verification-persistence.ts`), written via a new
+`VerificationService#recordEndUserMeta` (a plain metadata write, mirroring
+`recordProviderAttemptMeta`, never a state-machine transition). Deliberately
+**never** captured on the customer-backend-created path
+(`POST /v1/projects/{slug}/verifications`) — the caller there is a
+customer's own server, not the end user, so an "IP" captured there would
+just be that server's IP, not a meaningful signal, and never trusted from a
+header a caller could set itself (only ever read via
+`apps/web/lib/api-route.ts#clientIp`, the same Cloudflare-aware helper used
+everywhere else).
+
+Surfaced read-only on `/admin` via a new "Widget interactions" panel
+(`apps/web/app/admin/widget-interactions-panel.tsx`, `GET
+/v1/admin/widget-interactions`, `VerificationService#recentWidgetInteractions`,
+`apps/api/src/verification-reporting.ts#listRecentWidgetInteractions`) —
+manual-refresh, most recent 50, same convention as every other admin panel
+this project has. **Explicitly visibility/audit only**: no fraud/risk
+scoring, rate limiting by IP, or any other logic is attached to this data
+yet — if a concrete use for it comes up, that's a future, separately-scoped
+addition, not something to build speculatively now.
+
 ## Known gaps / next steps
 
 1. `call_reachability` and `voice_code` are both **confirmed working end-to-end live**,
@@ -1192,8 +1445,20 @@ infrastructure:
    "we'll deal with 6-month archiving at 6 months time"), not
    speculatively. Also not built: a manual "retry this callback" admin
    action (visibility only was the explicit scope this session).
-9. Everything else in Phases 8–9 per `docs/PLAN.md` (integration surface,
-   production hardening) — neither started at all.
+9. **Phase 8 is now substantially implemented** (see "Hosted verification
+   modal" above): a POWEROTP-hosted verification modal (session creation,
+   the hosted `/widget` page, a new read-only `view_status` interaction-
+   token action for browser polling), a completed (private, unpublished)
+   server SDK and widget-loader, and a deepened MCP server. Not done:
+   publishing either package to a public registry (deferred, needs an npm
+   org/token that doesn't exist yet — revisit only if asked), and the
+   Power Passport concept is UI-placeholder only (no key validation,
+   purchase flow, or billing — see that section for the documented, not-yet-
+   built, eventual intent). This session's new routes/page have not been
+   live-tested against a real embedded iframe on a third-party site yet —
+   code-complete and unit-tested, same caveat as most new surfaces on first
+   landing. Phase 9 (production hardening) has still not been started at
+   all.
 
 ### Incident: `npm ci` OOM-killed on the droplet during the Phase 5 redeploy (fixed with a permanent swap file)
 

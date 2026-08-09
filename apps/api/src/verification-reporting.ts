@@ -3,6 +3,7 @@ import type {
   InteractionSummary,
   VerificationState,
   VerificationType,
+  WidgetInteractionSummary,
 } from "@powerotp/contracts";
 import type { Collection, Filter } from "mongodb";
 
@@ -109,6 +110,34 @@ export async function listRecentCallbackDeliveries(
     statusCode: row.statusCode,
     error: row.error,
     occurredAt: row.occurredAt.toISOString(),
+  }));
+}
+
+/**
+ * Recent real end-user widget interactions, most recent first — filtered
+ * to verifications that actually have `endUserIp` set, i.e. only ones
+ * created through the hosted modal's own
+ * `POST /v1/modal-sessions/{sessionId}/verifications` route, never a
+ * customer-backend-created one (which has no meaningful end-user IP to
+ * show). Visibility/audit only, no fraud/risk logic attached to this yet.
+ */
+export async function listRecentWidgetInteractions(
+  requests: Collection<VerificationRequestDocument>,
+  limit = 50,
+): Promise<WidgetInteractionSummary[]> {
+  const rows = await requests
+    .find({ endUserIp: { $exists: true } })
+    .sort({ createdAt: -1 })
+    .limit(limit)
+    .toArray();
+  return rows.map((row) => ({
+    interactionId: row._id,
+    occurredAt: row.createdAt.toISOString(),
+    type: row.type,
+    state: row.state,
+    maskedTarget: maskE164(row.targetNumber),
+    endUserIp: row.endUserIp,
+    endUserUserAgent: row.endUserUserAgent,
   }));
 }
 

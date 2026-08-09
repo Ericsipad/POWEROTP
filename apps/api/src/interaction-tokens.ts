@@ -21,6 +21,20 @@ export function tokenActionForType(type: VerificationType) {
   return tokenActionByType[type];
 }
 
+/**
+ * Fixed `audience` used for `view_status` tokens minted for the hosted
+ * verification modal (`apps/web/app/widget/[sessionId]/page.tsx`) —
+ * deliberately not the request's `Origin` header, unlike
+ * `submit_code`/`submit_challenge` tokens (which must match a customer's
+ * own allowlisted origin). A same-origin `GET` fetch is not guaranteed to
+ * always include an `Origin` header across browsers, and the modal is
+ * always served from this one control-plane origin we already own, so
+ * there is nothing extra an origin check would defend against here that
+ * the token's own signature/expiry/project/interaction-id scoping doesn't
+ * already cover.
+ */
+export const WIDGET_STATUS_TOKEN_AUDIENCE = "powerotp-widget";
+
 export class InteractionTokenError extends Error {
   constructor(
     readonly code: string,

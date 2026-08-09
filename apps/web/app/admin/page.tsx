@@ -8,6 +8,7 @@ import { CallbackDeliveriesPanel } from "./callback-deliveries-panel";
 import { ChallengesPanel } from "./challenges-panel";
 import { OpsPanel } from "./ops-panel";
 import { UsagePanel } from "./usage-panel";
+import { WidgetInteractionsPanel } from "./widget-interactions-panel";
 
 function isNodeStale(lastSeenAt: string): boolean {
   return Date.now() - new Date(lastSeenAt).getTime() > NODE_STALE_THRESHOLD_MS;
@@ -183,6 +184,7 @@ export default function AdminPage() {
         <OpsPanel />
         <UsagePanel />
         <CallbackDeliveriesPanel />
+        <WidgetInteractionsPanel />
         {session && <ChallengesPanel csrfToken={session.csrfToken} />}
       </section>
     </main>

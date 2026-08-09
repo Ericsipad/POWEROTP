@@ -8,8 +8,12 @@ See [`AS_BUILT.md`](AS_BUILT.md) for what is actually deployed and running right
 including deviations from this plan and infrastructure with real credentials behind it.
 This file describes intended direction; `AS_BUILT.md` describes ground truth.
 
-Implementation status: Phases 0, 1, 2, 3, and Phase 6's SMS provider adapter are
-implemented. Phase 2 requires the
+Implementation status: Phases 0, 1, 2, 3, 5, 6, and 7 are implemented, and
+Phase 8 is substantially implemented (hosted verification modal, SDK
+completion, MCP deepening — see `docs/AS_BUILT.md`'s "Hosted verification
+modal" section; publishing the SDK/widget-loader packages to a public
+registry is deliberately deferred). Phase 9 has not been started. Phase 2
+requires the
 production Atlas, Valkey, Brevo, domain, and cryptographic configuration listed in
 [`PHASE2_OPERATIONS.md`](PHASE2_OPERATIONS.md) before activation. Phase 3's durable
 queue (idempotent creation, dispatch, timeouts, and signed callback retries) runs on the

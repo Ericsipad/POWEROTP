@@ -35,6 +35,7 @@ import {
   computeProjectStats,
   listProjectInteractions,
   listRecentCallbackDeliveries,
+  listRecentWidgetInteractions,
 } from "./verification-reporting.js";
 
 const VERIFICATION_LIFETIME_MS = 10 * 60 * 1_000;
@@ -282,6 +283,18 @@ export class VerificationService {
     await this.#requests.updateOne({ _id: interactionId }, { $set: meta });
   }
 
+  /**
+   * Records the end user's own IP/User-Agent, captured directly from their
+   * browser request to the hosted verification modal — see
+   * `VerificationRequestDocument#endUserIp` for why this is never
+   * populated for a customer-backend-created verification. Visibility/
+   * audit only, same as `recordProviderAttemptMeta`: a plain metadata
+   * write, never a state-machine transition.
+   */
+  async recordEndUserMeta(interactionId: string, meta: { endUserIp?: string; endUserUserAgent?: string }) {
+    await this.#requests.updateOne({ _id: interactionId }, { $set: meta });
+  }
+
   /** Called by `apps/api/src/provider-reconcile-worker.ts` once a matching
    * VoIP.ms CDR/SMS record has been found. */
   async applyProviderRecord(interactionId: string, record: ProviderRecordSnapshot) {
@@ -453,6 +466,13 @@ export class VerificationService {
    * data is already recorded by `apps/api/src/callback-worker.ts`. */
   async recentCallbackDeliveries(limit = 50) {
     return listRecentCallbackDeliveries(this.#callbackDeliveries, limit);
+  }
+
+  /** Admin-only visibility into recent real end-user widget interactions
+   * (see `endUserIp`/`recordEndUserMeta` above) — visibility/audit only,
+   * no fraud/risk logic attached to this yet. */
+  async recentWidgetInteractions(limit = 50) {
+    return listRecentWidgetInteractions(this.#requests, limit);
   }
 
   async #requireActive(

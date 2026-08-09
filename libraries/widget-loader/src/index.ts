@@ -1,31 +1,35 @@
+/**
+ * Mounts the hosted POWEROTP verification modal
+ * (`apps/web/app/widget/[sessionId]/page.tsx`) in an iframe. The `modalUrl`
+ * comes from a customer's own backend calling
+ * `POST /v1/projects/{slug}/modal-sessions` with its project API key (see
+ * `@powerotp/server-sdk`'s `createModalSession`) — never a raw interaction
+ * token, since a modal session is created *before* the end user has typed
+ * their own phone number, and therefore before any interaction exists at
+ * all. See `docs/AS_BUILT.md`'s "Hosted verification modal" section.
+ */
 export interface PowerOtpWidgetOptions {
   container: HTMLElement;
-  interactionToken: string;
-  widgetUrl?: string;
+  modalUrl: string;
   title?: string;
+  /** Called for every `message` event the modal iframe posts to this
+   * window — e.g. `{ source: "powerotp-widget", state, reasonCode }` once
+   * the verification reaches a terminal state. This is a same-page UX
+   * signal only; it is never authoritative and must never be used to make
+   * a security decision — always confirm any sensitive outcome through
+   * the project's own signed server-to-server callback instead. */
+  onEvent?(data: unknown): void;
 }
 
 export interface PowerOtpWidgetHandle {
   destroy(): void;
 }
 
-export function mountPowerOtpWidget(
-  options: PowerOtpWidgetOptions,
-): PowerOtpWidgetHandle {
-  const widgetUrl = new URL(
-    options.widgetUrl ?? "https://powerotp.com/widget",
-  );
+export function mountPowerOtpWidget(options: PowerOtpWidgetOptions): PowerOtpWidgetHandle {
+  const widgetUrl = new URL(options.modalUrl);
   if (widgetUrl.protocol !== "https:") {
-    throw new Error("POWEROTP widgetUrl must use HTTPS");
+    throw new Error("POWEROTP modalUrl must use HTTPS");
   }
-  if (!options.interactionToken) {
-    throw new Error("POWEROTP interactionToken is required");
-  }
-
-  widgetUrl.hash = new URLSearchParams({
-    interactionToken: options.interactionToken,
-    parentOrigin: window.location.origin,
-  }).toString();
 
   const frame = document.createElement("iframe");
   frame.src = widgetUrl.toString();
@@ -36,10 +40,17 @@ export function mountPowerOtpWidget(
   frame.style.border = "0";
   frame.style.width = "100%";
 
+  function handleMessage(event: MessageEvent) {
+    if (event.source !== frame.contentWindow) return;
+    options.onEvent?.(event.data);
+  }
+  window.addEventListener("message", handleMessage);
+
   options.container.replaceChildren(frame);
 
   return {
     destroy() {
+      window.removeEventListener("message", handleMessage);
       frame.remove();
     },
   };

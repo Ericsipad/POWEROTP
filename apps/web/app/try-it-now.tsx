@@ -1,7 +1,9 @@
 "use client";
 
-import type { VerificationType } from "@powerotp/contracts";
+import type { VerificationStatus, VerificationType } from "@powerotp/contracts";
 import { useEffect, useRef, useState, type FormEvent } from "react";
+
+import { VerificationModalView, type ResponseBody } from "@/app/verification-modal/verification-modal-view";
 
 const hintNumbers = [
   "+1 555 123 4567",
@@ -65,6 +67,7 @@ export function TryItNow() {
   const [timeline, setTimeline] = useState<TimelineEntry[]>([]);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState("");
+  const [liveInteractionId, setLiveInteractionId] = useState<string>();
   const pollGeneration = useRef(0);
 
   useEffect(() => {
@@ -105,6 +108,7 @@ export function TryItNow() {
     setError("");
     setTimeline([]);
     setRunning(true);
+    setLiveInteractionId(undefined);
     const generation = pollGeneration.current + 1;
     pollGeneration.current = generation;
 
@@ -130,6 +134,7 @@ export function TryItNow() {
         return;
       }
 
+      setLiveInteractionId(data.interactionId);
       void poll(data.interactionId, generation, 0);
     } catch {
       setError("The demo request could not reach the API.");
@@ -137,68 +142,107 @@ export function TryItNow() {
     }
   }
 
+  async function fetchDemoStatus(interactionId: string): Promise<VerificationStatus | null> {
+    const response = await fetch(`/v1/demo/verifications/${interactionId}`, {
+      cache: "no-store",
+    }).catch(() => undefined);
+    if (!response?.ok) return null;
+    return (await response.json()) as VerificationStatus;
+  }
+
+  async function submitDemoResponse(
+    interactionId: string,
+    body: ResponseBody,
+  ): Promise<{ succeeded: boolean } | null> {
+    const response = await fetch(`/v1/demo/verifications/${interactionId}/response`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }).catch(() => undefined);
+    if (!response?.ok) return null;
+    return (await response.json()) as { succeeded: boolean };
+  }
+
   return (
-    <div className="tryItNow">
-      <span className="sectionLabel">Try it now</span>
-      <p className="tryItNowCopy">
-        Send a real request to the live POWEROTP API and watch the exact lifecycle events
-        underneath.
-      </p>
-      <form className="tryItNowForm" onSubmit={submit}>
-        <label className="field">
-          Phone number
-          <input
-            value={targetNumber}
-            onChange={(event) => setTargetNumber(sanitizeNumber(event.target.value))}
-            inputMode="tel"
-            required
-            minLength={8}
-          />
-        </label>
-        <p className="tryItNowHint">e.g. {hintNumbers[hintIndex]}</p>
-        <p className="tryItNowHint">
-          Always include your country code — e.g. <strong>+1</strong> for the US/Canada.
-          Omitting it silently sends a different, invalid number to a different country.
+    <div className="tryItNowRow">
+      <div className="tryItNow">
+        <span className="sectionLabel">Try it now</span>
+        <p className="tryItNowCopy">
+          Send a real request to the live POWEROTP API and watch the exact lifecycle events
+          underneath.
         </p>
+        <form className="tryItNowForm" onSubmit={submit}>
+          <label className="field">
+            Phone number
+            <input
+              value={targetNumber}
+              onChange={(event) => setTargetNumber(sanitizeNumber(event.target.value))}
+              inputMode="tel"
+              required
+              minLength={8}
+            />
+          </label>
+          <p className="tryItNowHint">e.g. {hintNumbers[hintIndex]}</p>
+          <p className="tryItNowHint">
+            Always include your country code — e.g. <strong>+1</strong> for the US/Canada.
+            Omitting it silently sends a different, invalid number to a different country.
+          </p>
 
-        <div className="tryItNowTypes">
-          {demoMethods.map((method) => (
-            <label
-              key={method.id}
-              className={type === method.id ? "tryItNowType tryItNowTypeActive" : "tryItNowType"}
-            >
-              <input
-                type="radio"
-                name="demoType"
-                value={method.id}
-                checked={type === method.id}
-                onChange={() => setType(method.id)}
-              />
-              <span className="tryItNowTypeName">{method.label}</span>
-              <span className="tryItNowTypeDescription">{method.description}</span>
-            </label>
-          ))}
+          <div className="tryItNowTypes">
+            {demoMethods.map((method) => (
+              <label
+                key={method.id}
+                className={type === method.id ? "tryItNowType tryItNowTypeActive" : "tryItNowType"}
+              >
+                <input
+                  type="radio"
+                  name="demoType"
+                  value={method.id}
+                  checked={type === method.id}
+                  onChange={() => setType(method.id)}
+                />
+                <span className="tryItNowTypeName">{method.label}</span>
+                <span className="tryItNowTypeDescription">{method.description}</span>
+              </label>
+            ))}
+          </div>
+
+          <button className="button" type="submit" disabled={running}>
+            {running ? "Running…" : "Send test verification"}
+          </button>
+          {error && <div className="formError">{error}</div>}
+        </form>
+
+        <div className="tryItNowCode codePanel">
+          <div className="codeTop">
+            <span>What&apos;s happening underneath</span>
+            <span className="readOnly">LIVE API TRAFFIC</span>
+          </div>
+          <pre>
+            <code>
+              {timeline.length === 0
+                ? "// Submit a number above to see real request/response JSON"
+                : timeline.map(formatEntry).join("\n\n")}
+            </code>
+          </pre>
         </div>
-
-        <button className="button" type="submit" disabled={running}>
-          {running ? "Running…" : "Send test verification"}
-        </button>
-        {error && <div className="formError">{error}</div>}
-      </form>
-
-      <div className="tryItNowCode codePanel">
-        <div className="codeTop">
-          <span>What&apos;s happening underneath</span>
-          <span className="readOnly">LIVE API TRAFFIC</span>
-        </div>
-        <pre>
-          <code>
-            {timeline.length === 0
-              ? "// Submit a number above to see real request/response JSON"
-              : timeline.map(formatEntry).join("\n\n")}
-          </code>
-        </pre>
       </div>
+
+      {liveInteractionId && (
+        <section className="widgetCard tryItNowModalPreview">
+          <div className="widgetBrand">
+            <span className="brandMark">P</span>
+            POWEROTP
+          </div>
+          <span className="readOnly tryItNowModalBadge">THE MODAL YOUR CUSTOMERS SEE</span>
+          <VerificationModalView
+            interactionId={liveInteractionId}
+            targetNumber={targetNumber}
+            fetchStatus={() => fetchDemoStatus(liveInteractionId)}
+            submitResponse={(body) => submitDemoResponse(liveInteractionId, body)}
+          />
+        </section>
+      )}
     </div>
   );
 }

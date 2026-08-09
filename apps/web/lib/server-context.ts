@@ -5,6 +5,7 @@ import { ChallengeService } from "@powerotp/api/challenge-service.js";
 import { loadConfig, type ProductionConfig } from "@powerotp/api/config.js";
 import { connectDataStores, type DataStores } from "@powerotp/api/dependencies.js";
 import { createBrevoEmailService } from "@powerotp/api/email.js";
+import { ModalSessionService } from "@powerotp/api/modal-session-service.js";
 import { NodeService } from "@powerotp/api/node-service.js";
 import { ensureIndexes } from "@powerotp/api/persistence.js";
 import { createProviderReconcileWorker } from "@powerotp/api/provider-reconcile-worker.js";
@@ -26,6 +27,7 @@ export interface ServerContext {
   verifications: VerificationService;
   nodes: NodeService;
   challenges: ChallengeService;
+  modalSessions: ModalSessionService;
   queues: VerificationQueues;
 }
 
@@ -69,6 +71,7 @@ async function buildServerContext(): Promise<ServerContext> {
   const auth = new AuthService(dataStores.db, config, emailService);
   const projects = new ProjectService(dataStores.db, config, verifications);
   const nodes = new NodeService(dataStores.db, config);
+  const modalSessions = new ModalSessionService(dataStores.db);
 
   // Platform operator alerting (queue backlog / high failure rate / stale
   // node) — see `docs/AS_BUILT.md`'s "Admin operator health dashboard"
@@ -94,7 +97,7 @@ async function buildServerContext(): Promise<ServerContext> {
   process.on("SIGINT", () => void shutdown("SIGINT"));
   process.on("SIGTERM", () => void shutdown("SIGTERM"));
 
-  return { config, dataStores, auth, projects, verifications, nodes, challenges, queues };
+  return { config, dataStores, auth, projects, verifications, nodes, challenges, modalSessions, queues };
 }
 
 export function getServerContext(): Promise<ServerContext> {

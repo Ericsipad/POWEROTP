@@ -1,6 +1,7 @@
 import { ApiError } from "@powerotp/api/errors.js";
 import { AuthError } from "@powerotp/api/auth-service.js";
 import { ChallengeError } from "@powerotp/api/challenge-service.js";
+import { ModalSessionError } from "@powerotp/api/modal-session-service.js";
 import { NodeError } from "@powerotp/api/node-service.js";
 import { MediaValidationError } from "@powerotp/api/media-service.js";
 import { ProjectError } from "@powerotp/api/project-service.js";
@@ -21,7 +22,8 @@ export function toErrorResponse(error: unknown, correlationId: string): NextResp
     error instanceof ProjectError ||
     error instanceof VerificationError ||
     error instanceof InteractionTokenError ||
-    error instanceof ChallengeError
+    error instanceof ChallengeError ||
+    error instanceof ModalSessionError
   ) {
     return NextResponse.json(
       { error: error.code },
