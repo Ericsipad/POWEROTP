@@ -248,10 +248,7 @@ export function TryItNow() {
 
       {liveInteractionId && (
         <div className="tryItNowModalPreviewWrap">
-          <p className="tryItNowBotNote">
-            Note: for Bot Blocker, this hint will only be shown to detected bots, not suspected
-            real humans.
-          </p>
+          <p className="tryItNowBotNote">This OTP challenge will only be shown to suspected bots.</p>
           <section className="widgetCard tryItNowModalPreview">
             <button
               className="widgetCardClose"
