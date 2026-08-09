@@ -68,6 +68,13 @@
   border-color: var(--green-dark);
 }
 
+.widgetNote {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+  margin: -4px 0 0;
+}
+
 .widgetProgress {
   color: var(--muted);
   font-size: 14px;

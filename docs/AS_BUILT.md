@@ -1387,6 +1387,25 @@ scoring, rate limiting by IP, or any other logic is attached to this data
 yet — if a concrete use for it comes up, that's a future, separately-scoped
 addition, not something to build speculatively now.
 
+## SMS fallback hint (unconditional today; scoped for future bot-only visibility)
+
+`VerificationModalView` (`apps/web/app/verification-modal/verification-modal-view.tsx`)
+shows "Didn't get a text? Try a phone call instead. Some carriers block
+international SMS." under the code-entry field whenever an `sms_code`
+interaction reaches `awaiting_response` — added after live-testing an SMS
+to a Thailand number that was accepted by VoIP.ms (`code_sent`) but likely
+never actually delivered by the carrier (no delivery-receipt integration
+exists yet to confirm either way; see the git history around this commit
+for the live investigation). **Shown unconditionally today, to every
+visitor, since no bot-detection exists yet.** The user was explicit about
+future intent: once the future bot-blocker phase can distinguish a
+detected bot from a suspected real human, this specific hint should only
+ever render for the detected-bot case — a real human hitting an ordinary
+international-SMS delivery hiccup shouldn't be nudged with bot-oriented
+"prove it another way" framing. Not gated on anything now (there is
+nothing to gate on); a future session wiring up bot detection should
+revisit this exact spot rather than re-deriving the intent from scratch.
+
 ## Known gaps / next steps
 
 1. `call_reachability` and `voice_code` are both **confirmed working end-to-end live**,

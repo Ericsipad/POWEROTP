@@ -160,6 +160,19 @@ export function VerificationModalView({
             />
           </label>
         )}
+        {status.type === "sms_code" && (
+          // Shown unconditionally today (no bot-detection exists yet). Per
+          // the user's explicit note: once the future bot-blocker phase can
+          // tell a detected bot from a suspected real human, this specific
+          // hint should only render for the detected-bot case — a real
+          // human getting an SMS delivery hiccup shouldn't be nudged toward
+          // "prove you're human a second way" copy. Not gated on anything
+          // now, since there's nothing to gate on yet.
+          <p className="widgetNote">
+            Didn&apos;t get a text? Try a phone call instead. Some carriers block
+            international SMS.
+          </p>
+        )}
         <button className="button" type="submit">
           Submit
         </button>
