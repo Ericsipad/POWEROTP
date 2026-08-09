@@ -1418,9 +1418,9 @@ the actual UI copy end users see must not reference future plans.
   message); on the demo preview it just removes the floating card from the
   page.
 - **A separate, demo-only explanatory note — the one place "bot" language
-  appears in any UI at all**: "This OTP challenge is part of Bot Blocker
-  and will only be shown to suspected bots." rendered above (not inside)
-  the demo's floating
+  appears in any UI at all**: "For Bot Blocker, this OTP challenge will
+  only be shown to suspected bots." rendered above (not inside) the
+  demo's floating
   modal-preview card (`.tryItNowBotNote`, `apps/web/app/try-it-now.tsx`)
   — explicitly per the user's instruction that this framing belongs on the
   marketing demo for evaluators, never inside the real widget a real end

@@ -249,7 +249,7 @@ export function TryItNow() {
       {liveInteractionId && (
         <div className="tryItNowModalPreviewWrap">
           <p className="tryItNowBotNote">
-            This OTP challenge is part of Bot Blocker and will only be shown to suspected bots.
+            For Bot Blocker, this OTP challenge will only be shown to suspected bots.
           </p>
           <section className="widgetCard tryItNowModalPreview">
             <button
