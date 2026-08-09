@@ -148,27 +148,50 @@
 
 /*
  * The marketing homepage's "try it now" demo: the existing request/response
- * card plus a live preview of the exact same branded modal a real
- * customer's end user would see, side by side on wide screens.
+ * card, plus a live preview of the exact same branded modal a real
+ * customer's end user would see — floating as a popup overlay to the left
+ * of the card (not pushed into normal page flow), the same way it would
+ * pop up as an iframe over a real customer's own site.
  */
 .tryItNowRow {
-  align-items: start;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 20px;
-}
-
-.tryItNowRow > .tryItNow {
-  flex: 1 1 320px;
+  position: relative;
 }
 
 .tryItNowModalPreview {
-  flex: 1 1 300px;
-  max-width: 420px;
+  animation: tryItNowModalPopIn 0.35s ease-out;
+  box-shadow: 0 24px 70px rgba(16, 35, 29, 0.28);
+  position: absolute;
+  right: calc(100% + 24px);
+  top: 0;
+  width: 340px;
+  z-index: 20;
 }
 
 .tryItNowModalBadge {
   font-size: 9px;
+}
+
+@keyframes tryItNowModalPopIn {
+  from {
+    opacity: 0;
+    transform: translateX(24px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+
+/* Not enough room to the left for a floating overlay without clipping off
+   the viewport or the nav — fall back to stacking it below the card. */
+@media (max-width: 1400px) {
+  .tryItNowModalPreview {
+    animation: none;
+    position: static;
+    margin-top: 20px;
+    right: auto;
+    width: 100%;
+  }
 }
 
 /*
