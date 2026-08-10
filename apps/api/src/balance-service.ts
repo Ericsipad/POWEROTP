@@ -52,6 +52,11 @@ export interface LedgerEntryInput {
   interactionId?: string;
   stripePaymentId?: string;
   country?: string;
+  /** The admin's stated reason for `admin_adjustment` entries (see
+   * `POST /v1/admin/billing/credit`), or the literal `"free_quota"` for a
+   * free-quota-covered `otp1`..`otp4` entry (see
+   * `apps/api/src/billing-charge-service.ts`). */
+  note?: string;
 }
 
 /**
@@ -83,9 +88,16 @@ export class BalanceService {
    * Blocks a new verification once a customer's balance is already at or
    * below zero. Deliberately a hard `<= 0` gate rather than a per-call cost
    * estimate: real cost (minutes talked, whether an SMS was even sendable)
-   * isn't known until after the attempt completes. Exempts the
+   * isn't known until after the attempt completes. No per-type minimum
+   * floor (a $0.30 minimum for `sms_code`/`voice_challenge` was tried and
+   * then deliberately removed — it doesn't make sense once an active
+   * project is charged the daily plan fee regardless of balance; the free
+   * usage quota, not a balance floor, is what protects a brand-new
+   * account — see `apps/api/src/usage-quota-service.ts`). Exempts the
    * platform-admin-owned demo project — there is no real customer balance
-   * behind the public marketing demo to charge.
+   * behind the public marketing demo to charge. Only reached once
+   * `UsageQuotaService#tryConsumeFreeQuota` reports the request isn't
+   * covered by the account's free monthly quota.
    */
   async requireNonNegativeBalance(userId: string): Promise<void> {
     if (userId === PLATFORM_ADMIN_USER_ID) return;
@@ -128,6 +140,7 @@ export class BalanceService {
           stripePaymentId: input.stripePaymentId,
           type: input.type,
           country: input.country,
+          note: input.note,
           openingBalanceUsd,
           tierAtTransaction,
           amountUsd,
@@ -177,6 +190,7 @@ export function toFinancialTransactionResponse(document: FinancialTransactionDoc
     stripePaymentId: document.stripePaymentId,
     type: document.type,
     country: document.country,
+    note: document.note,
     openingBalanceUsd: document.openingBalanceUsd,
     tierAtTransaction: document.tierAtTransaction,
     amountUsd: document.amountUsd,

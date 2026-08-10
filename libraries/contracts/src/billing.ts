@@ -68,7 +68,16 @@ export const UpdatePlanChargeSchema = PlanChargeSchema.omit({ updatedAt: true })
  * charging logic exists for it yet; see `docs/AS_BUILT.md`'s "Customer
  * balance billing" section. `otp1`..`otp4` map 1:1 to
  * `call_reachability`/`voice_code`/`voice_challenge`/`sms_code` in that
- * fixed order (see `otpChargeTypeFor` below).
+ * fixed order (see `otpChargeTypeFor` below). New-account free usage (see
+ * `apps/api/src/usage-quota-service.ts`) is a simple per-type rolling
+ * counter, not a dollar credit, so it has no dedicated ledger type of its
+ * own — a free-quota-covered interaction still writes a normal `otp1`..
+ * `otp4` row, just always at `amountUsd: 0` with `note: "free_quota"` (see
+ * `apps/api/src/billing-charge-service.ts`), so it stays fully visible in
+ * the same ledger/reports every real charge appears in.
+ * `admin_adjustment` is a manual support credit/debit
+ * (`POST /v1/admin/billing/credit`), added for the "Customer signup flow"
+ * work — see `docs/AS_BUILT.md`.
  */
 export const financialTransactionTypes = [
   "visit",
@@ -78,6 +87,7 @@ export const financialTransactionTypes = [
   "otp4",
   "daily_charge",
   "topup",
+  "admin_adjustment",
 ] as const;
 export const FinancialTransactionTypeSchema = z.enum(financialTransactionTypes);
 
@@ -86,7 +96,12 @@ export const FinancialTransactionTypeSchema = z.enum(financialTransactionTypes);
  * (negative=charge, positive=credit); `openingBalanceUsd`/
  * `closingBalanceUsd` make any date-range total independently verifiable
  * without recomputation, since every row already carries its own
- * before/after balance.
+ * before/after balance. `note` is a short annotation, populated for
+ * `admin_adjustment` rows (the admin's stated reason) and for free-quota-
+ * covered `otp1`..`otp4` rows (always the literal `"free_quota"`, so a $0
+ * row from free usage is distinguishable in reports from a real $0 charge
+ * caused by a missing rate — see `apps/api/src/usage-quota-service.ts` and
+ * `apps/api/src/billing-charge-service.ts`).
  */
 export const FinancialTransactionSchema = z.object({
   id: z.string().min(16),
@@ -96,11 +111,24 @@ export const FinancialTransactionSchema = z.object({
   stripePaymentId: z.string().min(1).optional(),
   type: FinancialTransactionTypeSchema,
   country: CountryCodeSchema.optional(),
+  note: z.string().min(1).max(200).optional(),
   openingBalanceUsd: z.number(),
   tierAtTransaction: BillingTierSchema,
   amountUsd: z.number(),
   closingBalanceUsd: z.number(),
   createdAt: z.string().datetime(),
+});
+
+/**
+ * Admin manual balance credit/debit (`POST /v1/admin/billing/credit`) — the
+ * only way to adjust a customer's balance today outside of the automated
+ * charge/credit paths, e.g. for support cases. `amountUsd` is signed
+ * (positive=credit, negative=debit).
+ */
+export const AdjustBalanceSchema = z.object({
+  userId: z.string().min(1),
+  amountUsd: z.number().refine((value) => value !== 0, "Amount must be nonzero"),
+  note: z.string().trim().min(1).max(200).optional(),
 });
 
 export const FinancialTransactionsResponseSchema = z.object({
@@ -149,6 +177,7 @@ export type PlanCharge = z.infer<typeof PlanChargeSchema>;
 export type UpdatePlanCharge = z.infer<typeof UpdatePlanChargeSchema>;
 export type FinancialTransactionType = z.infer<typeof FinancialTransactionTypeSchema>;
 export type FinancialTransaction = z.infer<typeof FinancialTransactionSchema>;
+export type AdjustBalance = z.infer<typeof AdjustBalanceSchema>;
 export type FinancialTransactionsResponse = z.infer<typeof FinancialTransactionsResponseSchema>;
 export type CustomerBalance = z.infer<typeof CustomerBalanceSchema>;
 export type CreateTopup = z.infer<typeof CreateTopupSchema>;

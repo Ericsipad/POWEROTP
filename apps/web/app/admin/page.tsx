@@ -189,7 +189,7 @@ export default function AdminPage() {
         <WidgetInteractionsPanel />
         {session && <ChallengesPanel csrfToken={session.csrfToken} />}
         {session && <BillingRatesPanel csrfToken={session.csrfToken} />}
-        <BillingLedgerPanel />
+        {session && <BillingLedgerPanel csrfToken={session.csrfToken} />}
       </section>
     </main>
   );

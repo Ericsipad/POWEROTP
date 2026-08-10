@@ -1109,6 +1109,207 @@ transactional running-balance ledger, and Stripe fixed-amount top-ups.
   not build any part of this until the BotBlocker gate-adapter itself
   exists to actually emit that signal.
 
+## Customer signup flow (implemented)
+
+Built to close the real gap the "Customer balance billing" work above left
+open: with no signup flow, no real customer could ever get a balance above
+$0, and the new `insufficient_balance` gate would block every real request.
+Scoped down through direct Q&A (the same standing pattern as billing) before
+any code was written — the original quota framing shifted from a dollar
+credit to a plain usage counter mid-session once the user pointed out the
+dollar-credit design (a monthly BullMQ worker) was needless complexity for
+what is really just "give new accounts a free allowance, then charge
+normally."
+
+- **Password pepper**: `PASSWORD_PEPPER` (required, ≥32 bytes, independent
+  from every other secret) is mixed into every customer password hash via
+  Argon2's own `secret` option (`apps/api/src/security.ts#hashPassword`/
+  `verifyPassword`) — true keyed hashing, not string concatenation. Never
+  stored anywhere near the hash (unlike Argon2's own per-hash salt), so a
+  leaked `users` collection alone is never enough to offline-crack
+  passwords. Safe to introduce as a newly-required env var with zero
+  migration concern — there were no real customer accounts yet this
+  session.
+- **Password rules**: `PasswordSchema` (`libraries/contracts/src/auth.ts`)
+  gained a special-character requirement (12+ chars, upper, lower, digit,
+  special — all five, per the user's exact framing). The same five rules
+  are also exported as `PASSWORD_REQUIREMENTS` (an array of
+  `{ id, label, test }` predicates) so the signup modal's live checklist UI
+  and the server-side Zod schema can never silently drift apart.
+- **The rapid signup modal** (`apps/web/app/signup-modal.tsx`, triggered from
+  a "Sign up" nav link and the homepage hero CTA via
+  `apps/web/app/signup-cta.tsx`): one modal collects email, password (typed
+  twice, with the live checklist above), and a website URL — then, on
+  submit, creates the account **and** its first project/API key together,
+  showing the raw API key once directly in the same modal with the note
+  "This key is shown once — copy it to a safe place. Your API key will work
+  immediately on the free tier upon pressing the activation link in your
+  email" (the account must still click that link before the key can create
+  anything real — see "Email-verification gate" below). `POST
+  /v1/auth/signup` (`SignupSchema`/`SignupResponseSchema` in
+  `libraries/contracts/src/auth.ts`) does this in one request:
+  `AuthService#register` (unchanged core logic, now returns `{ userId,
+  alreadyVerified }` instead of `void` so the route can act on it) followed
+  by `ProjectService#create` using the website's hostname as the project
+  name and the website itself as its one `allowedOrigins` entry, with every
+  verification method enabled by default. A resubmission of an
+  already-unverified email reuses the existing project (never fabricates a
+  second API key — the first one was already shown once and is
+  non-recoverable); an already-verified email returns a generic
+  `already_registered` status with no project/key data at all
+  (anti-enumeration, matching the existing `register()` behavior). The
+  original `/register` page/`POST /v1/auth/register` endpoint (password
+  only, no project/key, "check your email" outcome) is untouched and still
+  works as a plain fallback — nothing was removed.
+- **Email-verification gate** (`AuthService#requireVerifiedEmail`, injected
+  into `VerificationService#create` the same way as
+  `requireNonNegativeBalance`): blocks creating *any* new verification
+  interaction (`email_not_verified`, HTTP 403) until the account's email is
+  verified. This closes a real abuse gap the signup modal's "immediate API
+  key" design would otherwise open: without it, a freshly registered but
+  never-verified account could still spend its entire free monthly quota
+  (below) purely by holding the key shown once at signup, never clicking
+  the activation link at all. Exempts the platform-admin-owned demo
+  project, like every other per-customer gate in this codebase.
+- **Free monthly usage quota** (`apps/api/src/usage-quota-service.ts`,
+  `UsageQuotaService`, `usageQuotas` collection) — checked *before*
+  `BalanceService#requireNonNegativeBalance` inside
+  `VerificationService#create`; a request it covers never touches the
+  balance gate at all. It is a plain rolling counter, never a dollar credit
+  (a dollar-credit design with its own monthly BullMQ worker was drafted and
+  then deliberately discarded mid-session as needless complexity for this —
+  "give the free quota a counter then start charges"). The interaction still
+  gets a real row in the same `financialTransactions` ledger at completion,
+  always at `amountUsd: 0` with `note: "free_quota"` (`otp1`..`otp4`, set via
+  `VerificationRequestDocument#freeQuotaCovered`, fixed at creation time and
+  read by `BillingChargeService#chargeCompletedInteraction`) — per explicit
+  instruction, free usage must be fully visible in every report/UI a real
+  charge appears in (the customer dashboard's ledger table, the admin ledger
+  lookup panel), not silently invisible. Per account, for its first 180 days
+  since signup only:
+  - `call_reachability`: 10 free per rolling 30-day window
+  - `voice_code`: 10 free per rolling 30-day window
+  - `sms_code`: 5 free per rolling 30-day window
+  - `voice_challenge`: **no free quota at all** — always goes straight to
+    normal balance-gated charging, an explicit product decision, not an
+    oversight.
+  The 30-day window is rolling from account creation, not calendar-month
+  (no cron alignment needed — `tryConsumeFreeQuota` just compares
+  `now - windowStartAt` against 30 days and resets in place). Once the
+  180-day eligibility window has passed (`eligibleUntil`, fixed once at
+  first use as a fixed day count from the account's own `createdAt` — not
+  "6 calendar months", which varies 28-31 days per month; checked on every
+  call), or
+  once a given 30-day window's quota for that type is already used up,
+  every further request of that type falls through to the normal
+  `requireNonNegativeBalance` gate (including its $0.30 floor for
+  `sms_code`/`voice_challenge` below) — never blocked outright by quota
+  exhaustion alone. Not a Mongo transaction: a small race window under
+  concurrent requests could over-consume a slot by one, corrected by an
+  increment-then-rollback check (`tryConsumeFreeQuota`) rather than a full
+  transaction — acceptable since nothing here is money, unlike
+  `BalanceService#applyLedgerEntry`, which does use a real transaction.
+  A future 5th verification type — **email-based OTP, with its own
+  proposed 1,000-free-per-30-days quota** — was raised in this session's
+  scoping Q&A and explicitly deferred; see "Known gaps / next steps" below.
+  Do not build it speculatively.
+- **No per-type minimum balance floor**: a $0.30 minimum for
+  `sms_code`/`voice_challenge` was tried and then deliberately removed in
+  the same session — it doesn't make sense once an active project is
+  charged the daily plan fee regardless of balance (see "Daily plan
+  charge" above), and the free usage quota above, not a balance floor, is
+  what actually protects a brand-new account. `requireNonNegativeBalance`
+  is back to the original plain `balance > 0` gate for every type.
+- **Data-minimization / SOC 2-oriented design**: most of the codebase never
+  touches the one collection holding real customer PII/credentials
+  (`users` — email, password hash) at all; it only ever passes a plain
+  opaque `userId` around. `AuthService` is the only module that reads or
+  writes `UserDocument` directly (login, registration, session,
+  `requireVerifiedEmail`). Every other service that needs *something* about
+  an account — `UsageQuotaService`, for a signup timestamp to seed a new
+  quota window's eligibility — reads the separate, deliberately PII-free
+  `customerAccounts` collection (`CustomerAccountDocument`, just `_id` +
+  `createdAt`, `apps/api/src/persistence.ts`) instead. `BalanceService`
+  never reads any account document at all — it only ever takes a `userId`.
+  This was reinforced directly this session (the user's own framing: "use
+  the client user id in our system to process things and not refer to user
+  doc unless must") and is a genuinely useful SOC 2 posture regardless of
+  formal certification — it minimizes how much of the codebase can even
+  read PII, which is the property an auditor actually checks for.
+- **Email encrypted at rest, looked up by a separate deterministic hash**:
+  `UserDocument#email` (plaintext) was replaced with `emailEncrypted`
+  (authenticated-encrypted under the new `PII_ENCRYPTION_KEY`, same
+  primitive as `ProjectDocument#callbackSecretEncrypted`) and
+  `emailLookupHash` (a deterministic HMAC under the new
+  `EMAIL_LOOKUP_HASH_SECRET`) — a real DB dump of `users` never shows an
+  actual email address. `emailLookupHash` is the collection's unique index
+  and the only field `AuthService#register`/`loginCustomer` ever query by;
+  `emailEncrypted` is decrypted only transiently, via the exported
+  `AuthService#decryptEmail` helper, in exactly two places: sending the
+  verification email (`AuthService#register`, which already has the
+  plaintext from the request body, never round-trips through the DB for
+  this) and `apps/web/lib/session-cookies.ts#sessionUser`, which returns it
+  to the account itself in a session response. Two independent new secrets
+  by design — a leak of either one alone should never compromise the
+  other (encryption vs. lookup-indexing are different concerns, matching
+  every other secret-separation decision already in this codebase). The
+  platform admin's `UserDocument` (upserted by `AuthService#loginAdmin`)
+  uses the exact same encrypted/hashed shape for consistency, even though
+  `ADMIN_EMAIL` itself is already a non-secret App Platform config value.
+- **Brevo email template support** (`apps/api/src/email.ts`): the account
+  verification email can now use a Brevo dashboard template
+  (`templateId` + `params.VERIFY_URL`) instead of the original inline HTML,
+  selected by the new optional `BREVO_VERIFY_TEMPLATE_ID` env var — unset
+  keeps the original inline-HTML behavior working exactly as before, so
+  this is purely additive. The HTML to paste into a new Brevo template
+  (Campaigns → Templates → create, then use the template's own merge-tag
+  editor) is:
+
+  ```html
+  <div style="font-family: -apple-system, Segoe UI, Roboto, sans-serif; max-width: 480px; margin: 0 auto; padding: 32px 24px;">
+    <p style="font-size: 20px; font-weight: 800; color: #10241b; margin: 0 0 24px;">POWEROTP</p>
+    <h1 style="font-size: 24px; margin: 0 0 12px;">Verify your email</h1>
+    <p style="color: #55645d; line-height: 1.6;">
+      Click the button below to activate your POWEROTP account and your API key.
+      This link expires in one hour.
+    </p>
+    <p style="margin: 28px 0;">
+      <a href="{{ params.VERIFY_URL }}" style="background: #16a34a; color: #ffffff; text-decoration: none; font-weight: 700; padding: 14px 28px; border-radius: 8px; display: inline-block;">
+        Verify email
+      </a>
+    </p>
+    <p style="color: #92a099; font-size: 13px;">
+      If the button doesn't work, paste this link into your browser:<br />
+      <a href="{{ params.VERIFY_URL }}" style="color: #16a34a;">{{ params.VERIFY_URL }}</a>
+    </p>
+  </div>
+  ```
+
+  After creating the template, note its numeric Brevo template id and set
+  it as `BREVO_VERIFY_TEMPLATE_ID` in App Platform (see
+  [`infrastructure/app-platform/README.md`](../infrastructure/app-platform/README.md)).
+- **Admin manual balance credit/debit** (`POST /v1/admin/billing/credit`,
+  `apps/web/app/admin/billing-ledger-panel.tsx`'s new "Manually credit/debit
+  this user" form): the only way to adjust a customer's balance today
+  outside of the automated top-up/charge paths — built specifically to
+  close the "no mitigation exists" gap flagged at the end of the prior
+  session (a real customer blocked by `insufficient_balance` before rates/
+  Stripe were configured had no remediation short of editing Mongo
+  directly). Writes a new `admin_adjustment` ledger type (added to
+  `financialTransactionTypes` in `libraries/contracts/src/billing.ts`)
+  through the same `BalanceService#applyLedgerEntry` transaction as every
+  other ledger row, with a new optional `note` field (only ever populated
+  for this type) recording the admin's stated reason. `AdjustBalanceSchema`
+  takes a signed `amountUsd` (positive credits, negative debits).
+- **Dashboard balance auto-refresh** (`apps/web/app/dashboard/billing-panel.tsx`):
+  polls `/v1/billing/balance` and `/v1/billing/ledger` every 10 seconds
+  while the dashboard is open, so a Stripe-webhook-applied top-up credit
+  (which lands asynchronously, slightly after the customer's browser is
+  already redirected back by `apps/web/app/top-banner.tsx`) becomes visible
+  without a manual page refresh. Deliberately different from every admin
+  panel's "manual refresh only" convention — this one is customer-facing and
+  the whole point is reflecting an async webhook credit promptly.
+
 ## Admin operator health dashboard (implemented)
 
 `/admin` gained three read-only "operator health" additions, closing part of
@@ -1606,6 +1807,15 @@ the actual UI copy end users see must not reference future plans.
    $0 and blocking a request. The future BotBlocker "visit" per-visitor charge (100k/month
    allowance then billed in 100k blocks) is explicitly deferred — see that section's last
    bullet for the user's exact described rule, recorded so it isn't lost.
+   **The real-customer-blocking gap itself is now addressed**: a full "Customer signup
+   flow" (see that section above) lets a real customer actually reach a nonzero balance —
+   a per-type free monthly usage quota for their first 180 days, plus an admin manual
+   balance credit/debit action (`POST /v1/admin/billing/credit`) for support cases. Still
+   not done: no rate has actually been entered into the admin rate charts yet (every
+   country still bills $0), and a real Stripe test-mode top-up has still never been
+   performed end-to-end even though the user reported `STRIPE_SECRET_KEY`/
+   `STRIPE_WEBHOOK_SECRET` as now configured in App Platform this session (not
+   independently re-verified live).
 8. **Phase 7 is now mostly done** (see the new "Phase 7: usage counters,
    callback diagnostics, alerting, retention" section above): usage
    counters (admin-wide and per-project), callback delivery diagnostics
@@ -1632,6 +1842,27 @@ the actual UI copy end users see must not reference future plans.
    code-complete and unit-tested, same caveat as most new surfaces on first
    landing. Phase 9 (production hardening) has still not been started at
    all.
+10. **Customer signup flow is now implemented** (see that section above):
+    password pepper, the rapid signup modal (account + first project/API key
+    together), an email-verification gate before any real usage, a per-type
+    free monthly usage quota for an account's first 180 days (no per-type
+    minimum balance floor — tried and removed, see that section), Brevo
+    template support, an admin manual balance credit/debit action, and a
+    data-minimization design where most services only ever pass around an
+    opaque `userId`, never touching the PII-bearing `users` document
+    directly. Explicitly deferred,
+    raised and scoped out during this session's Q&A rather than built
+    speculatively: a **5th verification type, email-based OTP**, with the
+    user's own proposed free allowance of 1,000/rolling-30-days — this needs
+    its own provider adapter (an actual email-sending code path distinct
+    from account-verification email), contracts, rate-chart entries, admin
+    UI, and transport wiring, comparable in size to Phase 6 (SMS) — do not
+    build any part of it until explicitly asked to pick it up as its own
+    scoped task. Also not yet done from this session: `BREVO_VERIFY_TEMPLATE_ID`
+    is documented but no Brevo template has actually been created from the
+    HTML in that section yet, and the free-quota/email-gate/pepper logic has
+    not been live-tested end-to-end against real production Mongo (unit-tested
+    only, same caveat as most new surfaces on first landing).
 
 ### Incident: `npm ci` OOM-killed on the droplet during the Phase 5 redeploy (fixed with a permanent swap file)
 

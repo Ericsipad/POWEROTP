@@ -17,12 +17,41 @@ export const PLATFORM_ADMIN_USER_ID = "usr_platform_admin";
 
 export interface UserDocument {
   _id: string;
-  email: string;
+  /**
+   * Authenticated-encrypted with `PII_ENCRYPTION_KEY`, never plaintext —
+   * see that config field's doc comment. Decrypt via
+   * `apps/api/src/auth-service.ts#decryptEmail`, only when actually needed.
+   */
+  emailEncrypted: string;
+  /**
+   * A deterministic HMAC of the lowercased/trimmed email under
+   * `EMAIL_LOOKUP_HASH_SECRET` — the unique lookup index this collection is
+   * actually queried by (login, duplicate-registration checks), since
+   * `emailEncrypted` can never be queried against directly.
+   */
+  emailLookupHash: string;
   passwordHash: string;
   accountClass: AccountClass;
   emailVerifiedAt?: Date;
   createdAt: Date;
   updatedAt: Date;
+}
+
+/**
+ * A minimal, deliberately PII-free companion to `UserDocument` — just the
+ * id and signup timestamp, nothing else. Data-minimization / SOC 2-oriented
+ * design: any service that only needs "is this a real customer account,
+ * and when was it created" (e.g. `apps/api/src/usage-quota-service.ts`)
+ * should read this instead of `UserDocument` (which carries `email` and
+ * `passwordHash`), so most of the codebase never has a reason to touch the
+ * one collection holding real customer PII/credentials at all — only
+ * `AuthService` (which owns login/verification) does. Every real customer
+ * account has exactly one row here, inserted at the same time as its
+ * `UserDocument` (`AuthService#register`).
+ */
+export interface CustomerAccountDocument {
+  _id: string;
+  createdAt: Date;
 }
 
 export interface SessionDocument {
@@ -118,7 +147,7 @@ export interface AuditDocument {
 
 export async function ensureIndexes(db: Db) {
   await Promise.all([
-    db.collection<UserDocument>("users").createIndex({ email: 1 }, { unique: true }),
+    db.collection<UserDocument>("users").createIndex({ emailLookupHash: 1 }, { unique: true }),
     db
       .collection<SessionDocument>("sessions")
       .createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),

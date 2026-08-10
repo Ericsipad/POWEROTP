@@ -72,6 +72,19 @@ export interface RequireNonNegativeBalance {
   (customerId: string): Promise<void>;
 }
 
+/** See `apps/api/src/usage-quota-service.ts#tryConsumeFreeQuota` — checked
+ * before `RequireNonNegativeBalance`; a covered request never touches the
+ * balance gate at all. Kept as a plain injected function for the same
+ * reason as `RequireNonNegativeBalance` above. */
+export interface TryConsumeFreeQuota {
+  (customerId: string, type: VerificationType): Promise<boolean>;
+}
+
+/** See `apps/api/src/auth-service.ts#requireVerifiedEmail`. */
+export interface RequireVerifiedEmail {
+  (customerId: string): Promise<void>;
+}
+
 /** See `apps/api/src/billing-charge-service.ts#chargeCompletedInteraction`. */
 export interface ChargeCompletedInteraction {
   (interaction: VerificationRequestDocument): Promise<void>;
@@ -93,6 +106,8 @@ export class VerificationService {
     private readonly enqueueProviderReconcile: EnqueueProviderReconcile,
     private readonly requireNonNegativeBalance: RequireNonNegativeBalance = async () => {},
     private readonly chargeCompletedInteraction: ChargeCompletedInteraction = async () => {},
+    private readonly tryConsumeFreeQuota: TryConsumeFreeQuota = async () => false,
+    private readonly requireVerifiedEmail: RequireVerifiedEmail = async () => {},
   ) {
     this.#requests = db.collection<VerificationRequestDocument>("verificationRequests");
     this.#events = db.collection<VerificationEventDocument>("verificationEvents");
@@ -121,11 +136,25 @@ export class VerificationService {
       if (verification) return this.#toAccepted(verification);
     }
 
-    // A hard `balance <= 0` gate, checked before any new interaction is
-    // created — see `apps/api/src/balance-service.ts#requireNonNegativeBalance`
-    // for why this is a coarse gate rather than a per-call cost estimate.
-    // Exempts the platform-admin-owned demo project.
-    await this.requireNonNegativeBalance(customerId);
+    // An unverified account cannot create anything at all — closes a real
+    // abuse gap where the free monthly quota below could otherwise be spent
+    // purely by holding the API key shown once at signup, without ever
+    // clicking the activation link. See
+    // `apps/api/src/auth-service.ts#requireVerifiedEmail`.
+    await this.requireVerifiedEmail(customerId);
+
+    // A new account's free monthly usage counter (see
+    // `apps/api/src/usage-quota-service.ts`) is checked first — a covered
+    // request never touches the balance gate at all. Only once quota is
+    // unavailable (none configured for this type, already used up this
+    // window, or the account's 180-day free-quota eligibility has passed)
+    // does the hard `balance <= 0` gate apply — see
+    // `apps/api/src/balance-service.ts#requireNonNegativeBalance`. Both
+    // exempt the platform-admin-owned demo project.
+    const coveredByFreeQuota = await this.tryConsumeFreeQuota(customerId, input.type);
+    if (!coveredByFreeQuota) {
+      await this.requireNonNegativeBalance(customerId);
+    }
 
     // Voice clients may supply their own code; SMS codes are always generated
     // by the platform. Both use the same encrypted-at-rest representation.
@@ -162,6 +191,7 @@ export class VerificationService {
         ? encryptString(code, this.config.CONFIG_ENCRYPTION_KEY)
         : undefined,
       challenge,
+      freeQuotaCovered: coveredByFreeQuota,
       createdAt: now,
       updatedAt: now,
       expiresAt: new Date(now.getTime() + VERIFICATION_LIFETIME_MS),

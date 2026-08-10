@@ -53,6 +53,24 @@ export class BillingChargeService {
     const otpType = otpChargeTypeFor[verification.type];
     const country = countryForE164(verification.targetNumber);
 
+    // Fixed at creation time by `UsageQuotaService#tryConsumeFreeQuota` (see
+    // `apps/api/src/usage-quota-service.ts`) — always $0, but still writes a
+    // real ledger row (never skipped) so free-quota usage is fully visible
+    // in the same ledger/reports every real charge appears in, per the
+    // user's explicit requirement.
+    if (verification.freeQuotaCovered) {
+      await this.balances.applyLedgerEntry({
+        userId: verification.customerId,
+        projectId: verification.projectId,
+        interactionId: verification._id,
+        type: otpType,
+        country,
+        amountUsd: 0,
+        note: "free_quota",
+      });
+      return;
+    }
+
     if (verification.type === "sms_code") {
       await this.balances.applyLedgerEntry({
         userId: verification.customerId,

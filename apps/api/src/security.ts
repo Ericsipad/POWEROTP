@@ -51,12 +51,19 @@ export function hashToken(value: string, secret: string) {
   return createHmac("sha256", secret).update(value).digest("base64url");
 }
 
-export async function hashPassword(password: string) {
-  return hash(password, ARGON2_OPTIONS);
+/**
+ * `pepper` is `PASSWORD_PEPPER` — a server-only secret never stored
+ * alongside the hash (unlike Argon2's own per-hash salt). Passed as
+ * Argon2's own `secret` option (true keyed hashing, not just string
+ * concatenation), so a leaked `users` collection alone is never enough to
+ * offline-crack passwords even with unlimited compute.
+ */
+export async function hashPassword(password: string, pepper: string) {
+  return hash(password, { ...ARGON2_OPTIONS, secret: Buffer.from(pepper, "utf8") });
 }
 
-export async function verifyPassword(passwordHash: string, password: string) {
-  return verify(passwordHash, password, ARGON2_OPTIONS);
+export async function verifyPassword(passwordHash: string, password: string, pepper: string) {
+  return verify(passwordHash, password, { ...ARGON2_OPTIONS, secret: Buffer.from(pepper, "utf8") });
 }
 
 /**

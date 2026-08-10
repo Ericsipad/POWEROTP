@@ -151,11 +151,35 @@ h1 em {
   max-width: 660px;
 }
 
+.heroMcpLine {
+  color: var(--muted);
+  font-size: 17px;
+  line-height: 1.6;
+  margin-top: 14px;
+  max-width: 660px;
+}
+
+.heroMcpLine code {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--green-dark);
+  font-weight: 700;
+  padding: 2px 8px;
+}
+
 .heroActions {
   align-items: center;
   display: flex;
   gap: 28px;
   margin-top: 35px;
+}
+
+.heroFreeTierNote {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+  margin-top: 12px;
 }
 
 .textLink {

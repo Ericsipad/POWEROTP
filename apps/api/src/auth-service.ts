@@ -6,6 +6,7 @@ import type { EmailService } from "./email.js";
 import { isIpAllowed } from "./ip-allowlist.js";
 import {
   PLATFORM_ADMIN_USER_ID,
+  type CustomerAccountDocument,
   type EmailVerificationDocument,
   type SessionDocument,
   type UserDocument,
@@ -13,13 +14,13 @@ import {
 import {
   createId,
   createSecret,
+  decryptString,
+  encryptString,
   hashPassword,
   hashToken,
   safeEqual,
   verifyPassword,
 } from "./security.js";
-
-const dummyPasswordHash = hashPassword("POWEROTP-dummy-password-not-a-credential");
 
 export class AuthError extends Error {
   constructor(
@@ -28,6 +29,19 @@ export class AuthError extends Error {
   ) {
     super(code);
   }
+}
+
+/**
+ * Decrypts an account's real email address — the only supported way to
+ * read it, since `UserDocument#emailEncrypted` is never queried against
+ * directly (use `emailLookupHash` for that). Exported as a plain function,
+ * not an `AuthService` method, so callers outside this module (e.g.
+ * `apps/web/lib/session-cookies.ts#sessionUser`) that already have a
+ * `UserDocument` in hand don't need a whole `AuthService` instance just to
+ * read one field.
+ */
+export function decryptEmail(user: UserDocument, piiEncryptionKey: string): string {
+  return decryptString(user.emailEncrypted, piiEncryptionKey);
 }
 
 export interface AuthenticatedSession {
@@ -42,6 +56,7 @@ export class AuthService {
   readonly #sessions;
   readonly #verifications;
   readonly #customerAccounts;
+  readonly #dummyPasswordHash: Promise<string>;
 
   constructor(
     db: Db,
@@ -52,23 +67,34 @@ export class AuthService {
     this.#sessions = db.collection<SessionDocument>("sessions");
     this.#verifications =
       db.collection<EmailVerificationDocument>("emailVerifications");
-    this.#customerAccounts = db.collection<{
-      _id: string;
-      createdAt: Date;
-    }>("customerAccounts");
+    this.#customerAccounts = db.collection<CustomerAccountDocument>("customerAccounts");
+    this.#dummyPasswordHash = hashPassword(
+      "POWEROTP-dummy-password-not-a-credential",
+      config.PASSWORD_PEPPER,
+    );
   }
 
-  async register(input: CustomerRegistration) {
-    const existing = await this.#users.findOne({ email: input.email });
-    if (existing?.emailVerifiedAt) return;
+  /**
+   * Creates (or refreshes, if still unverified) a customer account and
+   * queues its verification email. Returns the account's `userId` and
+   * whether the email was already verified (silent, anti-enumeration
+   * no-op) so callers like `POST /v1/auth/signup`
+   * (`apps/web/app/v1/auth/signup/route.ts`) can decide whether to also
+   * provision a first project/API key.
+   */
+  async register(input: CustomerRegistration): Promise<{ userId: string; alreadyVerified: boolean }> {
+    const emailLookupHash = this.#emailLookupHash(input.email);
+    const existing = await this.#users.findOne({ emailLookupHash });
+    if (existing?.emailVerifiedAt) return { userId: existing._id, alreadyVerified: true };
 
     const userId = existing?._id ?? createId("usr");
     if (!existing) {
       const now = new Date();
       await this.#users.insertOne({
         _id: userId,
-        email: input.email,
-        passwordHash: await hashPassword(input.password),
+        emailEncrypted: encryptString(input.email, this.config.PII_ENCRYPTION_KEY),
+        emailLookupHash,
+        passwordHash: await hashPassword(input.password, this.config.PASSWORD_PEPPER),
         accountClass: "customer",
         createdAt: now,
         updatedAt: now,
@@ -79,7 +105,7 @@ export class AuthService {
         { _id: userId, emailVerifiedAt: { $exists: false } },
         {
           $set: {
-            passwordHash: await hashPassword(input.password),
+            passwordHash: await hashPassword(input.password, this.config.PASSWORD_PEPPER),
             updatedAt: new Date(),
           },
         },
@@ -108,9 +134,14 @@ export class AuthService {
       }
       throw error;
     }
+
+    return { userId, alreadyVerified: false };
   }
 
-  async verifyEmail(token: string) {
+  /** Returns the verified account's `userId` so callers (e.g.
+   * `POST /v1/auth/verify-email`) can do post-verification bookkeeping
+   * that belongs outside this module, like activating usage quotas. */
+  async verifyEmail(token: string): Promise<{ userId: string }> {
     const tokenHash = hashToken(token, this.config.SESSION_HASH_SECRET);
     const verification = await this.#verifications.findOneAndDelete({
       _id: tokenHash,
@@ -122,11 +153,12 @@ export class AuthService {
       { _id: verification.userId },
       { $set: { emailVerifiedAt: new Date(), updatedAt: new Date() } },
     );
+    return { userId: verification.userId };
   }
 
   async loginCustomer(input: CustomerLogin) {
     const user = await this.#users.findOne({
-      email: input.email,
+      emailLookupHash: this.#emailLookupHash(input.email),
       accountClass: "customer",
     });
     await this.#verifyCredentials(user, input.password);
@@ -157,9 +189,11 @@ export class AuthService {
     }
 
     const now = new Date();
+    const adminEmail = this.config.ADMIN_EMAIL.toLowerCase();
     const user: UserDocument = {
       _id: PLATFORM_ADMIN_USER_ID,
-      email: this.config.ADMIN_EMAIL.toLowerCase(),
+      emailEncrypted: encryptString(adminEmail, this.config.PII_ENCRYPTION_KEY),
+      emailLookupHash: this.#emailLookupHash(adminEmail),
       passwordHash: "",
       accountClass: "platform_admin",
       emailVerifiedAt: now,
@@ -170,7 +204,8 @@ export class AuthService {
       { _id: user._id },
       {
         $set: {
-          email: user.email,
+          emailEncrypted: user.emailEncrypted,
+          emailLookupHash: user.emailLookupHash,
           passwordHash: user.passwordHash,
           accountClass: user.accountClass,
           emailVerifiedAt: user.emailVerifiedAt,
@@ -209,6 +244,23 @@ export class AuthService {
     }
   }
 
+  /**
+   * Blocks creating a new verification interaction until the account's
+   * email is verified — closes a real abuse gap: without this, a freshly
+   * registered (but never-verified) account could still spend its free
+   * monthly usage quota (`apps/api/src/usage-quota-service.ts`) purely by
+   * holding the API key shown once at signup, never clicking the
+   * activation link at all. Exempts the platform-admin-owned demo project.
+   * Injected into `VerificationService` the same way as
+   * `requireNonNegativeBalance`, so that module stays agnostic of exactly
+   * how "verified" is defined.
+   */
+  async requireVerifiedEmail(userId: string): Promise<void> {
+    if (userId === PLATFORM_ADMIN_USER_ID) return;
+    const user = await this.#users.findOne({ _id: userId }, { projection: { emailVerifiedAt: 1 } });
+    if (!user?.emailVerifiedAt) throw new AuthError("email_not_verified", 403);
+  }
+
   async logout(sessionToken: string | undefined) {
     if (!sessionToken) return;
     await this.#sessions.deleteOne({
@@ -216,10 +268,18 @@ export class AuthService {
     });
   }
 
+  /** Deterministic, so the same email always maps to the same lookup
+   * value — this is what `users` is actually queried by (never plaintext
+   * or `emailEncrypted`, which can't be queried against directly). Emails
+   * are already lowercased/trimmed by `EmailSchema` before reaching here. */
+  #emailLookupHash(email: string): string {
+    return hashToken(email, this.config.EMAIL_LOOKUP_HASH_SECRET);
+  }
+
   async #verifyCredentials(user: UserDocument | null, password: string) {
     const valid = user
-      ? await verifyPassword(user.passwordHash, password)
-      : await verifyPassword(await dummyPasswordHash, password);
+      ? await verifyPassword(user.passwordHash, password, this.config.PASSWORD_PEPPER)
+      : await verifyPassword(await this.#dummyPasswordHash, password, this.config.PASSWORD_PEPPER);
     if (!valid) throw new AuthError("invalid_credentials", 401);
   }
 

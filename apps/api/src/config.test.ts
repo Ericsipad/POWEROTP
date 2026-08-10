@@ -10,6 +10,9 @@ const requiredEnv = {
   CONFIG_ENCRYPTION_KEY: "b".repeat(32),
   SESSION_HASH_SECRET: "c".repeat(32),
   API_KEY_HASH_SECRET: "d".repeat(32),
+  PASSWORD_PEPPER: "e".repeat(32),
+  PII_ENCRYPTION_KEY: "f".repeat(32),
+  EMAIL_LOOKUP_HASH_SECRET: "g".repeat(32),
   BREVO_API_KEY: "brevo-key",
   EMAIL_FROM: "no-reply@example.com",
   PUBLIC_APP_URL: "https://powerotp.com",
@@ -41,6 +44,7 @@ describe("loadConfig", () => {
         SPACES_ACCESS_KEY: "",
         SPACES_SECRET_KEY: "",
         MEDIA_MANIFEST_SECRET: "",
+        BREVO_VERIFY_TEMPLATE_ID: "",
       }),
     );
   });

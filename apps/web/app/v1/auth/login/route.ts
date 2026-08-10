@@ -19,7 +19,7 @@ export const POST = apiRoute(async (request) => {
 
   const session = await auth.loginCustomer(parseBody(CustomerLoginSchema, await request.json()));
   const response = NextResponse.json({
-    user: sessionUser(session.user),
+    user: sessionUser(session.user, config.PII_ENCRYPTION_KEY),
     csrfToken: session.csrfToken,
   });
   setSessionCookies(response, session.sessionToken, session.csrfToken, session.expiresAt);

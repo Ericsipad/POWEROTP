@@ -56,6 +56,10 @@ export interface FinancialTransactionDocument {
   stripePaymentId?: string;
   type: FinancialTransactionType;
   country?: string;
+  /** A short annotation — the admin's stated reason for `admin_adjustment`
+   * rows, or the literal `"free_quota"` for a free-quota-covered `otp1`..
+   * `otp4` row (see `apps/api/src/billing-charge-service.ts`). */
+  note?: string;
   openingBalanceUsd: number;
   tierAtTransaction: BillingTier;
   amountUsd: number;

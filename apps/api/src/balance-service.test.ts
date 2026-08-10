@@ -151,10 +151,10 @@ describe("BalanceService.requireNonNegativeBalance", () => {
     );
   });
 
-  it("passes for a positive balance", async () => {
+  it("passes for any positive balance, with no per-type minimum floor", async () => {
     const { db, client } = createFakeStores({
       _id: "usr_1",
-      balanceUsd: 10,
+      balanceUsd: 0.01,
       tier: "tier1",
       updatedAt: new Date(),
     });

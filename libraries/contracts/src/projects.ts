@@ -9,7 +9,7 @@ export const ProjectSlugSchema = z
   .max(48)
   .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
 
-const HttpsUrlSchema = z
+export const HttpsUrlSchema = z
   .string()
   .url()
   .refine((value) => new URL(value).protocol === "https:", "HTTPS is required");

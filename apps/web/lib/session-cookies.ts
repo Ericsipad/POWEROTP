@@ -1,4 +1,4 @@
-import type { AuthService } from "@powerotp/api/auth-service.js";
+import { decryptEmail, type AuthService } from "@powerotp/api/auth-service.js";
 import { ApiError } from "@powerotp/api/errors.js";
 import type { UserDocument } from "@powerotp/api/persistence.js";
 import { NextResponse, type NextRequest } from "next/server";
@@ -6,10 +6,14 @@ import { NextResponse, type NextRequest } from "next/server";
 export const SESSION_COOKIE = "powerotp_session";
 export const CSRF_COOKIE = "powerotp_csrf";
 
-export function sessionUser(user: UserDocument) {
+/** `piiEncryptionKey` is `config.PII_ENCRYPTION_KEY` — decrypts the
+ * account's real email only transiently, for returning it to the
+ * authenticated account itself in a session response. See
+ * `apps/api/src/auth-service.ts#decryptEmail`. */
+export function sessionUser(user: UserDocument, piiEncryptionKey: string) {
   return {
     id: user._id,
-    email: user.email,
+    email: decryptEmail(user, piiEncryptionKey),
     accountClass: user.accountClass,
     emailVerified: Boolean(user.emailVerifiedAt),
   };

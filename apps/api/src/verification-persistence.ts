@@ -99,6 +99,18 @@ export interface VerificationRequestDocument {
    * attempt (nothing to reconcile).
    */
   providerRecordStatus?: "pending" | "matched" | "not_found" | "error";
+  /**
+   * Set once at `create()` from `UsageQuotaService#tryConsumeFreeQuota`'s
+   * result — `true` means this interaction's completion charge (see
+   * `apps/api/src/billing-charge-service.ts`) must always be $0, regardless
+   * of what the rate chart says, and still write a ledger row (never
+   * silently skip it) so free-quota usage is fully visible in the same
+   * ledger/reports every real charge appears in. Fixed at creation time,
+   * not re-evaluated at charge time, so a quota window resetting mid-flight
+   * can never retroactively change what an already-created interaction
+   * bills.
+   */
+  freeQuotaCovered: boolean;
   createdAt: Date;
   updatedAt: Date;
   expiresAt: Date;

@@ -9,6 +9,39 @@ const ProductionConfigSchema = z.object({
   SESSION_HASH_SECRET: z.string().min(32),
   API_KEY_HASH_SECRET: z.string().min(32),
   /**
+   * A server-only "pepper" mixed into every customer password hash via
+   * Argon2's own `secret` option (see `apps/api/src/security.ts`) — never
+   * stored in the database alongside the hash, unlike Argon2's per-hash
+   * salt. Independent from every other secret; rotating it invalidates
+   * every existing password hash (there are no real customer accounts yet,
+   * so this is safe to set once now rather than added later as a breaking
+   * migration).
+   */
+  PASSWORD_PEPPER: z.string().min(32),
+  /**
+   * SOC 2-oriented data protection for customer PII at rest: an account's
+   * real email address is never stored as plaintext in `users.email` — it
+   * is authenticated-encrypted (`apps/api/src/security.ts#encryptString`,
+   * same primitive as `ProjectDocument#callbackSecretEncrypted`) under
+   * `PII_ENCRYPTION_KEY` into `emailEncrypted`, decrypted only transiently
+   * when actually needed (sending a verification email, returning it to
+   * the authenticated account itself in a session response). Independent
+   * from every other secret, including `CONFIG_ENCRYPTION_KEY` (a
+   * different security domain — provider/callback secrets, not customer
+   * PII).
+   */
+  PII_ENCRYPTION_KEY: z.string().min(32),
+  /**
+   * A deterministic keyed hash of the same email address, stored alongside
+   * `emailEncrypted` as `emailLookupHash` — the only way to find an account
+   * by email (login, duplicate-registration checks) without ever storing
+   * or querying against plaintext. Independent from `PII_ENCRYPTION_KEY`
+   * (encryption and lookup-indexing are different concerns; a leak of one
+   * secret alone should never compromise the other) and from every other
+   * secret in this app.
+   */
+  EMAIL_LOOKUP_HASH_SECRET: z.string().min(32),
+  /**
    * Platform admin identity lives entirely in environment variables, not
    * the database: a single email/password pair plus an IP allowlist,
    * instead of a registered account with TOTP. All optional so the app
@@ -32,6 +65,15 @@ const ProductionConfigSchema = z.object({
    */
   NODE_SECRET: z.string().min(32).optional(),
   BREVO_API_KEY: z.string().min(1),
+  /**
+   * Optional Brevo transactional-email template id for the account-email
+   * verification message (see `apps/api/src/email.ts`). When unset, the
+   * verification email falls back to a plain inline-HTML message (the
+   * original behavior) — set this once the template has been created in
+   * the Brevo dashboard using the HTML documented in `docs/AS_BUILT.md`'s
+   * "Customer signup flow" section.
+   */
+  BREVO_VERIFY_TEMPLATE_ID: z.string().min(1).optional(),
   EMAIL_FROM: z.string().email(),
   PUBLIC_APP_URL: z.string().url(),
   PUBLIC_API_URL: z.string().url(),

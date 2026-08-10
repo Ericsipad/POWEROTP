@@ -21,6 +21,12 @@ export function BillingPanel({ authenticatedFetch }: BillingPanelProps) {
 
   useEffect(() => {
     void refresh();
+    // Polls while the dashboard is open so a Stripe-webhook-applied top-up
+    // credit (which lands asynchronously, slightly after the customer is
+    // redirected back — see `apps/web/app/top-banner.tsx`) shows up without
+    // a manual page refresh.
+    const interval = setInterval(() => void refresh(), 10_000);
+    return () => clearInterval(interval);
   }, []);
 
   async function refresh() {

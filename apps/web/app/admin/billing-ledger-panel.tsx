@@ -8,11 +8,18 @@ import { useState, type FormEvent } from "react";
  * `docs/AS_BUILT.md`'s "Customer balance billing" section. Manual lookup
  * only, same convention as every other admin panel (no auto-polling).
  */
-export function BillingLedgerPanel() {
+interface BillingLedgerPanelProps {
+  csrfToken: string;
+}
+
+export function BillingLedgerPanel({ csrfToken }: BillingLedgerPanelProps) {
   const [userId, setUserId] = useState("");
   const [balance, setBalance] = useState<CustomerBalance>();
   const [transactions, setTransactions] = useState<FinancialTransaction[]>();
   const [status, setStatus] = useState("");
+  const [adjustAmount, setAdjustAmount] = useState("");
+  const [adjustNote, setAdjustNote] = useState("");
+  const [adjustStatus, setAdjustStatus] = useState("");
 
   async function lookup(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -37,6 +44,27 @@ export function BillingLedgerPanel() {
     setStatus("");
   }
 
+  async function adjustBalance(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const amountUsd = Number(adjustAmount);
+    if (!userId.trim() || !amountUsd) return;
+    setAdjustStatus("Applying…");
+    const response = await fetch("/v1/admin/billing/credit", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "content-type": "application/json", "x-csrf-token": csrfToken },
+      body: JSON.stringify({ userId: userId.trim(), amountUsd, note: adjustNote.trim() || undefined }),
+    });
+    if (!response.ok) {
+      setAdjustStatus("Adjustment failed.");
+      return;
+    }
+    setAdjustStatus("Applied.");
+    setAdjustAmount("");
+    setAdjustNote("");
+    await lookup({ preventDefault: () => {} } as FormEvent<HTMLFormElement>);
+  }
+
   return (
     <article className="projectCard">
       <h2>Customer balance lookup</h2>
@@ -51,6 +79,32 @@ export function BillingLedgerPanel() {
         </button>
       </form>
       {status && <p>{status}</p>}
+      <h3>Manually credit/debit this user</h3>
+      <p>
+        Positive amount credits, negative debits. Use this for support cases (e.g. a customer
+        blocked before top-ups/rates were configured) — there is no automated alternative.
+      </p>
+      <form className="formStack" onSubmit={adjustBalance}>
+        <label className="field">
+          Amount (USD, signed)
+          <input
+            type="number"
+            step="0.01"
+            value={adjustAmount}
+            onChange={(event) => setAdjustAmount(event.target.value)}
+            placeholder="e.g. 10 or -5"
+            required
+          />
+        </label>
+        <label className="field">
+          Note (optional)
+          <input value={adjustNote} onChange={(event) => setAdjustNote(event.target.value)} />
+        </label>
+        <button className="button buttonSmall" type="submit" disabled={!userId.trim()}>
+          Apply adjustment
+        </button>
+        {adjustStatus && <p>{adjustStatus}</p>}
+      </form>
       {balance && (
         <div className="statsGrid">
           <div className="stat">

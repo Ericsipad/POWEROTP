@@ -12,10 +12,20 @@ import {
 } from "./security.js";
 
 describe("security primitives", () => {
+  const pepper = "test-pepper-with-at-least-32-characters!!";
+
   it("hashes passwords with Argon2id", async () => {
-    const passwordHash = await hashPassword("Correct-Horse-123");
-    assert.equal(await verifyPassword(passwordHash, "Correct-Horse-123"), true);
-    assert.equal(await verifyPassword(passwordHash, "Wrong-Horse-123"), false);
+    const passwordHash = await hashPassword("Correct-Horse-123", pepper);
+    assert.equal(await verifyPassword(passwordHash, "Correct-Horse-123", pepper), true);
+    assert.equal(await verifyPassword(passwordHash, "Wrong-Horse-123", pepper), false);
+  });
+
+  it("rejects a correct password hashed/verified with a different pepper", async () => {
+    const passwordHash = await hashPassword("Correct-Horse-123", pepper);
+    assert.equal(
+      await verifyPassword(passwordHash, "Correct-Horse-123", "a-completely-different-pepper-value"),
+      false,
+    );
   });
 
   it("encrypts sensitive configuration with authenticated encryption", () => {

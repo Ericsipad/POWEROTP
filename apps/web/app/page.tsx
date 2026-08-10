@@ -1,3 +1,4 @@
+import { SignupCta } from "./signup-cta";
 import { TryItNow } from "./try-it-now";
 
 const methods = [
@@ -45,6 +46,7 @@ export default function Home() {
           <a className="button buttonSmall buttonGhost" href="/login">
             Client login
           </a>
+          <SignupCta className="button buttonSmall">Sign up</SignupCta>
         </div>
       </nav>
 
@@ -55,23 +57,17 @@ export default function Home() {
               <span className="pulse" />
               Programmable phone verification
             </div>
-            <h1>
-              One API.
-              <br />
-              Four ways to <em>verify.</em>
-            </h1>
-            <p className="heroCopy">
-              Orchestrate calls, spoken codes, listening challenges, and SMS from
-              one secure control plane—with real-time status callbacks at every step.
+            <h1>Production ready in 5 minutes.</h1>
+            <p className="heroMcpLine">
+              <code>https://powerotp.com/mcp</code> — paste this to your AI tools.
             </p>
             <div className="heroActions">
-              <a className="button" href="/register">
-                Start building <span>→</span>
-              </a>
+              <SignupCta className="button">Get API key now</SignupCta>
               <a className="textLink" href="#integration">
                 See the API flow
               </a>
             </div>
+            <p className="heroFreeTierNote">No card required · Free usage tier included</p>
             <div className="statusStrip">
               <span>Request accepted</span>
               <i>→</i>

@@ -20,6 +20,7 @@ import { ProjectService } from "@powerotp/api/project-service.js";
 import { RateChartService } from "@powerotp/api/rate-chart-service.js";
 import { StripeTopupService } from "@powerotp/api/stripe-service.js";
 import { productionTransportRegistry } from "@powerotp/api/transport.js";
+import { UsageQuotaService } from "@powerotp/api/usage-quota-service.js";
 import {
   createDispatchWorker,
   createVerificationQueues,
@@ -67,6 +68,10 @@ async function buildServerContext(): Promise<ServerContext> {
   const rateCharts = new RateChartService(dataStores.db);
   const billingCharges = new BillingChargeService(dataStores.db, balances, rateCharts);
   const stripeTopups = new StripeTopupService(dataStores.db, config, balances);
+  const usageQuotas = new UsageQuotaService(dataStores.db);
+
+  const emailService = createBrevoEmailService(config);
+  const auth = new AuthService(dataStores.db, config, emailService);
 
   const verifications = new VerificationService(
     dataStores.db,
@@ -78,6 +83,8 @@ async function buildServerContext(): Promise<ServerContext> {
     queues.enqueueProviderReconcile,
     (customerId) => balances.requireNonNegativeBalance(customerId),
     (verification) => billingCharges.chargeCompletedInteraction(verification),
+    (customerId, type) => usageQuotas.tryConsumeFreeQuota(customerId, type),
+    (customerId) => auth.requireVerifiedEmail(customerId),
   );
   const dispatchWorker = createDispatchWorker(
     queueConnection,
@@ -99,8 +106,6 @@ async function buildServerContext(): Promise<ServerContext> {
   );
   await scheduleBillingDailyCharges(billingDailyChargeQueue);
 
-  const emailService = createBrevoEmailService(config);
-  const auth = new AuthService(dataStores.db, config, emailService);
   const projects = new ProjectService(dataStores.db, config, verifications);
   const nodes = new NodeService(dataStores.db, config);
   const modalSessions = new ModalSessionService(dataStores.db);
