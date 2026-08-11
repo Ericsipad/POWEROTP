@@ -963,15 +963,19 @@ the same address and steps 1–5 collapse to nothing. This has not been done —
 needs a DigitalOcean control-panel action and this environment has no DO API
 access.
 
-**Known gap found while taking this inventory:** the live droplet's
+**Confirmed while taking this inventory:** the live droplet's
 `/etc/powerotp/agent.env` contains only `CONTROL_PLANE_URL`,
-`ASTERISK_PJSIP_TRUNKS_PATH`, `POLL_INTERVAL_MS`, and `NODE_SECRET` — it has
-**no `MEDIA_MANIFEST_SECRET` or `MEDIA_ROOT`**, even though
-`/var/lib/asterisk/sounds/custom` exists. So `media-sync.ts`'s loop has never
-actually run on `powerotpvoip1` and `voice_challenge` recordings are not being
-synced to the node. Not fixed here (it changes telephony behavior and wants its
-own verification pass), but `bootstrap-node.sh` wires both vars whenever
-`MEDIA_MANIFEST_SECRET` is supplied, so a rebuilt node would not inherit the gap.
+`ASTERISK_PJSIP_TRUNKS_PATH`, `POLL_INTERVAL_MS`, and `NODE_SECRET` — no
+`MEDIA_MANIFEST_SECRET` or `MEDIA_ROOT`, so `media-sync.ts`'s loop has never run
+on `powerotpvoip1`. This is **correct for the current state**, not an oversight
+to fix on the droplet: DigitalOcean Spaces is still unprovisioned, so
+`MEDIA_MANIFEST_SECRET` and the `SPACES_*` values are unset in App Platform as
+well, and `voice_challenge` fails closed end-to-end by design (see "Infrastructure
+that has real credentials behind it" above). Setting the two droplet vars alone
+would accomplish nothing — there would be no manifest to fetch. They become
+required at the same moment Spaces is provisioned, which is why
+`bootstrap-node.sh` wires both automatically whenever `MEDIA_MANIFEST_SECRET` is
+supplied to it.
 
 ### Incident: a phishing email impersonating a DigitalOcean abuse report
 
@@ -2094,6 +2098,17 @@ the actual UI copy end users see must not reference future plans.
 
 ## Known gaps / next steps
 
+**This section is the project's to-do list.** Nothing here is an accepted
+permanent limitation — every item is work still owed, and an item is meant to be
+deleted (not softened) once it genuinely works end-to-end. Where an item is
+blocked, the blocker is named explicitly so a future session can see immediately
+whether it can act or needs something from the user first. The three current
+hard blockers are: **DigitalOcean account access** (no API token here and
+`doctl` isn't installed — blocks the Reserved IP, Spaces provisioning, and
+testing the node rebuild script), **VoIP.ms support** (the `trunk-2`/`trunk-3`
+403s; local debugging is exhausted), and **real business numbers from the user**
+(the per-country rate charts, which are all still $0).
+
 1. `call_reachability` and `voice_code` are both **confirmed working end-to-end live**,
    including the trunk pool's rotation and mid-attempt failover against two real broken
    VoIP.ms subaccounts (see "Outbound trunk pool" above's "Live confirmation"
@@ -2217,15 +2232,33 @@ the actual UI copy end users see must not reference future plans.
     the repo** (see "Droplet deploy hardening" and "Node rebuild / disaster
     recovery" above). Still open from that work: **no DigitalOcean Reserved IP is
     attached**, so a rebuild changes the IP and drags a six-step checklist with
-    it — attaching one is a control-panel action nobody has taken, and this
-    environment has no DO API access to do it. **`MEDIA_MANIFEST_SECRET`/
-    `MEDIA_ROOT` are absent from the live droplet's `agent.env`**, so
-    `voice_challenge` media sync has in fact never run there (deliberately not
-    changed in that session — it alters telephony behavior and wants its own
-    verification pass). And `bootstrap-node.sh` has been syntax-checked and is
+    it. **Blocked on DigitalOcean account access** — attaching a Reserved IP is
+    an API/control-panel action, and this environment has no DO API token and no
+    `doctl`. To unblock: a read/write DO API token (ideally exported as
+    `DIGITALOCEAN_TOKEN` on the operator's machine rather than pasted into chat),
+    after which the Reserved IP, the Spaces provisioning in item 13, and the
+    rebuild-script test below can all be done without further input.
+    Also still open: `bootstrap-node.sh` has been syntax-checked and is
     derived from the live box's actual inspected state, but has **never been run
     end-to-end against a genuinely fresh droplet** — the first real DR event will
-    be its first full execution, so budget time for it to be slightly wrong.
+    be its first full execution, so budget time for it to be slightly wrong. The
+    test is cheap (create a throwaway droplet, run it, destroy the droplet) and is
+    blocked on the same token. (`MEDIA_MANIFEST_SECRET`/`MEDIA_ROOT` being absent
+    from the live droplet's `agent.env` is *not* a gap — that is correct until
+    Spaces is provisioned; see "Node rebuild / disaster recovery".)
+13. **`voice_challenge` cannot work end-to-end until DigitalOcean Spaces is
+    provisioned.** The code is complete and unit-tested and fails closed
+    (`media_storage_not_configured` / `no_published_challenges`), but
+    `SPACES_ENDPOINT/BUCKET/ACCESS_KEY/SECRET_KEY` and the independent
+    `MEDIA_MANIFEST_SECRET` are unset in App Platform, so there is no manifest for
+    the agent's `media-sync.ts` loop to fetch. Finishing it means: create the
+    Spaces bucket, generate its keys, set those five values in App Platform, then
+    add `MEDIA_MANIFEST_SECRET` + `MEDIA_ROOT=/var/lib/asterisk/sounds/custom` to
+    the droplet's `/etc/powerotp/agent.env` and restart the agent
+    (`bootstrap-node.sh` does the droplet half automatically when the secret is
+    supplied). **Blocked on the same DigitalOcean access as item 12.** This is
+    also what blocks `brandLogoUrl` becoming a real file upload instead of a
+    pasted link (item 11).
 
 ### Incident: `npm ci` OOM-killed on the droplet during the Phase 5 redeploy (fixed with a permanent swap file)
 
