@@ -1,18 +1,22 @@
 import type {
   BillingTier,
   CallRateCard,
+  EmailRate,
   PlanCharge,
   SmsRateCard,
   UpdatePlanCharge,
   UpsertCallRateCard,
+  UpsertEmailRate,
   UpsertSmsRateCard,
 } from "@powerotp/contracts";
 import type { Db } from "mongodb";
 
-import type {
-  CallRateCardDocument,
-  PlanChargeDocument,
-  SmsRateCardDocument,
+import {
+  EMAIL_RATE_CARD_ID,
+  type CallRateCardDocument,
+  type EmailRateCardDocument,
+  type PlanChargeDocument,
+  type SmsRateCardDocument,
 } from "./billing-persistence.js";
 
 /**
@@ -25,11 +29,13 @@ import type {
 export class RateChartService {
   readonly #callRates;
   readonly #smsRates;
+  readonly #emailRate;
   readonly #planCharges;
 
   constructor(db: Db) {
     this.#callRates = db.collection<CallRateCardDocument>("callRateCards");
     this.#smsRates = db.collection<SmsRateCardDocument>("smsRateCards");
+    this.#emailRate = db.collection<EmailRateCardDocument>("emailRateCards");
     this.#planCharges = db.collection<PlanChargeDocument>("planCharges");
   }
 
@@ -46,6 +52,13 @@ export class RateChartService {
   async listPlanCharges(): Promise<PlanCharge[]> {
     const rows = await this.#planCharges.find().sort({ _id: 1 }).toArray();
     return rows.map(toPlanCharge);
+  }
+
+  /** `null` before an admin has ever set it — same "no guessed default"
+   * convention as `callRateFor`/`smsRateFor` below. */
+  async getEmailRate(): Promise<EmailRate | null> {
+    const row = await this.#emailRate.findOne({ _id: EMAIL_RATE_CARD_ID });
+    return row ? toEmailRate(row) : null;
   }
 
   async upsertCallRate(input: UpsertCallRateCard): Promise<CallRateCard> {
@@ -74,6 +87,23 @@ export class RateChartService {
           tier1PerMessageUsd: input.tier1PerMessageUsd,
           tier2PerMessageUsd: input.tier2PerMessageUsd,
           tier3PerMessageUsd: input.tier3PerMessageUsd,
+          updatedAt: now,
+        },
+      },
+      { upsert: true },
+    );
+    return { ...input, updatedAt: now.toISOString() };
+  }
+
+  async upsertEmailRate(input: UpsertEmailRate): Promise<EmailRate> {
+    const now = new Date();
+    await this.#emailRate.updateOne(
+      { _id: EMAIL_RATE_CARD_ID },
+      {
+        $set: {
+          tier1PerEmailUsd: input.tier1PerEmailUsd,
+          tier2PerEmailUsd: input.tier2PerEmailUsd,
+          tier3PerEmailUsd: input.tier3PerEmailUsd,
           updatedAt: now,
         },
       },
@@ -112,6 +142,13 @@ export class RateChartService {
   async planChargeFor(tier: BillingTier): Promise<PlanChargeDocument | null> {
     return this.#planCharges.findOne({ _id: tier });
   }
+
+  /** Looked up at charge time by `apps/api/src/billing-charge-service.ts`
+   * for `email_code` — same "no guessed default" convention as
+   * `callRateFor`/`smsRateFor`. */
+  async emailRateFor(): Promise<EmailRateCardDocument | null> {
+    return this.#emailRate.findOne({ _id: EMAIL_RATE_CARD_ID });
+  }
 }
 
 function toCallRateCard(document: CallRateCardDocument): CallRateCard {
@@ -139,6 +176,15 @@ function toPlanCharge(document: PlanChargeDocument): PlanCharge {
     tier: document._id,
     monthlyDisplayUsd: document.monthlyDisplayUsd,
     dailyChargedUsd: document.dailyChargedUsd,
+    updatedAt: document.updatedAt.toISOString(),
+  };
+}
+
+function toEmailRate(document: EmailRateCardDocument): EmailRate {
+  return {
+    tier1PerEmailUsd: document.tier1PerEmailUsd,
+    tier2PerEmailUsd: document.tier2PerEmailUsd,
+    tier3PerEmailUsd: document.tier3PerEmailUsd,
     updatedAt: document.updatedAt.toISOString(),
   };
 }

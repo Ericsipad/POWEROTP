@@ -45,7 +45,15 @@ export class ModalSessionService {
     project: Pick<ProjectDocument, "_id" | "customerId" | "enabledMethods">,
     requestedTypes: VerificationType[] | undefined,
   ) {
-    const allowedTypes = requestedTypes ?? project.enabledMethods;
+    // `email_code` isn't offered through the hosted widget yet —
+    // `ModalSessionVerificationRequestSchema#targetNumber` is still
+    // E.164-only there (see `libraries/contracts/src/modal-sessions.ts`);
+    // it's only reachable today via a customer's own backend call to
+    // `POST /v1/projects/{slug}/verifications`. Revisit once the widget's
+    // own contact-input UI is extended for email.
+    const allowedTypes = (requestedTypes ?? project.enabledMethods).filter(
+      (type) => type !== "email_code",
+    );
     if (allowedTypes.length === 0) {
       throw new ModalSessionError("no_methods_available", 409);
     }

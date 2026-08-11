@@ -18,6 +18,10 @@ const methodLabels: Record<VerificationType, string> = {
   voice_code: "Phone call with a spoken code",
   voice_challenge: "Phone call with a spoken question",
   sms_code: "Text message code",
+  // Not actually offered through the hosted widget yet (see
+  // `apps/api/src/modal-session-service.ts`) — kept here only so this map
+  // stays exhaustive over `VerificationType`.
+  email_code: "Email code",
 };
 
 function sanitizeNumber(rawValue: string) {

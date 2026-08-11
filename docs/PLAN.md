@@ -32,6 +32,7 @@ tests using a test-only fake transport that never runs outside `*.test.ts` files
 | 2 | `voice_code` | Repeats a five-digit code and validates the code submitted by the client. |
 | 3 | `voice_challenge` | Plays a POWEROTP recording, returns question/options JSON, and validates opaque answer IDs. |
 | 4 | `sms_code` | Sends and validates a five-digit SMS code through a provider adapter. |
+| 5 | `email_code` | Sends and validates a five-digit code by email, optionally branded with the owning project's name/logo. Not part of the original phase list — added later; see `docs/AS_BUILT.md`. |
 
 Each customer project receives a stable API URL, a server-side secret API key, callback
 configuration, allowed browser origins, enabled methods, and usage history. Customer

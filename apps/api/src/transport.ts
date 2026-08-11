@@ -1,6 +1,7 @@
 import type { VerificationState, VerificationType } from "@powerotp/contracts";
 
 import type { ProductionConfig } from "./config.js";
+import { createBrevoEmailOtpService, EmailOtpProviderError, type EmailOtpBranding } from "./email-otp-service.js";
 import { hasAnyOutboundTrunk } from "./outbound-trunks.js";
 import { createVoipMsSmsService, SmsProviderError, type SmsService } from "./sms.js";
 
@@ -10,6 +11,8 @@ export interface TransportContext {
   targetNumber: string;
   /** Present only for code-delivery transports; never log this context. */
   code?: string;
+  /** Present only for `email_code` — see `VerificationRequestDocument#emailBranding`. */
+  branding?: EmailOtpBranding;
 }
 
 /**
@@ -22,7 +25,7 @@ export interface TransportHandle {
   advance(
     state: VerificationState,
     reasonCode?: string,
-    meta?: { smsDid?: string },
+    meta?: { smsDid?: string; emailSent?: boolean },
   ): Promise<boolean>;
 }
 
@@ -114,6 +117,40 @@ export function createSmsCodeTransport(
   };
 }
 
+/**
+ * Same shape as `createSmsCodeTransport` above, over Brevo instead of
+ * VoIP.ms. `EmailOtpService` has no "unconfigured" state the way `SmsService`
+ * does (`BREVO_API_KEY`/`EMAIL_FROM` are both required, non-optional config
+ * fields, unlike the SMS provider's optional credentials), so this
+ * transport is always real once deployed — never falls back to
+ * `unavailableTransport`.
+ */
+export function createEmailCodeTransport(
+  config: Pick<ProductionConfig, "BREVO_API_KEY" | "EMAIL_FROM">,
+  emailOtp = createBrevoEmailOtpService(config),
+): VerificationTransport {
+  return {
+    async dispatch(context, handle) {
+      const claimed = await handle.advance("dispatching", "sending_to_provider");
+      if (!claimed) return;
+      if (!context.code) {
+        await handle.advance("failed", "code_unavailable");
+        return;
+      }
+
+      try {
+        await emailOtp.sendOtpCode(context.targetNumber, context.code, context.branding);
+      } catch (error) {
+        const reasonCode =
+          error instanceof EmailOtpProviderError ? error.reasonCode : "provider_unavailable";
+        await handle.advance("failed", reasonCode);
+        return;
+      }
+      await handle.advance("awaiting_response", "code_sent", { emailSent: true });
+    },
+  };
+}
+
 export function productionTransportRegistry(config: ProductionConfig): TransportRegistry {
   return {
     // All three voice methods now have real dialplan/ARI call-control
@@ -126,5 +163,6 @@ export function productionTransportRegistry(config: ProductionConfig): Transport
     voice_code: createNodeDispatchTransport(config),
     voice_challenge: createNodeDispatchTransport(config),
     sms_code: createSmsCodeTransport(config),
+    email_code: createEmailCodeTransport(config),
   };
 }

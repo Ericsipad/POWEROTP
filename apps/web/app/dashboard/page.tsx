@@ -18,6 +18,7 @@ const methods: Array<{ id: VerificationType; label: string }> = [
   { id: "voice_code", label: "Voice code" },
   { id: "voice_challenge", label: "Voice challenge" },
   { id: "sms_code", label: "SMS code" },
+  { id: "email_code", label: "Email code" },
 ];
 
 interface RevealedSecrets {
@@ -198,6 +199,9 @@ export default function DashboardPage() {
             project={project}
             onRotateApiKey={rotateApiKey}
             onSetCallback={setCallback}
+            onProjectUpdated={(updated) =>
+              setProjects((current) => current.map((p) => (p.id === updated.id ? updated : p)))
+            }
             authenticatedFetch={authenticatedFetch}
           />
         ))}

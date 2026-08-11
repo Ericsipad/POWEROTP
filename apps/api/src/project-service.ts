@@ -26,6 +26,7 @@ const emptyByType: Record<VerificationType, number> = {
   voice_code: 0,
   voice_challenge: 0,
   sms_code: 0,
+  email_code: 0,
 };
 
 export interface ProjectStatsProvider {
@@ -71,6 +72,8 @@ export class ProjectService {
       enabledMethods: input.enabledMethods,
       allowedOrigins: input.allowedOrigins,
       callbackUrl: input.callbackUrl,
+      brandName: input.brandName,
+      brandLogoUrl: input.brandLogoUrl,
       active: true,
       activatedAt: now,
       createdAt: now,
@@ -126,6 +129,8 @@ export class ProjectService {
     }
     if (input.active !== undefined) changes.active = input.active;
     if (input.callbackUrl) changes.callbackUrl = input.callbackUrl;
+    if (input.brandName) changes.brandName = input.brandName;
+    if (input.brandLogoUrl) changes.brandLogoUrl = input.brandLogoUrl;
 
     if (input.callbackUrl) {
       const existing = await this.#ownedProject(customerId, projectId);
@@ -134,10 +139,14 @@ export class ProjectService {
       }
     }
 
-    const unset =
-      input.callbackUrl === null
-        ? { callbackUrl: 1 as const, callbackSecretEncrypted: 1 as const }
-        : undefined;
+    const unsetFields: Partial<Record<"callbackUrl" | "callbackSecretEncrypted" | "brandName" | "brandLogoUrl", 1>> = {};
+    if (input.callbackUrl === null) {
+      unsetFields.callbackUrl = 1;
+      unsetFields.callbackSecretEncrypted = 1;
+    }
+    if (input.brandName === null) unsetFields.brandName = 1;
+    if (input.brandLogoUrl === null) unsetFields.brandLogoUrl = 1;
+    const unset = Object.keys(unsetFields).length > 0 ? unsetFields : undefined;
     const project = await this.#projects.findOneAndUpdate(
       { _id: projectId, customerId },
       { $set: changes, ...(unset ? { $unset: unset } : {}) },
@@ -291,6 +300,8 @@ export class ProjectService {
       activatedAt: project.activatedAt.toISOString(),
       apiKeyPrefix: key?.prefix,
       apiKeyLastFour: key?.lastFour,
+      brandName: project.brandName,
+      brandLogoUrl: project.brandLogoUrl,
       stats: this.stats
         ? await this.stats.projectStats(project._id)
         : { total: 0, succeeded: 0, failed: 0, byType: { ...emptyByType } },

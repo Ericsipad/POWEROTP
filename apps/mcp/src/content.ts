@@ -33,6 +33,8 @@ export const verificationGuides: Record<VerificationType, string> = {
     "POWEROTP selects and plays a recording, then returns question text and opaque answer options. Render the options and submit selected IDs; the correct answer remains server-only.",
   sms_code:
     "Sends a five-digit SMS code through the configured provider and validates a one-time response through the shared lifecycle.",
+  email_code:
+    "Sends a five-digit code by email (targetNumber is an email address for this type) and validates a one-time response through the shared lifecycle. Not yet offered through the hosted modal — direct API integration only.",
 };
 
 export function getCapabilities() {

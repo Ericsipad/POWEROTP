@@ -80,6 +80,15 @@ export interface ProjectDocument {
   callbackSecretEncrypted?: string;
   active: boolean;
   activatedAt: Date;
+  /**
+   * Customer-entered branding for `email_code` delivery emails only (see
+   * `apps/api/src/email-otp-service.ts`) — never used anywhere else in the
+   * product. `brandLogoUrl` is a pasted link to an already-hosted image,
+   * not an uploaded file (DigitalOcean Spaces isn't provisioned for
+   * arbitrary customer uploads yet).
+   */
+  brandName?: string;
+  brandLogoUrl?: string;
   createdAt: Date;
   updatedAt: Date;
 }

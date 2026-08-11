@@ -1202,9 +1202,10 @@ normally."
   call), or
   once a given 30-day window's quota for that type is already used up,
   every further request of that type falls through to the normal
-  `requireNonNegativeBalance` gate (including its $0.30 floor for
-  `sms_code`/`voice_challenge` below) — never blocked outright by quota
-  exhaustion alone. Not a Mongo transaction: a small race window under
+  `requireNonNegativeBalance` gate (a plain `balance > 0` check for every
+  type — see "No per-type minimum balance floor" below) — never blocked
+  outright by quota exhaustion alone. Not a Mongo transaction: a small race
+  window under
   concurrent requests could over-consume a slot by one, corrected by an
   increment-then-rollback check (`tryConsumeFreeQuota`) rather than a full
   transaction — acceptable since nothing here is money, unlike
@@ -1259,7 +1260,9 @@ normally."
 - **Brevo email template support** (`apps/api/src/email.ts`): the account
   verification email can now use a Brevo dashboard template
   (`templateId` + `params.VERIFY_URL`) instead of the original inline HTML,
-  selected by the new optional `BREVO_VERIFY_TEMPLATE_ID` env var — unset
+  selected by the new optional `POWEROTP_SIGNUP_EMAIL_TEMPLATE_ID` env var
+  (named after what it is, not the provider, so it reads unambiguously next
+  to any future per-customer branded OTP-delivery template id) — unset
   keeps the original inline-HTML behavior working exactly as before, so
   this is purely additive. The HTML to paste into a new Brevo template
   (Campaigns → Templates → create, then use the template's own merge-tag
@@ -1285,8 +1288,11 @@ normally."
   </div>
   ```
 
-  After creating the template, note its numeric Brevo template id and set
-  it as `BREVO_VERIFY_TEMPLATE_ID` in App Platform (see
+  Name the template itself something obvious in the Brevo dashboard too
+  (e.g. "POWEROTP - Sign Up Email Template"), since a future per-customer
+  branded OTP-delivery template will live alongside it there. After
+  creating the template, note its numeric Brevo template id and set it as
+  `POWEROTP_SIGNUP_EMAIL_TEMPLATE_ID` in App Platform (see
   [`infrastructure/app-platform/README.md`](../infrastructure/app-platform/README.md)).
 - **Admin manual balance credit/debit** (`POST /v1/admin/billing/credit`,
   `apps/web/app/admin/billing-ledger-panel.tsx`'s new "Manually credit/debit
@@ -1309,6 +1315,133 @@ normally."
   without a manual page refresh. Deliberately different from every admin
   panel's "manual refresh only" convention — this one is customer-facing and
   the whole point is reflecting an async webhook credit promptly.
+
+## Email verification type, customer branding, and dashboard redesign (implemented)
+
+Picked up as the next item in "Known gaps / next steps" (the deferred 5th
+verification type) plus two related asks from the same session: a
+customer-brandable delivery template for it, and a customer dashboard
+redesign so every verification type — including the new one — has its own
+settings and filtered history view.
+
+- **`email_code`, a 5th verification type**: added to `verificationTypes`
+  (`libraries/contracts/src/verification.ts`) alongside
+  `call_reachability`/`voice_code`/`voice_challenge`/`sms_code`. Its state
+  machine is identical to `sms_code`'s (`queued → dispatching →
+  awaiting_response → succeeded|failed|expired|canceled` — see
+  `apps/api/src/verification-state-machine.ts`): a five-digit code is
+  always platform-generated (never client-supplied, same as `sms_code`) and
+  validated through the exact same `POST
+  /v1/verifications/{interactionId}/response` route every other code-based
+  type already uses (`VerificationService#submitCode` now accepts
+  `email_code` alongside `voice_code`/`sms_code`).
+- **The destination is still called `targetNumber`**, even though for
+  `email_code` it holds an email address, not an E.164 number — deliberately
+  kept as one generic "destination" field shared by every type
+  (`CreateVerificationSchema`, `VerificationRequestDocument`) rather than
+  adding a second `targetEmail` field, so masking, reporting, and the
+  dispatch transport can keep treating "the destination" as one string
+  regardless of type. `CreateVerificationSchema`'s `superRefine` now
+  validates it as an email address for `email_code` and E.164 for every
+  other type. `apps/api/src/masking.ts` gained `maskEmail`/`maskTarget` (a
+  type-aware dispatcher) so interaction summaries and widget-interaction
+  rows mask an email address (`j•••••@example.com`) instead of running
+  E.164 masking against it.
+- **Delivery transport** (`apps/api/src/email-otp-service.ts`,
+  `createBrevoEmailOtpService`, wired into
+  `apps/api/src/transport.ts#createEmailCodeTransport`): sends the code over
+  the same Brevo account as account-verification email, through its own
+  dedicated module (not `apps/api/src/email.ts`, which only ever sends the
+  fixed signup-verification email and operator alerts) since every
+  `email_code` send renders a different, per-project-branded template.
+  Unlike `sms_code`'s VoIP.ms credentials, `BREVO_API_KEY`/`EMAIL_FROM` are
+  both already-required config fields, so this transport has no "provider
+  not configured" fallback state — it is always real once deployed.
+- **Not offered through the hosted widget yet**:
+  `ModalSessionVerificationRequestSchema` (`libraries/contracts/src/modal-sessions.ts`)
+  still validates `targetNumber` as E.164-only, and
+  `ModalSessionService#createSession` explicitly filters `email_code` out of
+  any session's `allowedTypes` — reachable today only via a customer's own
+  backend calling `POST /v1/projects/{slug}/verifications` directly.
+  Extending the widget's own contact-input UI for email is a deliberate,
+  documented scope cut, not an oversight.
+- **Free quota and billing**: `email_code` gets its own free allowance in
+  `apps/api/src/usage-quota-service.ts` — **1,000 per rolling 30 days**, the
+  user's own number from when this type was first scoped, same 180-day
+  eligibility window as every other type. Once quota runs out, charging
+  goes through a **new, deliberately flat, non-per-country rate** —
+  `EmailRateSchema`/`EmailRateCardDocument` (`libraries/contracts/src/billing.ts`,
+  `apps/api/src/billing-persistence.ts`) is a single global document (fixed
+  `_id: "global"`), not a per-country chart like
+  `CallRateCardSchema`/`SmsRateCardSchema`, since Brevo's own per-email cost
+  isn't country-dependent. Admin-editable at `GET`/`PUT
+  /v1/admin/billing/email-rate` and a new card in `/admin`'s
+  "Billing rates" panel (`apps/web/app/admin/billing-rates-panel.tsx`), same
+  "gathered and entered by an admin, never auto-fetched" convention as
+  every other rate. Ledger type `otp5` was added to
+  `financialTransactionTypes`, mapped 1:1 from `email_code` via
+  `otpChargeTypeFor` — a free-quota-covered `email_code` interaction still
+  writes a normal `otp5` row at `amountUsd: 0`/`note: "free_quota"`, same
+  convention as every other type.
+- **Customer-brandable delivery emails**: `ProjectDocument` gained optional
+  `brandName`/`brandLogoUrl` fields (`apps/api/src/persistence.ts`,
+  `libraries/contracts/src/projects.ts`) — set by a customer for their own
+  project, used *only* to brand that project's `email_code` delivery
+  emails to their own end users (sender name, subject line, and an
+  optional logo image), never anywhere else. Per an explicit multiple-choice
+  answer this session, `brandLogoUrl` is a pasted link to an
+  already-hosted image, not a file upload — DigitalOcean Spaces isn't
+  provisioned for arbitrary customer-uploaded assets yet (it currently only
+  holds `voice_challenge` recordings); revisit a real upload flow once it
+  is. The branding is **snapshotted onto the interaction itself** at
+  `create()` time (`VerificationRequestDocument#emailBranding`), the same
+  "snapshot, never re-derive from a mutable source" rationale already used
+  for `voice_challenge`'s own `challenge` snapshot — a customer changing
+  their brand name/logo later can never change how an email already in
+  flight looks.
+- **Customer dashboard redesign**: each project card
+  (`apps/web/app/dashboard/project-card.tsx`) now renders
+  `VerificationTabs` (`apps/web/app/dashboard/verification-tabs.tsx`) instead
+  of a flat method-chip list plus one always-unfiltered interaction
+  timeline. One tab per verification type (including the new `email_code`)
+  shows that type's own "enabled for this project" toggle (writing straight
+  through the existing `PATCH /v1/projects/{id}` `enabledMethods` update)
+  plus, for `email_code` only, the branding form above. Every type's tab
+  then shows the *same* shared history table
+  (`apps/web/app/dashboard/interactions-table.tsx`, extracted from the old
+  `InteractionTimeline`, now fed rows directly instead of owning its own
+  fetch/show-hide state) filtered to just that type — `GET
+  /v1/projects/{projectId}/interactions` gained an optional `?type=` query
+  param (`apps/api/src/verification-reporting.ts#listProjectInteractions`),
+  validated against `VerificationTypeSchema` server-side. Per the user's
+  exact framing: "tabs for each type ... settings for each and the table
+  for each history ... same table all pages but filtered for the type."
+- **A new "Visitors" tab** (`apps/web/app/dashboard/visitors-panel.tsx`):
+  the customer-facing equivalent of the admin-only widget-interactions
+  panel, scoped to the caller's own project via a new `GET
+  /v1/projects/{projectId}/visitors` route
+  (`VerificationService#projectWidgetInteractions` →
+  `verification-reporting.ts#listProjectWidgetInteractions`, the same
+  `endUserIp`-exists filter as the admin-wide version, just `projectId`-
+  scoped). Shows visit/unique-IP summary stats plus the interaction table
+  with IP/User-Agent, and a **"Threat score" column that always reads
+  "Coming soon"** — deliberately scaffolding only, per the user's explicit
+  framing ("frame the table cards for this phase... most of which yet to
+  build"). No scoring model, middleware signal ingestion beyond the existing
+  bot-signal honeypot (`apps/api/src/bot-signal-service.ts`, unchanged this
+  session), or threat logic of any kind exists yet — this is UI framing for
+  a future phase, not a real feature.
+- **New unit tests** (all passing, `npm run verify` clean across every
+  workspace): `apps/api/src/email-otp-service.test.ts` (new — plain vs.
+  branded template rendering, HTML-escapes an untrusted brand name,
+  provider-rejected vs. provider-unavailable normalization),
+  `apps/api/src/transport.test.ts` (extended — `email_code`'s
+  dispatch/failure/branding-passthrough behavior), `apps/api/src/masking.test.ts`
+  (extended — `maskEmail`/`maskTarget`), `apps/api/src/usage-quota-service.test.ts`
+  (extended — the 1,000/30-day `email_code` limit), `apps/api/src/billing-charge-service.test.ts`
+  (extended — flat-rate charging with no country, and the $0 case when no
+  admin rate has been entered yet), `apps/mcp/src/content.test.ts` (updated
+  — now asserts 5 verification types, not 4).
 
 ## Admin operator health dashboard (implemented)
 
@@ -1850,19 +1983,32 @@ the actual UI copy end users see must not reference future plans.
     template support, an admin manual balance credit/debit action, and a
     data-minimization design where most services only ever pass around an
     opaque `userId`, never touching the PII-bearing `users` document
-    directly. Explicitly deferred,
-    raised and scoped out during this session's Q&A rather than built
-    speculatively: a **5th verification type, email-based OTP**, with the
-    user's own proposed free allowance of 1,000/rolling-30-days — this needs
-    its own provider adapter (an actual email-sending code path distinct
-    from account-verification email), contracts, rate-chart entries, admin
-    UI, and transport wiring, comparable in size to Phase 6 (SMS) — do not
-    build any part of it until explicitly asked to pick it up as its own
-    scoped task. Also not yet done from this session: `BREVO_VERIFY_TEMPLATE_ID`
-    is documented but no Brevo template has actually been created from the
+    directly. The 5th verification type raised and scoped out in this
+    session's Q&A (email-based OTP) was picked up and fully built in a
+    later session — see "Email verification type, customer branding, and
+    dashboard redesign" above; it is no longer deferred. Also not yet done
+    from this session: `POWEROTP_SIGNUP_EMAIL_TEMPLATE_ID` is documented but
+    no Brevo template
+    has actually been created from the
     HTML in that section yet, and the free-quota/email-gate/pepper logic has
     not been live-tested end-to-end against real production Mongo (unit-tested
     only, same caveat as most new surfaces on first landing).
+11. **`email_code`, customer-branded delivery templates, and the dashboard
+    tabs redesign are now implemented** (see "Email verification type,
+    customer branding, and dashboard redesign" above). Not yet done: no
+    `email_code` rate has actually been entered into the new admin email-rate
+    card yet (defaults to $0, same "gathered by an admin" convention as
+    every other rate chart); `email_code` is not reachable through the
+    hosted widget yet (direct API integration only — see that section for
+    why); `brandLogoUrl` is a pasted link only, not a real file upload
+    (blocked on DigitalOcean Spaces provisioning for customer assets, which
+    still doesn't exist); the new "Visitors" tab's "Threat score" column is
+    UI framing only, with no scoring model behind it; and none of this
+    session's new surfaces (an actual `email_code` send, the branded
+    template rendering, the dashboard tabs, or the Visitors tab) have been
+    live-tested against real production Mongo/Brevo yet — unit-tested and
+    `npm run verify`-clean only, same caveat as most new surfaces on first
+    landing.
 
 ### Incident: `npm ci` OOM-killed on the droplet during the Phase 5 redeploy (fixed with a permanent swap file)
 

@@ -3,12 +3,13 @@
 import type { Project } from "@powerotp/contracts";
 import { useState, type FormEvent } from "react";
 
-import { InteractionTimeline } from "./interaction-timeline";
+import { VerificationTabs } from "./verification-tabs";
 
 interface ProjectCardProps {
   project: Project;
   onRotateApiKey(projectId: string): Promise<void>;
   onSetCallback(projectId: string, callbackUrl: string): Promise<void>;
+  onProjectUpdated(project: Project): void;
   authenticatedFetch(url: string, init?: RequestInit): Promise<Response>;
 }
 
@@ -16,6 +17,7 @@ export function ProjectCard({
   project,
   onRotateApiKey,
   onSetCallback,
+  onProjectUpdated,
   authenticatedFetch,
 }: ProjectCardProps) {
   const [showCallback, setShowCallback] = useState(false);
@@ -100,7 +102,11 @@ export function ProjectCard({
           Rotate API key
         </button>
       </div>
-      <InteractionTimeline projectId={project.id} authenticatedFetch={authenticatedFetch} />
+      <VerificationTabs
+        project={project}
+        authenticatedFetch={authenticatedFetch}
+        onProjectUpdated={onProjectUpdated}
+      />
     </article>
   );
 }

@@ -66,14 +66,16 @@ const ProductionConfigSchema = z.object({
   NODE_SECRET: z.string().min(32).optional(),
   BREVO_API_KEY: z.string().min(1),
   /**
-   * Optional Brevo transactional-email template id for the account-email
-   * verification message (see `apps/api/src/email.ts`). When unset, the
-   * verification email falls back to a plain inline-HTML message (the
-   * original behavior) — set this once the template has been created in
-   * the Brevo dashboard using the HTML documented in `docs/AS_BUILT.md`'s
-   * "Customer signup flow" section.
+   * Optional Brevo transactional-email template id for the account
+   * signup-verification message (see `apps/api/src/email.ts`). Named after
+   * what it is, not the provider, so it's unambiguous next to any future
+   * per-customer branded template id. When unset, the verification email
+   * falls back to a plain inline-HTML message (the original behavior) —
+   * set this once the template has been created in the Brevo dashboard
+   * using the HTML documented in `docs/AS_BUILT.md`'s "Customer signup
+   * flow" section.
    */
-  BREVO_VERIFY_TEMPLATE_ID: z.string().min(1).optional(),
+  POWEROTP_SIGNUP_EMAIL_TEMPLATE_ID: z.string().min(1).optional(),
   EMAIL_FROM: z.string().email(),
   PUBLIC_APP_URL: z.string().url(),
   PUBLIC_API_URL: z.string().url(),

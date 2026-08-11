@@ -21,6 +21,19 @@ export interface SmsRateCardDocument {
   updatedAt: Date;
 }
 
+/** `email_code`'s rate, per tier — always exactly one document at the
+ * fixed `_id` below, never per-country (see `EmailRateSchema`'s doc
+ * comment in `libraries/contracts/src/billing.ts` for why). */
+export interface EmailRateCardDocument {
+  _id: "global";
+  tier1PerEmailUsd: number;
+  tier2PerEmailUsd: number;
+  tier3PerEmailUsd: number;
+  updatedAt: Date;
+}
+
+export const EMAIL_RATE_CARD_ID = "global" as const;
+
 /** Exactly 3 documents, `_id` = the tier. Both fields are independently
  * admin-entered — `dailyChargedUsd` is never derived from
  * `monthlyDisplayUsd` by dividing by 30. */

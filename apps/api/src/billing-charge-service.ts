@@ -48,10 +48,13 @@ export class BillingChargeService {
     if (verification.customerId === PLATFORM_ADMIN_USER_ID) return;
     // Nothing was ever really dispatched (e.g. method_not_available) —
     // no real provider attempt happened, so there is nothing to bill.
-    if (!verification.callTrunkId && !verification.smsDid) return;
+    if (!verification.callTrunkId && !verification.smsDid && !verification.emailSent) return;
 
     const otpType = otpChargeTypeFor[verification.type];
-    const country = countryForE164(verification.targetNumber);
+    // `email_code` has no country dimension at all (see `EmailRateSchema`'s
+    // doc comment) — never attempt to parse an email address as an E.164
+    // number here.
+    const country = verification.type === "email_code" ? undefined : countryForE164(verification.targetNumber);
 
     // Fixed at creation time by `UsageQuotaService#tryConsumeFreeQuota` (see
     // `apps/api/src/usage-quota-service.ts`) — always $0, but still writes a
@@ -83,6 +86,23 @@ export class BillingChargeService {
           const rate = await this.rates.smsRateFor(country);
           if (!rate) return 0;
           return -rate[`${tier}PerMessageUsd`];
+        },
+      });
+      return;
+    }
+
+    if (verification.type === "email_code") {
+      // Flat global rate, no country dimension — see `EmailRateSchema`'s
+      // doc comment in `libraries/contracts/src/billing.ts`.
+      await this.balances.applyLedgerEntry({
+        userId: verification.customerId,
+        projectId: verification.projectId,
+        interactionId: verification._id,
+        type: otpType,
+        amountUsd: async (tier) => {
+          const rate = await this.rates.emailRateFor();
+          if (!rate) return 0;
+          return -rate[`${tier}PerEmailUsd`];
         },
       });
       return;

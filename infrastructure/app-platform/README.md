@@ -73,11 +73,20 @@ and do not create a repository `.env` file.
   IP; using it means admin login relies on the password alone, dropping IP as a second
   factor — prefer real IPs when you can.
 - `BREVO_API_KEY`: production transactional-email API key
-- `BREVO_VERIFY_TEMPLATE_ID`: optional. Numeric Brevo template id for the account-email
-  verification message — see `docs/AS_BUILT.md`'s "Customer signup flow" section for the
-  HTML to paste into a new Brevo template and where to find its id. Leave unset to keep
+- `POWEROTP_SIGNUP_EMAIL_TEMPLATE_ID`: optional. Numeric Brevo template id for the
+  account signup-verification email — named after what it is, not the provider, so it's
+  unambiguous next to any future per-customer branded OTP-delivery template id. See
+  `docs/AS_BUILT.md`'s "Customer signup flow" section for the HTML to paste into a new
+  Brevo template (name the template itself something obvious in the Brevo dashboard too,
+  e.g. "POWEROTP - Sign Up Email Template") and where to find its id. Leave unset to keep
   the original inline-HTML verification email working exactly as before.
-- `EMAIL_FROM`: verified POWEROTP sender address
+- `EMAIL_FROM`: verified POWEROTP sender address. Also the `sender.email` for
+  every `email_code` verification delivery (see `apps/api/src/email-otp-service.ts`
+  and `docs/AS_BUILT.md`'s "Email verification type, customer branding, and
+  dashboard redesign" section) — no separate env var needed for that type;
+  it reuses this and `BREVO_API_KEY` directly. `email_code`'s own rate
+  (admin-entered, a single flat USD/email value, not per-country) is set at
+  `/admin`, not via an env var — see that section.
 - `PUBLIC_APP_URL` / `PUBLIC_API_URL`: both `https://powerotp.com` (see Domains below)
 - `DEMO_PROJECT_SLUG`: optional; slug of the project backing the public "try it now"
   widget on the marketing site — use `demo`. After deploy, sign in at `/admin` and click

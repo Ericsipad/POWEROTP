@@ -1,4 +1,3 @@
-import { VerificationTypeSchema } from "@powerotp/contracts";
 import { NextResponse } from "next/server";
 
 import { apiRoute } from "@/lib/api-route";
@@ -9,22 +8,22 @@ interface RouteParams {
   params: Promise<{ projectId: string }>;
 }
 
-/** `?type=` optionally filters to one verification type — backs the
- * dashboard's own per-type tab history table (see
- * `apps/web/app/dashboard/verification-tabs.tsx`), which reuses this same
- * route/table rather than a separate endpoint per type. */
+/**
+ * Customer-facing equivalent of the admin-only
+ * `GET /v1/admin/widget-interactions` — scoped to one project the caller
+ * actually owns, backing the dashboard's own "Visitors" tab (see
+ * `docs/AS_BUILT.md`'s "Customer signup flow"/dashboard section). Same
+ * underlying data (real end-user IP/User-Agent captured from the hosted
+ * verification modal, visibility only — no threat score yet).
+ */
 export const GET = apiRoute<RouteParams>(async (request, { params }) => {
   const { auth, projects, verifications } = await getServerContext();
   const authenticated = await requireCustomerSession(request, auth);
 
   const { projectId } = await params;
   await projects.assertOwned(authenticated.user._id, projectId);
-  const typeParam = new URL(request.url).searchParams.get("type");
-  const type = VerificationTypeSchema.safeParse(typeParam).success
-    ? VerificationTypeSchema.parse(typeParam)
-    : undefined;
   const response = NextResponse.json({
-    interactions: await verifications.listInteractions(projectId, 50, type),
+    interactions: await verifications.projectWidgetInteractions(projectId),
   });
   response.headers.set("cache-control", "no-store");
   return response;

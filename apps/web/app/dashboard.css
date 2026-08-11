@@ -135,8 +135,61 @@
   padding: 11px;
 }
 
-.interactionTimeline {
+.verificationTabs {
   margin-top: 20px;
+}
+
+.tabBar {
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.tabButton {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 10px 12px;
+}
+
+.tabButtonActive {
+  border-bottom-color: var(--green-dark);
+  color: var(--night);
+}
+
+.tabPanel {
+  padding-top: 18px;
+}
+
+.tabPanel h3 {
+  font-size: 14px;
+  margin: 18px 0 6px;
+}
+
+.fieldInline {
+  align-items: center;
+  display: flex;
+  flex-direction: row;
+  font-size: 13px;
+  gap: 8px;
+  width: fit-content;
+}
+
+.brandingForm {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  margin-top: 14px;
+  padding: 16px;
+}
+
+.mutedCell {
+  color: var(--muted);
+  font-size: 11px;
 }
 
 .nodeList {

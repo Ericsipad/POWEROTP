@@ -14,6 +14,7 @@ const DEFAULT_LIFETIME_MS = 5 * 60 * 1_000;
 const tokenActionByType: Partial<Record<VerificationType, InteractionTokenClaims["action"]>> = {
   voice_code: "submit_code",
   sms_code: "submit_code",
+  email_code: "submit_code",
   voice_challenge: "submit_challenge",
 };
 

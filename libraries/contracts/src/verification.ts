@@ -5,6 +5,7 @@ export const verificationTypes = [
   "voice_code",
   "voice_challenge",
   "sms_code",
+  "email_code",
 ] as const;
 
 export const verificationStates = [
@@ -38,14 +39,31 @@ export const TargetNumberSchema = z
   .string()
   .regex(/^\+[1-9]\d{7,14}$/, "Use E.164 format");
 
+/** Destination address for `email_code` — still carried in the same
+ * `targetNumber` field as every other type (see `CreateVerificationSchema`
+ * below), just validated as an email address instead of E.164 for this one
+ * type. Kept as one field rather than a second `targetEmail` field so every
+ * other consumer (masking, interaction summaries, transports) can keep
+ * treating "the destination" as a single generic string regardless of
+ * type. */
+export const TargetEmailSchema = z.string().trim().toLowerCase().email().max(320);
+
 export const CreateVerificationSchema = z
   .object({
     type: VerificationTypeSchema,
-    targetNumber: TargetNumberSchema,
+    targetNumber: z.string().min(3).max(320),
     code: z.string().regex(/^\d{5}$/).optional(),
     browserResponse: z.boolean().default(false),
   })
   .superRefine((request, context) => {
+    const targetSchema = request.type === "email_code" ? TargetEmailSchema : TargetNumberSchema;
+    if (!targetSchema.safeParse(request.targetNumber).success) {
+      context.addIssue({
+        code: "custom",
+        message: request.type === "email_code" ? "Use a valid email address" : "Use E.164 format",
+        path: ["targetNumber"],
+      });
+    }
     if (request.code && request.type !== "voice_code") {
       context.addIssue({
         code: "custom",

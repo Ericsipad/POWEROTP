@@ -44,7 +44,7 @@ describe("loadConfig", () => {
         SPACES_ACCESS_KEY: "",
         SPACES_SECRET_KEY: "",
         MEDIA_MANIFEST_SECRET: "",
-        BREVO_VERIFY_TEMPLATE_ID: "",
+        POWEROTP_SIGNUP_EMAIL_TEMPLATE_ID: "",
       }),
     );
   });

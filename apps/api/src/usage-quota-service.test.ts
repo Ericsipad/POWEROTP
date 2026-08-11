@@ -100,6 +100,16 @@ describe("UsageQuotaService.tryConsumeFreeQuota", () => {
     assert.equal(await service.tryConsumeFreeQuota("usr_1", "call_reachability"), true);
   });
 
+  it("grants email_code its own 1,000-per-window free quota", async () => {
+    const { db } = createFakeDb(new Date());
+    const service = new UsageQuotaService(db);
+
+    for (let i = 0; i < 1_000; i += 1) {
+      assert.equal(await service.tryConsumeFreeQuota("usr_1", "email_code"), true);
+    }
+    assert.equal(await service.tryConsumeFreeQuota("usr_1", "email_code"), false);
+  });
+
   it("always grants unlimited free quota to the platform-admin-owned demo project", async () => {
     const { db } = createFakeDb(new Date());
     const service = new UsageQuotaService(db);

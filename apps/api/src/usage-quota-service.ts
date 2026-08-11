@@ -25,6 +25,10 @@ const FREE_QUOTA_LIMITS: Partial<Record<VerificationType, number>> = {
   call_reachability: 10,
   voice_code: 10,
   sms_code: 5,
+  // The user's own proposed number when `email_code` was scoped, carried
+  // over unchanged into this session's actual build — see
+  // `docs/AS_BUILT.md`'s "Customer signup flow" section.
+  email_code: 1_000,
 };
 
 const QUOTA_WINDOW_MS = 30 * 24 * 60 * 60 * 1_000;

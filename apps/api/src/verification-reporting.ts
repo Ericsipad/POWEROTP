@@ -8,7 +8,7 @@ import type {
 import type { Collection, Filter } from "mongodb";
 
 import type { CallbackDeliveryDocument } from "./verification-persistence.js";
-import { maskE164 } from "./masking.js";
+import { maskTarget } from "./masking.js";
 import { isTerminalState } from "./verification-state-machine.js";
 import type { VerificationRequestDocument } from "./verification-persistence.js";
 
@@ -17,6 +17,7 @@ const emptyByType: Record<VerificationType, number> = {
   voice_code: 0,
   voice_challenge: 0,
   sms_code: 0,
+  email_code: 0,
 };
 
 async function aggregateStats(
@@ -135,7 +136,37 @@ export async function listRecentWidgetInteractions(
     occurredAt: row.createdAt.toISOString(),
     type: row.type,
     state: row.state,
-    maskedTarget: maskE164(row.targetNumber),
+    maskedTarget: maskTarget(row.type, row.targetNumber),
+    endUserIp: row.endUserIp,
+    endUserUserAgent: row.endUserUserAgent,
+  }));
+}
+
+/**
+ * Same shape and filter as `listRecentWidgetInteractions` above (real
+ * end-user widget interactions only, i.e. `endUserIp` is set), scoped to
+ * one project — backs the customer dashboard's own "Visitors" tab (see
+ * `docs/AS_BUILT.md`'s "Customer signup flow"/dashboard section). Ownership
+ * of `projectId` is the caller's responsibility (see
+ * `ProjectService#assertOwned`), same convention as every other
+ * project-scoped route.
+ */
+export async function listProjectWidgetInteractions(
+  requests: Collection<VerificationRequestDocument>,
+  projectId: string,
+  limit = 50,
+): Promise<WidgetInteractionSummary[]> {
+  const rows = await requests
+    .find({ projectId, endUserIp: { $exists: true } })
+    .sort({ createdAt: -1 })
+    .limit(limit)
+    .toArray();
+  return rows.map((row) => ({
+    interactionId: row._id,
+    occurredAt: row.createdAt.toISOString(),
+    type: row.type,
+    state: row.state,
+    maskedTarget: maskTarget(row.type, row.targetNumber),
     endUserIp: row.endUserIp,
     endUserUserAgent: row.endUserUserAgent,
   }));
@@ -145,9 +176,10 @@ export async function listProjectInteractions(
   requests: Collection<VerificationRequestDocument>,
   projectId: string,
   limit = 50,
+  type?: VerificationType,
 ): Promise<InteractionSummary[]> {
   const rows = await requests
-    .find({ projectId })
+    .find(type ? { projectId, type } : { projectId })
     .sort({ createdAt: -1 })
     .limit(limit)
     .toArray();
@@ -156,7 +188,7 @@ export async function listProjectInteractions(
     occurredAt: row.updatedAt.toISOString(),
     type: row.type,
     state: row.state,
-    maskedTarget: maskE164(row.targetNumber),
+    maskedTarget: maskTarget(row.type, row.targetNumber),
     durationMs: isTerminalState(row.state)
       ? row.updatedAt.getTime() - row.createdAt.getTime()
       : undefined,

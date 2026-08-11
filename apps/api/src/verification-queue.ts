@@ -190,14 +190,18 @@ export function createDispatchWorker(
           type: verification.type,
           targetNumber: verification.targetNumber,
           code:
-            verification.type === "sms_code"
+            verification.type === "sms_code" || verification.type === "email_code"
               ? service.codeForDelivery(verification)
               : undefined,
+          branding: verification.type === "email_code" ? verification.emailBranding : undefined,
         },
         {
           async advance(state, reasonCode, meta) {
-            if (meta?.smsDid) {
-              await service.recordProviderAttemptMeta(interactionId, { smsDid: meta.smsDid });
+            if (meta?.smsDid || meta?.emailSent) {
+              await service.recordProviderAttemptMeta(interactionId, {
+                smsDid: meta.smsDid,
+                emailSent: meta.emailSent,
+              });
             }
             return service.transition(interactionId, state, reasonCode);
           },

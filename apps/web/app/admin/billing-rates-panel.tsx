@@ -1,6 +1,6 @@
 "use client";
 
-import type { BillingTier, CallRateCard, PlanCharge, SmsRateCard } from "@powerotp/contracts";
+import type { BillingTier, CallRateCard, EmailRate, PlanCharge, SmsRateCard } from "@powerotp/contracts";
 import { useEffect, useState, type FormEvent } from "react";
 
 interface BillingRatesPanelProps {
@@ -20,6 +20,7 @@ const tiers: BillingTier[] = ["tier1", "tier2", "tier3"];
 export function BillingRatesPanel({ csrfToken }: BillingRatesPanelProps) {
   const [callRates, setCallRates] = useState<CallRateCard[]>([]);
   const [smsRates, setSmsRates] = useState<SmsRateCard[]>([]);
+  const [emailRate, setEmailRate] = useState<EmailRate | null>(null);
   const [plans, setPlans] = useState<PlanCharge[]>([]);
   const [status, setStatus] = useState("");
 
@@ -27,19 +28,32 @@ export function BillingRatesPanel({ csrfToken }: BillingRatesPanelProps) {
   const [callTiers, setCallTiers] = useState({ tier1: "", tier2: "", tier3: "" });
   const [smsCountry, setSmsCountry] = useState("");
   const [smsTiers, setSmsTiers] = useState({ tier1: "", tier2: "", tier3: "" });
+  const [emailTiers, setEmailTiers] = useState({ tier1: "", tier2: "", tier3: "" });
 
   useEffect(() => {
     void refresh();
   }, []);
 
   async function refresh() {
-    const [callResponse, smsResponse, planResponse] = await Promise.all([
+    const [callResponse, smsResponse, emailResponse, planResponse] = await Promise.all([
       fetch("/v1/admin/billing/call-rates", { credentials: "same-origin", cache: "no-store" }),
       fetch("/v1/admin/billing/sms-rates", { credentials: "same-origin", cache: "no-store" }),
+      fetch("/v1/admin/billing/email-rate", { credentials: "same-origin", cache: "no-store" }),
       fetch("/v1/admin/billing/plan-charges", { credentials: "same-origin", cache: "no-store" }),
     ]);
     if (callResponse.ok) setCallRates((await callResponse.json()).rates);
     if (smsResponse.ok) setSmsRates((await smsResponse.json()).rates);
+    if (emailResponse.ok) {
+      const rate = (await emailResponse.json()).rate as EmailRate | null;
+      setEmailRate(rate);
+      if (rate) {
+        setEmailTiers({
+          tier1: String(rate.tier1PerEmailUsd),
+          tier2: String(rate.tier2PerEmailUsd),
+          tier3: String(rate.tier3PerEmailUsd),
+        });
+      }
+    }
     if (planResponse.ok) setPlans((await planResponse.json()).plans);
   }
 
@@ -83,6 +97,22 @@ export function BillingRatesPanel({ csrfToken }: BillingRatesPanelProps) {
       setSmsTiers({ tier1: "", tier2: "", tier3: "" });
       await refresh();
     }
+  }
+
+  async function saveEmailRate(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const response = await fetch("/v1/admin/billing/email-rate", {
+      method: "PUT",
+      credentials: "same-origin",
+      headers: { ...jsonHeaders, "x-csrf-token": csrfToken },
+      body: JSON.stringify({
+        tier1PerEmailUsd: Number(emailTiers.tier1) || 0,
+        tier2PerEmailUsd: Number(emailTiers.tier2) || 0,
+        tier3PerEmailUsd: Number(emailTiers.tier3) || 0,
+      }),
+    });
+    setStatus(response.ok ? "Email rate saved." : "Email rate rejected.");
+    if (response.ok) await refresh();
   }
 
   async function savePlanCharge(tier: BillingTier, monthlyDisplayUsd: string, dailyChargedUsd: string) {
@@ -217,6 +247,39 @@ export function BillingRatesPanel({ csrfToken }: BillingRatesPanelProps) {
             ))}
           </tbody>
         </table>
+      </article>
+
+      <article className="projectCard">
+        <h2>Email rate (USD/email, flat &mdash; no country)</h2>
+        <p>
+          Brevo&apos;s per-email sending cost isn&apos;t country-dependent, so
+          <code>email_code</code> has a single global rate per tier instead of a
+          per-country chart.
+        </p>
+        <form onSubmit={saveEmailRate}>
+          {tiers.map((tier) => (
+            <label className="field" key={tier}>
+              {`${tier} $/email`}
+              <input
+                type="number"
+                step="0.0001"
+                min="0"
+                value={emailTiers[tier]}
+                onChange={(event) => setEmailTiers({ ...emailTiers, [tier]: event.target.value })}
+                required
+              />
+            </label>
+          ))}
+          <button className="button buttonSmall" type="submit">
+            {emailRate ? "Update email rate" : "Save email rate"}
+          </button>
+        </form>
+        {emailRate && (
+          <p>
+            Current: tier1 ${emailRate.tier1PerEmailUsd}, tier2 ${emailRate.tier2PerEmailUsd}, tier3 $
+            {emailRate.tier3PerEmailUsd}
+          </p>
+        )}
       </article>
 
       <article className="projectCard">

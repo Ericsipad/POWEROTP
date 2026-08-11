@@ -17,7 +17,7 @@ function escapeHtml(value: string): string {
 export function createBrevoEmailService(
   config: Pick<
     ProductionConfig,
-    "BREVO_API_KEY" | "EMAIL_FROM" | "PUBLIC_APP_URL" | "BREVO_VERIFY_TEMPLATE_ID"
+    "BREVO_API_KEY" | "EMAIL_FROM" | "PUBLIC_APP_URL" | "POWEROTP_SIGNUP_EMAIL_TEMPLATE_ID"
   >,
 ): EmailService {
   return {
@@ -29,11 +29,11 @@ export function createBrevoEmailService(
       // flow" section for the HTML to paste in) is preferred once
       // configured; falls back to the original inline HTML so verification
       // emails keep working before an operator sets it up.
-      const body = config.BREVO_VERIFY_TEMPLATE_ID
+      const body = config.POWEROTP_SIGNUP_EMAIL_TEMPLATE_ID
         ? {
             sender: { name: "POWEROTP", email: config.EMAIL_FROM },
             to: [{ email }],
-            templateId: Number(config.BREVO_VERIFY_TEMPLATE_ID),
+            templateId: Number(config.POWEROTP_SIGNUP_EMAIL_TEMPLATE_ID),
             params: { VERIFY_URL: verificationUrl.toString() },
           }
         : {

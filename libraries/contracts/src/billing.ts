@@ -48,6 +48,21 @@ export const UpsertCallRateCardSchema = CallRateCardSchema.omit({ updatedAt: tru
 export const UpsertSmsRateCardSchema = SmsRateCardSchema.omit({ updatedAt: true });
 
 /**
+ * `email_code`'s rate chart, per tier — deliberately a single flat global
+ * rate, not per-country like `CallRateCardSchema`/`SmsRateCardSchema`:
+ * Brevo's own per-email sending cost isn't country-dependent, so there is
+ * nothing for a country dimension to express here. Exactly one document
+ * ever exists (see `apps/api/src/billing-persistence.ts`'s fixed `_id`).
+ */
+export const EmailRateSchema = z.object({
+  tier1PerEmailUsd: z.number().nonnegative(),
+  tier2PerEmailUsd: z.number().nonnegative(),
+  tier3PerEmailUsd: z.number().nonnegative(),
+  updatedAt: z.string().datetime(),
+});
+export const UpsertEmailRateSchema = EmailRateSchema.omit({ updatedAt: true });
+
+/**
  * The "shown as monthly, charged daily" plan fee per tier — both values are
  * independently admin-entered (never derived from each other by dividing by
  * 30), matching the product framing of "we show it as a monthly $10 ...
@@ -66,15 +81,16 @@ export const UpdatePlanChargeSchema = PlanChargeSchema.omit({ updatedAt: true })
  * One row per ledger-affecting event. `visit` is reserved for the future
  * BotBlocker/gate-adapter product (per-site-visitor gate checks) — no real
  * charging logic exists for it yet; see `docs/AS_BUILT.md`'s "Customer
- * balance billing" section. `otp1`..`otp4` map 1:1 to
- * `call_reachability`/`voice_code`/`voice_challenge`/`sms_code` in that
- * fixed order (see `otpChargeTypeFor` below). New-account free usage (see
- * `apps/api/src/usage-quota-service.ts`) is a simple per-type rolling
- * counter, not a dollar credit, so it has no dedicated ledger type of its
- * own — a free-quota-covered interaction still writes a normal `otp1`..
- * `otp4` row, just always at `amountUsd: 0` with `note: "free_quota"` (see
- * `apps/api/src/billing-charge-service.ts`), so it stays fully visible in
- * the same ledger/reports every real charge appears in.
+ * balance billing" section. `otp1`..`otp5` map 1:1 to
+ * `call_reachability`/`voice_code`/`voice_challenge`/`sms_code`/`email_code`
+ * in that fixed order (see `otpChargeTypeFor` below). New-account free
+ * usage (see `apps/api/src/usage-quota-service.ts`) is a simple per-type
+ * rolling counter, not a dollar credit, so it has no dedicated ledger type
+ * of its own — a free-quota-covered interaction still writes a normal
+ * `otp1`..`otp5` row, just always at `amountUsd: 0` with
+ * `note: "free_quota"` (see `apps/api/src/billing-charge-service.ts`), so it
+ * stays fully visible in the same ledger/reports every real charge appears
+ * in.
  * `admin_adjustment` is a manual support credit/debit
  * (`POST /v1/admin/billing/credit`), added for the "Customer signup flow"
  * work — see `docs/AS_BUILT.md`.
@@ -85,6 +101,7 @@ export const financialTransactionTypes = [
   "otp2",
   "otp3",
   "otp4",
+  "otp5",
   "daily_charge",
   "topup",
   "admin_adjustment",
@@ -157,15 +174,20 @@ export const TopupCheckoutSchema = z.object({ checkoutUrl: z.string().url() });
 export const CallRateCardsResponseSchema = z.object({ rates: z.array(CallRateCardSchema) });
 export const SmsRateCardsResponseSchema = z.object({ rates: z.array(SmsRateCardSchema) });
 export const PlanChargesResponseSchema = z.object({ plans: z.array(PlanChargeSchema) });
+/** Exactly one flat rate (or none, before an admin ever sets it) — never a
+ * list, unlike the per-country call/SMS charts above. */
+export const EmailRateResponseSchema = z.object({ rate: EmailRateSchema.nullable() });
 
 /** `call_reachability` -> `otp1`, `voice_code` -> `otp2`, `voice_challenge`
- * -> `otp3`, `sms_code` -> `otp4` — a fixed, stable mapping shared by every
- * billing surface (charging, admin displays), not re-derived ad hoc. */
+ * -> `otp3`, `sms_code` -> `otp4`, `email_code` -> `otp5` — a fixed, stable
+ * mapping shared by every billing surface (charging, admin displays), not
+ * re-derived ad hoc. */
 export const otpChargeTypeFor: Record<VerificationType, (typeof financialTransactionTypes)[number]> = {
   call_reachability: "otp1",
   voice_code: "otp2",
   voice_challenge: "otp3",
   sms_code: "otp4",
+  email_code: "otp5",
 };
 
 export type BillingTier = z.infer<typeof BillingTierSchema>;
@@ -185,3 +207,6 @@ export type TopupCheckout = z.infer<typeof TopupCheckoutSchema>;
 export type CallRateCardsResponse = z.infer<typeof CallRateCardsResponseSchema>;
 export type SmsRateCardsResponse = z.infer<typeof SmsRateCardsResponseSchema>;
 export type PlanChargesResponse = z.infer<typeof PlanChargesResponseSchema>;
+export type EmailRate = z.infer<typeof EmailRateSchema>;
+export type UpsertEmailRate = z.infer<typeof UpsertEmailRateSchema>;
+export type EmailRateResponse = z.infer<typeof EmailRateResponseSchema>;

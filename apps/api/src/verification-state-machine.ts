@@ -35,6 +35,7 @@ const activeStatesByType: Record<VerificationType, readonly VerificationState[]>
     "awaiting_response",
   ],
   sms_code: ["queued", "dispatching", "awaiting_response"],
+  email_code: ["queued", "dispatching", "awaiting_response"],
 };
 
 export function activeStatesFor(type: VerificationType): readonly VerificationState[] {

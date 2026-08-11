@@ -101,6 +101,52 @@ describe("BillingChargeService.chargeCompletedInteraction", () => {
 
     assert.equal(ledgerRows.length, 0);
   });
+
+  it("charges email_code at the flat global rate, never a per-country one", async () => {
+    const { db, client, ledgerRows } = createFakeDb();
+    const balances = new BalanceService(client, db);
+    const rates = {
+      emailRateFor: async () => ({
+        tier1PerEmailUsd: 0.01,
+        tier2PerEmailUsd: 0.008,
+        tier3PerEmailUsd: 0.005,
+      }),
+      callRateFor: async () => {
+        throw new Error("call rate chart must not be consulted for email_code");
+      },
+      smsRateFor: async () => {
+        throw new Error("sms rate chart must not be consulted for email_code");
+      },
+    } as unknown as RateChartService;
+    const service = new BillingChargeService(db, balances, rates);
+
+    await service.chargeCompletedInteraction(
+      fakeInteraction({
+        type: "email_code",
+        targetNumber: "user@example.com",
+        smsDid: undefined,
+        emailSent: true,
+      }),
+    );
+
+    assert.equal(ledgerRows.length, 1);
+    assert.equal(ledgerRows[0]?.type, "otp5");
+    assert.equal(ledgerRows[0]?.country, undefined);
+    assert.equal(ledgerRows[0]?.amountUsd, -0.01);
+  });
+
+  it("charges $0 for email_code when no admin rate has been entered yet", async () => {
+    const { db, client, ledgerRows } = createFakeDb();
+    const balances = new BalanceService(client, db);
+    const rates = { emailRateFor: async () => null } as unknown as RateChartService;
+    const service = new BillingChargeService(db, balances, rates);
+
+    await service.chargeCompletedInteraction(
+      fakeInteraction({ type: "email_code", targetNumber: "user@example.com", smsDid: undefined, emailSent: true }),
+    );
+
+    assert.equal(ledgerRows[0]?.amountUsd, 0);
+  });
 });
 
 describe("computeBillableMinutes", () => {

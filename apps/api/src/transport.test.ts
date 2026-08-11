@@ -2,8 +2,9 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import type { ProductionConfig } from "./config.js";
+import { EmailOtpProviderError, type EmailOtpService } from "./email-otp-service.js";
 import { SmsProviderError, type SmsService } from "./sms.js";
-import { createSmsCodeTransport } from "./transport.js";
+import { createEmailCodeTransport, createSmsCodeTransport } from "./transport.js";
 
 const config = {} as ProductionConfig;
 
@@ -102,5 +103,92 @@ describe("sms_code transport", () => {
     );
 
     assert.equal(called, false);
+  });
+});
+
+async function runEmail(emailOtp: EmailOtpService, code = "12345") {
+  const transitions: Array<{ state: string; reasonCode?: string; emailSent?: boolean }> = [];
+  await createEmailCodeTransport(config, emailOtp).dispatch(
+    { interactionId: "int_1", type: "email_code", targetNumber: "user@example.com", code },
+    {
+      async advance(state, reasonCode, meta) {
+        transitions.push({ state, reasonCode, emailSent: meta?.emailSent });
+        return true;
+      },
+    },
+  );
+  return transitions;
+}
+
+describe("email_code transport", () => {
+  it("advances to awaiting_response after Brevo accepts the send", async () => {
+    const sent: string[] = [];
+    const transitions = await runEmail({
+      async sendOtpCode(targetEmail, code) {
+        sent.push(targetEmail, code);
+      },
+    });
+
+    assert.deepEqual(sent, ["user@example.com", "12345"]);
+    assert.deepEqual(transitions, [
+      { state: "dispatching", reasonCode: "sending_to_provider", emailSent: undefined },
+      { state: "awaiting_response", reasonCode: "code_sent", emailSent: true },
+    ]);
+  });
+
+  it("fails closed when Brevo rejects the request", async () => {
+    const transitions = await runEmail({
+      async sendOtpCode() {
+        throw new EmailOtpProviderError("provider_rejected");
+      },
+    });
+
+    assert.deepEqual(transitions.at(-1), {
+      state: "failed",
+      reasonCode: "provider_rejected",
+      emailSent: undefined,
+    });
+  });
+
+  it("never calls the provider without an encrypted code to deliver", async () => {
+    let called = false;
+    const transitions = await runEmail(
+      {
+        async sendOtpCode() {
+          called = true;
+        },
+      },
+      "",
+    );
+
+    assert.equal(called, false);
+    assert.deepEqual(transitions.at(-1), {
+      state: "failed",
+      reasonCode: "code_unavailable",
+      emailSent: undefined,
+    });
+  });
+
+  it("passes the project's branding snapshot through to the provider", async () => {
+    let receivedBranding: unknown;
+    await createEmailCodeTransport(config, {
+      async sendOtpCode(_targetEmail, _code, branding) {
+        receivedBranding = branding;
+      },
+    }).dispatch(
+      {
+        interactionId: "int_1",
+        type: "email_code",
+        targetNumber: "user@example.com",
+        code: "12345",
+        branding: { brandName: "Acme", brandLogoUrl: "https://acme.example/logo.png" },
+      },
+      { async advance() { return true; } },
+    );
+
+    assert.deepEqual(receivedBranding, {
+      brandName: "Acme",
+      brandLogoUrl: "https://acme.example/logo.png",
+    });
   });
 });

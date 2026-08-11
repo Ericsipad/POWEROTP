@@ -4,10 +4,10 @@ import { describe, it } from "node:test";
 import { buildExample, buildModalSessionExample, getCapabilities, integrationOverview } from "./content.js";
 
 describe("MCP integration content", () => {
-  it("describes all four verification methods without project access", () => {
+  it("describes all five verification methods without project access", () => {
     const capabilities = getCapabilities();
 
-    assert.equal(capabilities.verificationTypes.length, 4);
+    assert.equal(capabilities.verificationTypes.length, 5);
     assert.match(capabilities.mcpAccess, /no project/);
   });
 

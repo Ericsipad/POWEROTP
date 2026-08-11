@@ -33,6 +33,11 @@ export interface VerificationRequestDocument {
   projectId: string;
   customerId: string;
   type: VerificationType;
+  /** For `email_code`, this holds an email address, not an E.164 number —
+   * kept as one generic "destination" field for every type rather than a
+   * second `targetEmail` field, so masking/reporting/transports can keep
+   * treating it as one string regardless of type (see
+   * `apps/api/src/masking.ts#maskTarget`). */
   targetNumber: string;
   state: VerificationState;
   reasonCode?: string;
@@ -73,6 +78,22 @@ export interface VerificationRequestDocument {
    * since that DID was never actually used/billed).
    */
   smsDid?: string;
+  /**
+   * `true` once Brevo has confirmed accepting an `email_code` delivery
+   * attempt — the `email_code` equivalent of `callTrunkId`/`smsDid` for
+   * the "was a real provider attempt actually made" billing check in
+   * `apps/api/src/billing-charge-service.ts`. Never set on a rejected send.
+   */
+  emailSent?: boolean;
+  /**
+   * A per-interaction snapshot of the owning project's branding, taken
+   * once at `create()` for `email_code` only (see
+   * `apps/api/src/verification-service.ts`) — same "snapshot, never
+   * re-derive from the mutable source" rationale as `challenge` above, so
+   * a customer changing their brand name/logo later can never change how
+   * an email already in flight looks. Absent for every other type.
+   */
+  emailBranding?: { brandName?: string; brandLogoUrl?: string };
   /** See `ProviderRecordSnapshot` above. */
   providerRecord?: ProviderRecordSnapshot;
   /**
