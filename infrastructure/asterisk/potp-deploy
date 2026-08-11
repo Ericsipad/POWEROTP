@@ -1,0 +1,40 @@
+#!/bin/bash
+# Forced-command entrypoint for the CI deploy key, installed on the droplet as
+# /usr/local/bin/potp-deploy and pinned via command="..." in
+# /var/lib/potp-deploy/.ssh/authorized_keys. That pinning is the point of this
+# script: the CI key can invoke only this one program, so a leaked
+# DROPLET_SSH_KEY cannot open a shell, read /etc/powerotp/*.env, or run
+# anything else on the node.
+#
+# Reads the `git archive` tarball on stdin (no scp step, so the key never needs
+# write access anywhere else) and redeploys apps/telephony-agent. Runs as the
+# unprivileged potp-deploy user; the only privileged step is the agent restart,
+# granted as two exact commands in /etc/sudoers.d/potp-deploy.
+#
+# See infrastructure/asterisk/README.md and docs/AS_BUILT.md ("Telephony
+# droplet") for how this is provisioned.
+set -euo pipefail
+
+# 027 so files land group-readable for the `asterisk` group that potp-agent
+# belongs to; /opt/powerotp's directories are setgid `asterisk` so the group is
+# inherited and no root chown is needed after extraction.
+umask 027
+
+readonly ROOT=/opt/powerotp
+ARCHIVE="$(mktemp /tmp/potp-deploy.XXXXXXXX.tar.gz)"
+readonly ARCHIVE
+trap 'rm -f "$ARCHIVE"' EXIT
+
+cat > "$ARCHIVE"
+
+# Reject anything that is not a readable gzip tarball before touching $ROOT.
+tar -tzf "$ARCHIVE" > /dev/null
+
+tar -xzf "$ARCHIVE" --no-same-owner -C "$ROOT"
+cd "$ROOT"
+npm ci
+npm run build -w @powerotp/contracts -w @powerotp/telephony-agent
+
+sudo -n /usr/bin/systemctl restart powerotp-agent
+sleep 2
+sudo -n /usr/bin/systemctl is-active powerotp-agent

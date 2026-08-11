@@ -74,6 +74,8 @@ export class ProjectService {
       callbackUrl: input.callbackUrl,
       brandName: input.brandName,
       brandLogoUrl: input.brandLogoUrl,
+      brandReplyToEmail: input.brandReplyToEmail,
+      brandHtmlTemplate: input.brandHtmlTemplate,
       active: true,
       activatedAt: now,
       createdAt: now,
@@ -131,6 +133,8 @@ export class ProjectService {
     if (input.callbackUrl) changes.callbackUrl = input.callbackUrl;
     if (input.brandName) changes.brandName = input.brandName;
     if (input.brandLogoUrl) changes.brandLogoUrl = input.brandLogoUrl;
+    if (input.brandReplyToEmail) changes.brandReplyToEmail = input.brandReplyToEmail;
+    if (input.brandHtmlTemplate) changes.brandHtmlTemplate = input.brandHtmlTemplate;
 
     if (input.callbackUrl) {
       const existing = await this.#ownedProject(customerId, projectId);
@@ -139,13 +143,25 @@ export class ProjectService {
       }
     }
 
-    const unsetFields: Partial<Record<"callbackUrl" | "callbackSecretEncrypted" | "brandName" | "brandLogoUrl", 1>> = {};
+    const unsetFields: Partial<
+      Record<
+        | "callbackUrl"
+        | "callbackSecretEncrypted"
+        | "brandName"
+        | "brandLogoUrl"
+        | "brandReplyToEmail"
+        | "brandHtmlTemplate",
+        1
+      >
+    > = {};
     if (input.callbackUrl === null) {
       unsetFields.callbackUrl = 1;
       unsetFields.callbackSecretEncrypted = 1;
     }
     if (input.brandName === null) unsetFields.brandName = 1;
     if (input.brandLogoUrl === null) unsetFields.brandLogoUrl = 1;
+    if (input.brandReplyToEmail === null) unsetFields.brandReplyToEmail = 1;
+    if (input.brandHtmlTemplate === null) unsetFields.brandHtmlTemplate = 1;
     const unset = Object.keys(unsetFields).length > 0 ? unsetFields : undefined;
     const project = await this.#projects.findOneAndUpdate(
       { _id: projectId, customerId },
@@ -302,6 +318,8 @@ export class ProjectService {
       apiKeyLastFour: key?.lastFour,
       brandName: project.brandName,
       brandLogoUrl: project.brandLogoUrl,
+      brandReplyToEmail: project.brandReplyToEmail,
+      brandHtmlTemplate: project.brandHtmlTemplate,
       stats: this.stats
         ? await this.stats.projectStats(project._id)
         : { total: 0, succeeded: 0, failed: 0, byType: { ...emptyByType } },

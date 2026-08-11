@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  BrandHtmlTemplateSchema,
   ChallengeSchema,
   CreateVerificationSchema,
   CustomerRegistrationSchema,
@@ -37,6 +38,46 @@ describe("CreateVerificationSchema", () => {
     });
 
     assert.equal(result.success, false);
+  });
+
+  it("accepts an email address as the destination for email_code", () => {
+    const result = CreateVerificationSchema.safeParse({
+      type: "email_code",
+      targetNumber: "user@example.com",
+    });
+
+    assert.equal(result.success, true);
+  });
+
+  it("rejects an E.164 number as the destination for email_code", () => {
+    const result = CreateVerificationSchema.safeParse({
+      type: "email_code",
+      targetNumber: "+15551234567",
+    });
+
+    assert.equal(result.success, false);
+  });
+
+  it("rejects an email address as the destination for every other type", () => {
+    const result = CreateVerificationSchema.safeParse({
+      type: "sms_code",
+      targetNumber: "user@example.com",
+    });
+
+    assert.equal(result.success, false);
+  });
+});
+
+describe("BrandHtmlTemplateSchema", () => {
+  it("accepts a template containing the {{CODE}} placeholder", () => {
+    assert.equal(
+      BrandHtmlTemplateSchema.safeParse("<p>Your code is {{CODE}}</p>").success,
+      true,
+    );
+  });
+
+  it("rejects a template missing the {{CODE}} placeholder", () => {
+    assert.equal(BrandHtmlTemplateSchema.safeParse("<p>No code here</p>").success, false);
   });
 });
 

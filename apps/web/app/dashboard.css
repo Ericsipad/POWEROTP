@@ -192,6 +192,12 @@
   font-size: 11px;
 }
 
+.brandHtmlTextarea {
+  font-family: monospace;
+  font-size: 12px;
+  resize: vertical;
+}
+
 .nodeList {
   display: grid;
   gap: 10px;

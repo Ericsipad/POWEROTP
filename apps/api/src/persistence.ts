@@ -85,10 +85,16 @@ export interface ProjectDocument {
    * `apps/api/src/email-otp-service.ts`) — never used anywhere else in the
    * product. `brandLogoUrl` is a pasted link to an already-hosted image,
    * not an uploaded file (DigitalOcean Spaces isn't provisioned for
-   * arbitrary customer uploads yet).
+   * arbitrary customer uploads yet). `brandReplyToEmail` sets the email's
+   * `replyTo` (needs no domain verification, unlike the "From" address,
+   * which always stays our own verified sender). `brandHtmlTemplate`, if
+   * set, replaces the auto-generated brand-name/logo template entirely —
+   * the customer's own full HTML with a `{{CODE}}` placeholder.
    */
   brandName?: string;
   brandLogoUrl?: string;
+  brandReplyToEmail?: string;
+  brandHtmlTemplate?: string;
   createdAt: Date;
   updatedAt: Date;
 }

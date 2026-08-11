@@ -27,6 +27,31 @@ export const BrandNameSchema = z.string().trim().min(1).max(80);
  */
 export const BrandLogoUrlSchema = HttpsUrlSchema;
 
+/** A customer's own address for replies to their `email_code` delivery
+ * emails — Brevo's `replyTo` is completely independent of `sender` and
+ * needs no domain verification (unlike the `sender`/"From" address, which
+ * must stay our own verified domain — see `apps/api/src/email-otp-service.ts`'s
+ * doc comment for why we can't send "From" a customer's own domain). */
+export const BrandReplyToEmailSchema = z.string().trim().toLowerCase().email().max(320);
+
+const CODE_PLACEHOLDER = "{{CODE}}";
+/**
+ * A customer's own complete HTML email body for `email_code` delivery,
+ * pasted in as-is — replaces the auto-generated brand-name/logo template
+ * entirely once set (see `apps/api/src/email-otp-service.ts`). Must contain
+ * the literal `{{CODE}}` placeholder, substituted with the real one-time
+ * code at send time; nothing else in the customer's HTML is parsed or
+ * modified. Never sent to Brevo's own shared template library — this is
+ * passed directly as `htmlContent` on each send, so it stays private to
+ * this project in our own database.
+ */
+export const BrandHtmlTemplateSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(20_000)
+  .refine((value) => value.includes(CODE_PLACEHOLDER), `Must include the literal ${CODE_PLACEHOLDER} placeholder`);
+
 export const CreateProjectSchema = z.object({
   name: ProjectNameSchema,
   enabledMethods: z.array(VerificationTypeSchema).min(1).default(["call_reachability"]),
@@ -34,6 +59,8 @@ export const CreateProjectSchema = z.object({
   callbackUrl: HttpsUrlSchema.optional(),
   brandName: BrandNameSchema.optional(),
   brandLogoUrl: BrandLogoUrlSchema.optional(),
+  brandReplyToEmail: BrandReplyToEmailSchema.optional(),
+  brandHtmlTemplate: BrandHtmlTemplateSchema.optional(),
 });
 
 export const UpdateProjectSchema = z
@@ -45,6 +72,8 @@ export const UpdateProjectSchema = z
     active: z.boolean().optional(),
     brandName: BrandNameSchema.nullable().optional(),
     brandLogoUrl: BrandLogoUrlSchema.nullable().optional(),
+    brandReplyToEmail: BrandReplyToEmailSchema.nullable().optional(),
+    brandHtmlTemplate: BrandHtmlTemplateSchema.nullable().optional(),
   })
   .refine((value) => Object.keys(value).length > 0, "At least one field is required");
 
@@ -70,6 +99,8 @@ export const ProjectSchema = z.object({
   apiKeyLastFour: z.string().length(4).optional(),
   brandName: BrandNameSchema.optional(),
   brandLogoUrl: BrandLogoUrlSchema.optional(),
+  brandReplyToEmail: BrandReplyToEmailSchema.optional(),
+  brandHtmlTemplate: BrandHtmlTemplateSchema.optional(),
   stats: ProjectStatsSchema,
 });
 

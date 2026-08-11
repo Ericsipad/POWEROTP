@@ -177,7 +177,7 @@ export class VerificationService {
       input.type === "email_code"
         ? await this.#projects.findOne(
             { _id: projectId },
-            { projection: { brandName: 1, brandLogoUrl: 1 } },
+            { projection: { brandName: 1, brandLogoUrl: 1, brandReplyToEmail: 1, brandHtmlTemplate: 1 } },
           )
         : undefined;
 
@@ -208,7 +208,12 @@ export class VerificationService {
         : undefined,
       challenge,
       emailBranding: emailBranding
-        ? { brandName: emailBranding.brandName, brandLogoUrl: emailBranding.brandLogoUrl }
+        ? {
+            brandName: emailBranding.brandName,
+            brandLogoUrl: emailBranding.brandLogoUrl,
+            brandReplyToEmail: emailBranding.brandReplyToEmail,
+            brandHtmlTemplate: emailBranding.brandHtmlTemplate,
+          }
         : undefined,
       freeQuotaCovered: coveredByFreeQuota,
       createdAt: now,

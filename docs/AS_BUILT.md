@@ -1399,6 +1399,33 @@ settings and filtered history view.
   for `voice_challenge`'s own `challenge` snapshot — a customer changing
   their brand name/logo later can never change how an email already in
   flight looks.
+- **Reply-to and a customer's own full HTML template** (added in a later
+  same-topic session, after the user asked directly whether Brevo supports
+  either): `ProjectDocument` gained two more optional branding fields,
+  `brandReplyToEmail` and `brandHtmlTemplate`
+  (`libraries/contracts/src/projects.ts`, `BrandReplyToEmailSchema`/
+  `BrandHtmlTemplateSchema`). The "From" email address always stays our own
+  verified `EMAIL_FROM` — Brevo (like every ESP) requires the sending
+  domain to be authenticated in the account that sends, so we cannot send
+  "From" an arbitrary customer's own domain without them individually
+  verifying it in *our* Brevo account, which doesn't scale across many
+  customers. `replyTo`, however, is completely independent of `sender` in
+  Brevo's API and needs no verification at all, so `brandReplyToEmail` is
+  the real, fully-supported way for an end user's reply to reach the
+  customer directly (`apps/api/src/email-otp-service.ts`, a `replyTo`
+  field added to the Brevo API call only when set). `brandHtmlTemplate` is
+  a customer's own complete HTML email body, pasted in as-is (max 20,000
+  characters) — Zod-validated to contain the literal `{{CODE}}` placeholder
+  (`BrandHtmlTemplateSchema`'s `refine`), substituted with the real
+  one-time code at send time via a plain `replaceAll`, nothing else parsed
+  or modified. When set, it replaces the auto-generated brand-name/logo
+  template entirely. Deliberately never uses Brevo's own dashboard
+  Templates feature at all — every `email_code` send (branded or not)
+  already passes `htmlContent` directly in the API call, so a customer's
+  HTML stays private to their own project in our database, never uploaded
+  to Brevo's shared template library. Both new fields are included in the
+  same per-interaction `emailBranding` snapshot as `brandName`/
+  `brandLogoUrl` above, for the same reason.
 - **Customer dashboard redesign**: each project card
   (`apps/web/app/dashboard/project-card.tsx`) now renders
   `VerificationTabs` (`apps/web/app/dashboard/verification-tabs.tsx`) instead
@@ -1441,7 +1468,13 @@ settings and filtered history view.
   (extended — the 1,000/30-day `email_code` limit), `apps/api/src/billing-charge-service.test.ts`
   (extended — flat-rate charging with no country, and the $0 case when no
   admin rate has been entered yet), `apps/mcp/src/content.test.ts` (updated
-  — now asserts 5 verification types, not 4).
+  — now asserts 5 verification types, not 4), and (reply-to/custom-HTML
+  addition) `apps/api/src/email-otp-service.test.ts` (extended further —
+  `replyTo` set only when branded, omitted otherwise, and `{{CODE}}`
+  substitution into a customer's own HTML leaves everything else
+  unmodified) and `libraries/contracts/src/index.test.ts` (extended —
+  `email_code` target validation both directions, `BrandHtmlTemplateSchema`'s
+  `{{CODE}}` requirement).
 
 ## Admin operator health dashboard (implemented)
 

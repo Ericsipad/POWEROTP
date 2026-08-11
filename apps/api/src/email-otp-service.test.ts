@@ -52,6 +52,52 @@ describe("Brevo email OTP service", () => {
     assert.doesNotMatch(String(body!.htmlContent), /<script>/);
   });
 
+  it("sets replyTo independently of the sender when a reply-to address is branded", async () => {
+    let body: Record<string, unknown> | undefined;
+    const service = createBrevoEmailOtpService(config, async (_input, init) => {
+      body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return Response.json({});
+    });
+
+    await service.sendOtpCode("user@example.com", "12345", {
+      brandName: "Acme Corp",
+      brandReplyToEmail: "support@acme.example",
+    });
+
+    assert.equal((body!.sender as { email: string }).email, config.EMAIL_FROM);
+    assert.deepEqual(body!.replyTo, { email: "support@acme.example" });
+  });
+
+  it("omits replyTo entirely when no reply-to address is branded", async () => {
+    let body: Record<string, unknown> | undefined;
+    const service = createBrevoEmailOtpService(config, async (_input, init) => {
+      body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return Response.json({});
+    });
+
+    await service.sendOtpCode("user@example.com", "12345");
+
+    assert.equal("replyTo" in body!, false);
+  });
+
+  it("substitutes {{CODE}} into a customer's own full HTML template, unmodified otherwise", async () => {
+    let body: Record<string, unknown> | undefined;
+    const service = createBrevoEmailOtpService(config, async (_input, init) => {
+      body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return Response.json({});
+    });
+
+    await service.sendOtpCode("user@example.com", "98765", {
+      brandName: "Acme Corp",
+      brandHtmlTemplate: "<div><h1>Acme</h1><p>Your code: {{CODE}}</p><p>{{CODE}} expires soon.</p></div>",
+    });
+
+    assert.equal(
+      body!.htmlContent,
+      "<div><h1>Acme</h1><p>Your code: 98765</p><p>98765 expires soon.</p></div>",
+    );
+  });
+
   it("normalizes a rejected send without exposing Brevo's response", async () => {
     const service = createBrevoEmailOtpService(config, async () => new Response("", { status: 400 }));
 

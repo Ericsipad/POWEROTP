@@ -93,7 +93,12 @@ export interface VerificationRequestDocument {
    * a customer changing their brand name/logo later can never change how
    * an email already in flight looks. Absent for every other type.
    */
-  emailBranding?: { brandName?: string; brandLogoUrl?: string };
+  emailBranding?: {
+    brandName?: string;
+    brandLogoUrl?: string;
+    brandReplyToEmail?: string;
+    brandHtmlTemplate?: string;
+  };
   /** See `ProviderRecordSnapshot` above. */
   providerRecord?: ProviderRecordSnapshot;
   /**
