@@ -104,7 +104,8 @@ server at all. This is the one to keep building on.
   the same sitting" manual reminder — it just happens automatically the
   moment the commit reaches `main`.** First-time node provisioning
   (hardening, Asterisk install, the systemd unit, `/etc/powerotp/*.env`) is
-  still a one-time manual process; only routine code updates are automated.
+  scripted too, as `infrastructure/asterisk/bootstrap-node.sh` — see "Node
+  rebuild / disaster recovery" below.
 - **Telephony droplet**: `powerotpvoip1`, Ubuntu 24.04.4 LTS, IP `178.128.235.192`, DNS
   `na1.powerotp.com` (already pointed at it). SSH access from this machine is via the
   alias `ssh powerotp` — defined in a **local-only, gitignored** Cursor rule
@@ -897,6 +898,80 @@ the deploy path, which were fixed. Current shape:
 Repo secrets after this pass: `DROPLET_HOST` (unchanged), `DROPLET_SSH_USER`
 (now `potp-deploy`), `DROPLET_SSH_KEY` (new, restricted key), `DROPLET_SSH_HOST_KEY`
 (new).
+
+## Node rebuild / disaster recovery (implemented)
+
+Until this session the droplet was a **single point of failure held together by
+undocumented local state**: the runbook in `infrastructure/asterisk/README.md`
+described provisioning in prose, but the actual Asterisk/SSH/firewall
+configuration existed only on that one machine. Losing it, or needing to move to
+a new IP, meant rediscovering all of it. That is fixed — everything needed to
+rebuild is now committed, and the rebuild is one script.
+
+`infrastructure/asterisk/bootstrap-node.sh` takes a stock Ubuntu 24.04 droplet
+to the exact shape `powerotpvoip1` is in, and is idempotent (so it also repairs a
+drifted node). Committed alongside it, each installed to its real path by the
+script:
+
+| Repo file | Installed as |
+| --- | --- |
+| `bootstrap-node.sh` | (run once, not installed) |
+| `powerotp-agent.service` | `/etc/systemd/system/powerotp-agent.service` |
+| `asterisk.service.d-override.conf` | `/etc/systemd/system/asterisk.service.d/override.conf` |
+| `pjsip-transport.conf` | appended to `/etc/asterisk/pjsip.conf` |
+| `potp-deploy` | `/usr/local/bin/potp-deploy` |
+| `sudoers-potp-deploy` | `/etc/sudoers.d/potp-deploy` |
+| `sshd-hardening.conf` | `/etc/ssh/sshd_config.d/10-powerotp-hardening.conf` |
+
+The script additionally generates the small inline pieces that are appended to
+packaged config rather than replacing it: ARI/HTTP enablement bound to
+`127.0.0.1`, the `[powerotp-outbound]` placeholder dialplan context,
+`noload => chan_iax2.so`, the `ufw` inbound/egress rules, swap, and the three
+accounts.
+
+**Deliberately not committed: the secrets.** A rebuild re-supplies `NODE_SECRET`
+and `MEDIA_MANIFEST_SECRET` (both from App Platform, both identical across
+nodes), plus the two SSH public keys. The ARI password is *not* re-supplied — the
+script generates a fresh one per node, and the control plane neither needs nor
+stores it. Trunk credentials need no manual step at all: they arrive from
+`GET /v1/nodes/config` on the first poll, which is the whole point of the
+"a droplet is never individually configured" design.
+
+### Redeploying on a new IP — the IP-dependent checklist
+
+`bootstrap-node.sh` prints this on completion, repeated here because it is the
+part that actually bites:
+
+1. **`DROPLET_HOST`** repo secret → the new IP.
+2. **`DROPLET_SSH_HOST_KEY`** repo secret → the *new* host key. A rebuilt droplet
+   has a brand-new host key, so the pinned line must be regenerated
+   (`ssh-keyscan -t ed25519 <new-ip>`, cross-checked against the box's own
+   `/etc/ssh/ssh_host_ed25519_key.pub` before trusting it). Skipping this fails
+   the deploy closed rather than open, which is the intended behavior.
+3. **DNS `na1.powerotp.com`** → repoint at the new IP.
+4. **Local `~/.ssh/config`** `powerotp` alias → new `HostName` (and `User
+   opsadmin`). This file is local-only and does not sync.
+5. **VoIP.ms** → if the subaccounts are restricted by source IP, add the new one.
+   Registration is outbound so this may not apply, but it is the one dependency
+   outside our control.
+6. **This document** → the IP recorded above.
+
+**Open recommendation: attach a DigitalOcean Reserved IP.** The droplet currently
+has none (`floating_ip/ipv4/active` reports `false`; region `tor1`), which is why
+a rebuild drags all six steps above with it. With a Reserved IP, a rebuild keeps
+the same address and steps 1–5 collapse to nothing. This has not been done — it
+needs a DigitalOcean control-panel action and this environment has no DO API
+access.
+
+**Known gap found while taking this inventory:** the live droplet's
+`/etc/powerotp/agent.env` contains only `CONTROL_PLANE_URL`,
+`ASTERISK_PJSIP_TRUNKS_PATH`, `POLL_INTERVAL_MS`, and `NODE_SECRET` — it has
+**no `MEDIA_MANIFEST_SECRET` or `MEDIA_ROOT`**, even though
+`/var/lib/asterisk/sounds/custom` exists. So `media-sync.ts`'s loop has never
+actually run on `powerotpvoip1` and `voice_challenge` recordings are not being
+synced to the node. Not fixed here (it changes telephony behavior and wants its
+own verification pass), but `bootstrap-node.sh` wires both vars whenever
+`MEDIA_MANIFEST_SECRET` is supplied, so a rebuilt node would not inherit the gap.
 
 ### Incident: a phishing email impersonating a DigitalOcean abuse report
 
@@ -2138,6 +2213,19 @@ the actual UI copy end users see must not reference future plans.
     live-tested against real production Mongo/Brevo yet — unit-tested and
     `npm run verify`-clean only, same caveat as most new surfaces on first
     landing.
+12. **The droplet deploy path is hardened and the node is now rebuildable from
+    the repo** (see "Droplet deploy hardening" and "Node rebuild / disaster
+    recovery" above). Still open from that work: **no DigitalOcean Reserved IP is
+    attached**, so a rebuild changes the IP and drags a six-step checklist with
+    it — attaching one is a control-panel action nobody has taken, and this
+    environment has no DO API access to do it. **`MEDIA_MANIFEST_SECRET`/
+    `MEDIA_ROOT` are absent from the live droplet's `agent.env`**, so
+    `voice_challenge` media sync has in fact never run there (deliberately not
+    changed in that session — it alters telephony behavior and wants its own
+    verification pass). And `bootstrap-node.sh` has been syntax-checked and is
+    derived from the live box's actual inspected state, but has **never been run
+    end-to-end against a genuinely fresh droplet** — the first real DR event will
+    be its first full execution, so budget time for it to be slightly wrong.
 
 ### Incident: `npm ci` OOM-killed on the droplet during the Phase 5 redeploy (fixed with a permanent swap file)
 

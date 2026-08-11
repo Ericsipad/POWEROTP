@@ -1,0 +1,8 @@
+# Install as /etc/sudoers.d/potp-deploy, mode 0440 root:root.
+# Validate before trusting it: visudo -c -f /etc/sudoers.d/potp-deploy
+#
+# The CI deploy user builds unprivileged (it owns /opt/powerotp outright, and
+# its primary group is `asterisk` so built files are group-readable by
+# potp-agent without any root chown). Restarting the agent is the only step
+# that needs root. Exact commands only - no wildcards, no ALL, no shell.
+potp-deploy ALL=(root) NOPASSWD: /usr/bin/systemctl restart powerotp-agent, /usr/bin/systemctl is-active powerotp-agent

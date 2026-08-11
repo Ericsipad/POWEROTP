@@ -50,86 +50,68 @@ is pinned to one forced command, it cannot open a shell or read
 separate `scp` step or an inline remote command list, both of which require an
 unrestricted key. See `docs/AS_BUILT.md`'s "Droplet deploy hardening" section.
 
-**A manual redeploy
-(steps 0–8 below) is still the way to add a brand-new node from scratch**
-(installing Asterisk, hardening, the systemd unit, `/etc/powerotp/*.env`,
-etc. — none of that is automated) or to recover an already-provisioned
-droplet if the automated job ever fails; it's just no longer required for
-routine "the agent's code changed" updates on `powerotpvoip1`.
+## Rebuilding a node from scratch (disaster recovery / new IP)
 
-Manual steps (still needed for first-time setup, or as a fallback):
+`bootstrap-node.sh` in this directory provisions a stock Ubuntu 24.04 droplet
+into exactly the shape `powerotpvoip1` is in today, and is the whole answer to
+"the node is gone / has to move". It is idempotent, so it is also the way to
+repair a node that has drifted. Run it as root **on the new droplet**, with the
+repo checked out or this directory copied over:
 
-0. **Confirm swap is present before running `npm ci`**: `swapon --show` on the droplet
-   should report a 2GB `/swapfile`. The droplet has only ~961Mi of RAM, and installing
-   the full monorepo's dependency tree (Next.js, the AWS SDK, `@ffmpeg-installer/ffmpeg`,
-   etc. — needed to build `@powerotp/contracts`/`@powerotp/telephony-agent` even though
-   the agent only runs a fraction of that tree) can OOM-kill `npm ci` and make `sshd`
-   itself briefly unresponsive without it (see the "npm ci OOM-killed" incident in
-   `docs/AS_BUILT.md`). If missing: `sudo fallocate -l 2G /swapfile && sudo chmod 600
-   /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile && echo '/swapfile none
-   swap sw 0 0' | sudo tee -a /etc/fstab`.
-1. From a clean local `main` checkout: `git archive --format=tar.gz -o /tmp/powerotp-deploy.tar.gz HEAD`.
-2. `scp` the archive to the droplet, extract it to `/opt/powerotp`, `npm ci`, then
-   `npm run build -w @powerotp/contracts -w @powerotp/telephony-agent`.
-3. `chown -R potp-deploy:asterisk /opt/powerotp && chmod 0750 /opt/powerotp` (see step 9 —
-   the CI user owns the tree and the agent only ever reads it, via the `asterisk` group).
-4. Copy `powerotp-agent.service` (this directory) to
-   `/etc/systemd/system/powerotp-agent.service`, `systemctl daemon-reload`.
-5. Write `/etc/powerotp/agent.env` with `CONTROL_PLANE_URL=https://powerotp.com`,
-   `ASTERISK_PJSIP_TRUNKS_PATH=/etc/asterisk/pjsip_trunks.conf`, `POLL_INTERVAL_MS=60000`,
-   and `NODE_SECRET` set to the exact same value as App Platform's `NODE_SECRET` — the
-   deploying session writes this once as part of standing the node up; it is never edited
-   on the node again afterward, including when trunk credentials change (those flow
-   automatically through `/v1/nodes/config` instead). `/etc/powerotp/ari.env` holds the
-   local-only ARI user credential generated directly on the droplet at install time. Both
-   files are `640 root:asterisk`, readable only by `potp-agent`.
-5a. For `voice_challenge`: also add `MEDIA_MANIFEST_SECRET` (the exact same value as App
-    Platform's `MEDIA_MANIFEST_SECRET` — an independent secret, never `NODE_SECRET`) and
-    `MEDIA_ROOT=/var/lib/asterisk/sounds/custom` to `/etc/powerotp/agent.env`. Create that
-    directory (`mkdir -p /var/lib/asterisk/sounds/custom && chown potp-agent:asterisk
-    /var/lib/asterisk/sounds/custom`) so the agent's `media-sync.ts` loop can write synced
-    recordings there. `MEDIA_SOUND_PREFIX` defaults to `custom/potp` and does not need to
-    be set unless recordings are placed under a different Asterisk sound-search-relative
-    path. Skip this step entirely on a node that never handles `voice_challenge` — the
-    media-sync loop simply never runs without `MEDIA_ROOT`/`MEDIA_MANIFEST_SECRET` set.
-6. Asterisk's packaged `asterisk.service` doesn't apply `asterisk.conf`'s
-   `astctlpermissions`/`astctlgroup` settings reliably on this build, so
-   `/var/run/asterisk/asterisk.ctl` is recreated `srwxr-xr-x` (owner-only write) on every
-   restart — `potp-agent` (group `asterisk`) could connect but not issue commands like
-   `pjsip reload`. Fixed with a systemd drop-in, not a one-off `chmod` (which the next
-   Asterisk restart would silently undo): `/etc/systemd/system/asterisk.service.d/override.conf`
-   contains `ExecStartPost=/bin/chmod 660 /var/run/asterisk/asterisk.ctl` — this is the
-   exact drop-in mechanism the packaged unit's own comments recommend, and it reliably
-   runs after the socket exists because the unit is `Type=notify` (systemd waits for
-   Asterisk's ready notification, which comes after socket creation, before running
-   `ExecStartPost`).
-7. Append `pjsip-transport.conf` (this directory) to `/etc/asterisk/pjsip.conf` — every
-   transport in the packaged sample config ships commented out, and without at least one
-   active transport, outbound registrations silently fail to be created at all. See that
-   file's comment for the exact symptom this causes if skipped.
-8. `systemctl enable --now powerotp-agent`.
-9. **Set up the CI deploy path** (skip only for a node CI never deploys to):
-   - `useradd --system --create-home --home-dir /var/lib/potp-deploy --shell /bin/bash
-     --gid asterisk potp-deploy` — the `asterisk` primary group plus the entrypoint's
-     `umask 027` is what makes built files readable by `potp-agent` without a root `chown`.
-   - Install `potp-deploy` (this directory) as `/usr/local/bin/potp-deploy`, `0755
-     root:root`.
-   - `/etc/sudoers.d/potp-deploy` (`0440`), granting exactly:
-     `potp-deploy ALL=(root) NOPASSWD: /usr/bin/systemctl restart powerotp-agent,
-     /usr/bin/systemctl is-active powerotp-agent`. Validate with `visudo -c -f`.
-   - Put the CI public key in `/var/lib/potp-deploy/.ssh/authorized_keys` (`0600`) prefixed
-     with `command="/usr/local/bin/potp-deploy",restrict` — this pinning is the whole point;
-     without it the CI key is an unrestricted shell key.
-   - Set the four repo secrets listed above, including the node's `known_hosts` line as
-     `DROPLET_SSH_HOST_KEY`.
-10. **SSH hardening**: install `/etc/ssh/sshd_config.d/10-powerotp-hardening.conf`
-    (`PermitRootLogin no`, `AllowUsers opsadmin potp-deploy`, `AuthenticationMethods
-    publickey`, forwarding off). The `10-` prefix matters — sshd keeps the first value it
-    sees per keyword and the cloud-init drop-ins are `50-`/`60-`. **Confirm `opsadmin` logs
-    in and `sudo`s before reloading sshd**, or you lock yourself out. Also add the
-    `egress-abuse-guard` `ufw deny out` rules and `noload => chan_iax2.so`; both are
-    described in `docs/AS_BUILT.md`'s "Droplet deploy hardening" section.
+```bash
+NODE_SECRET=... OPS_PUBKEY="ssh-ed25519 ..." CI_DEPLOY_PUBKEY="ssh-ed25519 ..." \
+  MEDIA_MANIFEST_SECRET=... \
+  sudo -E ./bootstrap-node.sh
+```
 
-Do not add real SIP, ARI, or SSH credentials to the repository — `agent.env`/`ari.env`
-exist only on the droplet, never here. `NODE_SECRET` itself is entered in App Platform,
-same as every other production secret.
+It installs Asterisk 20 and Node 22, creates the three accounts
+(`opsadmin`/`potp-agent`/`potp-deploy`), installs every file in this directory
+to its real path, writes `/etc/powerotp/*.env`, applies the firewall and SSH
+hardening, and prints the remaining IP-dependent steps. It deliberately does
+**not** deploy application code — push to `main` (or re-run the
+`deploy-droplet` job) and the CI path above populates `/opt/powerotp`.
+
+Everything needed to rebuild is therefore committed here **except the secrets**,
+which is intentional. On a rebuild you re-supply:
+
+| Secret | Where it comes from |
+| --- | --- |
+| `NODE_SECRET` | App Platform — the identical value, shared by every node |
+| `MEDIA_MANIFEST_SECRET` | App Platform — independent of `NODE_SECRET`; only needed for `voice_challenge` |
+| `OPS_PUBKEY` | the local-only `~/.ssh/poweroTP_do_droplet.pub` |
+| `CI_DEPLOY_PUBKEY` | the CI keypair; if lost, mint a new one and update `DROPLET_SSH_KEY` |
+| ARI password | not re-supplied — generated fresh on the node, never leaves it |
+
+Trunk credentials are **not** in this list: they arrive automatically from
+`GET /v1/nodes/config` on the first poll, so a rebuilt node picks them up with
+no manual step. Do not add real SIP, ARI, or SSH credentials to the repository.
+
+### Why some of these steps exist (non-obvious failure modes)
+
+Worth reading before "simplifying" anything in `bootstrap-node.sh`:
+
+- **Swap is mandatory, not optional.** The droplet has ~961Mi of RAM and
+  installing the monorepo's dependency tree can OOM-kill `npm ci` — and take
+  `sshd` down with it. See the "`npm ci` OOM-killed" incident in
+  `docs/AS_BUILT.md`.
+- **At least one active PJSIP transport must exist.** Every transport in the
+  packaged sample config ships commented out, and with none active,
+  `res_pjsip_outbound_registration` silently creates *no* registration objects
+  at all while endpoint/aor/auth objects from the same file load fine. See
+  `pjsip-transport.conf` for the exact misleading error.
+- **The Asterisk control socket needs the systemd drop-in.** The packaged unit
+  doesn't apply `asterisk.conf`'s `astctlpermissions`/`astctlgroup` reliably on
+  this build, so `/var/run/asterisk/asterisk.ctl` comes back owner-write-only on
+  every restart and `potp-agent` can connect but not issue `pjsip reload`. A
+  one-off `chmod` is silently undone by the next restart;
+  `asterisk.service.d-override.conf` is the fix, and it works because the unit
+  is `Type=notify` so `ExecStartPost` runs after the socket exists.
+- **The sshd drop-in must sort before `50-`/`60-`.** sshd keeps the *first*
+  value it sees per keyword and DigitalOcean's image ships cloud-init drop-ins
+  at those numbers. And confirm `opsadmin` can log in and `sudo` before
+  reloading sshd, or you lock yourself out — root login is closed.
+- **`MEDIA_ROOT` and `MEDIA_MANIFEST_SECRET` are what enable media sync.**
+  Without both set in `agent.env`, `media-sync.ts`'s loop simply never runs and
+  `voice_challenge` recordings silently never reach the node. `MEDIA_SOUND_PREFIX`
+  defaults to `custom/potp` and only needs setting for a different
+  sound-search-relative path.
