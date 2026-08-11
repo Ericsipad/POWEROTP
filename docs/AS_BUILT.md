@@ -769,9 +769,12 @@ Real changes made directly on the droplet via `ssh powerotp` (see
   `PasswordAuthentication no` and `PermitRootLogin prohibit-password` in `sshd_config` —
   password auth is fully disabled account-wide; root can still only ever log in with the
   same key, never a password. Installed and enabled `fail2ban`.
+  **Superseded — root login is now closed outright (`PermitRootLogin no`) and
+  `ssh powerotp` lands as `opsadmin`; see "Droplet deploy hardening" below.**
 - **Firewall**: `ufw` is active, default-deny incoming, only `22/tcp` (SSH) allowed in.
   Nothing else — no ARI, AMI, or Asterisk port is reachable from outside the box, matching
-  the threat model.
+  the threat model. **Egress is no longer unrestricted either — see "Droplet deploy
+  hardening" below.**
 - **Unattended upgrades**: already correctly configured by DigitalOcean's base image
   (security-origin automatic updates enabled) — verified, not changed.
 - **Asterisk**: installed from Ubuntu 24.04's apt repo — Asterisk 20 (LTS), already running
@@ -801,8 +804,12 @@ Real changes made directly on the droplet via `ssh powerotp` (see
   end-to-end.
 - **Node.js 22** installed from NodeSource for running the agent.
 - **`apps/telephony-agent` is deployed and running.** Transfer mechanism: `git archive`
-  at a committed `main` commit → `scp` → extract to `/opt/powerotp` → `npm ci` → `npm run
-  build -w @powerotp/contracts -w @powerotp/telephony-agent`, owned by a new non-login
+  at a committed `main` commit → piped to the forced-command deploy entrypoint on stdin →
+  extract to `/opt/powerotp` → `npm ci` → `npm run
+  build -w @powerotp/contracts -w @powerotp/telephony-agent`. (This used to be a separate
+  `scp` plus an inline root command list; see "Droplet deploy hardening" below for why it
+  is one stdin-piped forced command now.) `/opt/powerotp` is owned by the CI user
+  `potp-deploy`; the agent itself runs as the non-login
   system user `potp-agent` (member of the `asterisk` group so it can read/write
   `pjsip_trunks.conf` and reach the Asterisk control socket). Runs under the hardened
   systemd unit `infrastructure/asterisk/powerotp-agent.service` (also installed at
@@ -828,6 +835,95 @@ voice_code pause fix), authenticates, fetches its flat trunk-pool config, render
 their fixes (including one from this session — see "Live confirmation" under "Outbound
 trunk pool" above for the schema-change/old-agent incompatibility) are recorded below so
 they aren't re-discovered the hard way.
+
+## Droplet deploy hardening (implemented)
+
+Prompted by a reported "your droplet is doing SSH brute-force attacks" abuse notice that
+turned out to be **a phishing email, not a real DigitalOcean report** (see the incident
+note below). The forensic pass found no compromise, but it did surface real weaknesses in
+the deploy path, which were fixed. Current shape:
+
+- **CI no longer deploys as root.** A new unprivileged system user `potp-deploy` (primary
+  group `asterisk`, home `/var/lib/potp-deploy`) owns `/opt/powerotp` and runs `npm ci` and
+  the builds. Previously `.github/workflows/verify.yml` SSHed in **as root** on every push
+  to `main` and ran `npm ci` there, which executes every dependency's `postinstall` script
+  as root on the telephony node — one compromised npm package was a root RCE on the box,
+  and `npm audit --omit=dev` in CI does not catch that.
+- **The CI key can only do one thing.** `DROPLET_SSH_KEY` is pinned in
+  `/var/lib/potp-deploy/.ssh/authorized_keys` with
+  `command="/usr/local/bin/potp-deploy",restrict`. That program is
+  `infrastructure/asterisk/potp-deploy` in this repo; it reads the `git archive` tarball on
+  **stdin** (which is why the workflow has no `scp` step any more — an unrestricted key is
+  needed for `scp`, and a forced command blocks it). A leaked `DROPLET_SSH_KEY` therefore
+  cannot open a shell, run another command, or read `/etc/powerotp/*.env`. Verified by
+  asking the key to run `id` and watching the deploy entrypoint run instead.
+- **The one privileged step is granted as two exact commands**, in
+  `/etc/sudoers.d/potp-deploy`: `systemctl restart powerotp-agent` and
+  `systemctl is-active powerotp-agent`. No wildcards, no `ALL`. No root `chown` is needed
+  after extraction because `potp-deploy`'s primary group is `asterisk` and the deploy
+  entrypoint runs with `umask 027`, so built files are group-readable by `potp-agent`.
+- **Separate keys per purpose.** CI has its own ed25519 keypair, distinct from the human
+  `~/.ssh/poweroTP_do_droplet` key. Previously one private key was simultaneously root on
+  the droplet, the `DROPLET_SSH_KEY` repo secret, and a file on the developer laptop.
+- **Root SSH login is closed.** `/etc/ssh/sshd_config.d/10-powerotp-hardening.conf` sets
+  `PermitRootLogin no`, `AllowUsers opsadmin potp-deploy`,
+  `AuthenticationMethods publickey`, `MaxAuthTries 3`, `LoginGraceTime 20`, and disables
+  agent/TCP forwarding, tunnelling, and X11. It is named `10-` deliberately: sshd keeps the
+  **first** value it sees for a keyword and the cloud-init drop-ins are `50-`/`60-`.
+  Human access is `ssh powerotp` → `opsadmin` → `sudo`.
+- **Egress is restricted and logged.** `ufw` still defaults to allow-outgoing, but explicit
+  `deny out` rules now cover `22`, `23`, `25`, `445`, `465`, `587`, `3389/tcp`
+  (comment `egress-abuse-guard`), so the node cannot make the outbound SSH/SMTP/RDP
+  connections an abuse bot would — the exact behavior the phishing mail alleged is now
+  structurally impossible, and attempts are logged. Nothing legitimate needs these: the
+  agent talks HTTPS to the control plane and SIP over UDP, and email goes through Brevo's
+  API from `apps/web`, never SMTP from the droplet.
+- **IAX2 removed.** `chan_iax2` was loaded and listening on `udp/4569` with Asterisk's
+  packaged anonymous `[guest]` user in `iax.conf`, despite IAX2 being completely unused
+  (`iax2 show peers`/`show registry`: zero of each — all trunks are PJSIP). Added
+  `noload => chan_iax2.so` to `/etc/asterisk/modules.conf` and unloaded it at runtime
+  (`module unload chan_iax2.so`), which removes the listener without an Asterisk restart,
+  so trunk registrations were never dropped.
+- **Deliberately not changed**: the PJSIP transport still binds `0.0.0.0:5060`. `ufw`
+  already denies all inbound on it, and the repo's own
+  `infrastructure/asterisk/pjsip-transport.conf` documents how easily registrations break
+  when that transport is edited — rebinding it would have been risk without a security
+  gain. Do not "harden" this without a reason.
+- **CI host-key pinning**: the workflow used `ssh-keyscan` into `known_hosts` and then set
+  `StrictHostKeyChecking=yes`, which is decorative — trust-on-first-use on a fresh public
+  runner accepts whatever key it is handed, every run. There is now a
+  `DROPLET_SSH_HOST_KEY` repo secret holding the pinned `known_hosts` line instead.
+
+Repo secrets after this pass: `DROPLET_HOST` (unchanged), `DROPLET_SSH_USER`
+(now `potp-deploy`), `DROPLET_SSH_KEY` (new, restricted key), `DROPLET_SSH_HOST_KEY`
+(new).
+
+### Incident: a phishing email impersonating a DigitalOcean abuse report
+
+A message claiming `powerotpvoip1` was compromised and performing SSH brute-force attacks
+turned out to be phishing — there was no matching ticket in the DigitalOcean control
+panel, and no link in it was clicked. Recorded here because the forensic pass is the
+reusable part, and because "the droplet is clean" should not have to be re-derived from
+scratch next time:
+
+- The droplet was created 2026-08-05 12:45 UTC (cloud-init first boot, instance
+  `590153452`), so its logs cover its entire life with no gap.
+- `sysstat` collects 10-minute network samples continuously. Peak **outbound** rate on
+  every single day was 2–10 packets/s, except one 210 packets/s sample at 05:35:41 on
+  Aug 7 — the exact second the kernel OOM-killed `npm ci` (the swap incident below).
+  Lifetime average was ~2.6 packets/s outbound. Sustained brute-forcing would be orders of
+  magnitude higher, so the alleged behavior demonstrably never happened.
+- Root had no `~/.ssh/known_hosts` and no `~/.bash_history` at all — the box had never
+  made an outbound SSH connection.
+- Every accepted SSH login in the droplet's history was the one expected ed25519 key, from
+  either Azure ranges (the GitHub Actions deploy job) or the operator's ISP. `fail2ban`
+  showed 5,381 failed attempts and 378 bans, all inbound background noise, none successful.
+- Clean on: cron/`at`, systemd units and timers, `/tmp`, `/var/tmp`, `/dev/shm`,
+  `/etc/ld.so.preload`, the SUID set, `dpkg -V` on core packages, out-of-tree kernel
+  modules, and hidden processes (`/proc` PID count matched `ps` exactly).
+- **Useful for next time**: the fastest disproof of an outbound-abuse claim on this box is
+  `sar -n DEV -f /var/log/sysstat/sa<DD>` for peak `txpck/s`, plus the absence of
+  `/root/.ssh/known_hosts`.
 
 ### Incident: empty-string optional env vars crashed the whole app
 

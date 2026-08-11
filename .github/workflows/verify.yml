@@ -41,6 +41,16 @@ jobs:
   # mirrors, and docs/AS_BUILT.md's "Telephony droplet" section for why a
   # droplet is never individually configured beyond CONTROL_PLANE_URL/
   # NODE_SECRET — this job only ever pushes code, never any secret.
+  #
+  # The whole deploy is one `ssh` with the tarball on stdin, because
+  # DROPLET_SSH_KEY is pinned on the droplet to the single forced command
+  # `/usr/local/bin/potp-deploy` (infrastructure/asterisk/potp-deploy). That
+  # key cannot open a shell, run any other command, or read
+  # /etc/powerotp/*.env, and it authenticates as the unprivileged
+  # `potp-deploy` user rather than root — so `npm ci`'s postinstall scripts
+  # no longer execute as root on the node. Do not reintroduce a separate
+  # `scp` step or an inline command list here; both require an unrestricted
+  # key. See docs/AS_BUILT.md's "Droplet deploy hardening" section.
   deploy-droplet:
     needs: verify
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -59,27 +69,15 @@ jobs:
           mkdir -p ~/.ssh
           printf '%s\n' "${{ secrets.DROPLET_SSH_KEY }}" > ~/.ssh/droplet_key
           chmod 600 ~/.ssh/droplet_key
-          ssh-keyscan -H "${{ secrets.DROPLET_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
+          # A pinned host key, not ssh-keyscan: trust-on-first-use from a
+          # public runner would accept a MITM'd host key on every run, which
+          # made the StrictHostKeyChecking=yes below decorative.
+          printf '%s\n' "${{ secrets.DROPLET_SSH_HOST_KEY }}" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
 
-      - name: Copy archive to droplet
-        run: |
-          scp -i ~/.ssh/droplet_key -o StrictHostKeyChecking=yes \
-            /tmp/powerotp-deploy.tar.gz \
-            "${{ secrets.DROPLET_SSH_USER }}@${{ secrets.DROPLET_HOST }}:/tmp/powerotp-deploy.tar.gz"
-
-      - name: Extract, build, and restart the agent on the droplet
+      - name: Deploy the agent
         run: |
           ssh -i ~/.ssh/droplet_key -o StrictHostKeyChecking=yes \
-            "${{ secrets.DROPLET_SSH_USER }}@${{ secrets.DROPLET_HOST }}" '
-              set -euo pipefail
-              mkdir -p /opt/powerotp
-              tar -xzf /tmp/powerotp-deploy.tar.gz -C /opt/powerotp
-              rm -f /tmp/powerotp-deploy.tar.gz
-              cd /opt/powerotp
-              npm ci
-              npm run build -w @powerotp/contracts -w @powerotp/telephony-agent
-              chown -R potp-agent:asterisk /opt/powerotp
-              systemctl restart powerotp-agent
-              sleep 2
-              systemctl is-active powerotp-agent
-            '
+            -o IdentitiesOnly=yes -o BatchMode=yes \
+            "${{ secrets.DROPLET_SSH_USER }}@${{ secrets.DROPLET_HOST }}" \
+            < /tmp/powerotp-deploy.tar.gz

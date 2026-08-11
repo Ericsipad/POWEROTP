@@ -36,11 +36,21 @@ droplet" sections) for the ground truth of what is actually installed on
 **As of this session, this is automated.** `.github/workflows/verify.yml`'s
 `deploy-droplet` job runs after every push to `main` that passes `verify`
 (mirroring how DigitalOcean App Platform auto-deploys `apps/web` on every
-push) — it builds the same `git archive` tarball, `scp`s it to the droplet,
-and runs the same `npm ci` / build / restart sequence described below over
-SSH, using three GitHub Actions repository secrets (`DROPLET_HOST`,
-`DROPLET_SSH_USER`, `DROPLET_SSH_KEY` — the same key/IP as the local-only
-`ssh powerotp` alias, never committed to the repo). **A manual redeploy
+push) — it builds the same `git archive` tarball and pipes it on **stdin** to
+`potp-deploy` (this directory), the forced command its SSH key is pinned to,
+which runs the same `npm ci` / build / restart sequence described below.
+
+It authenticates as the unprivileged `potp-deploy` user, **not root**, using
+four repository secrets: `DROPLET_HOST`, `DROPLET_SSH_USER` (`potp-deploy`),
+`DROPLET_SSH_KEY` (a key dedicated to CI, distinct from the local-only
+`ssh powerotp` alias's key), and `DROPLET_SSH_HOST_KEY` (the pinned
+`known_hosts` line). None of these are committed to the repo. Because the key
+is pinned to one forced command, it cannot open a shell or read
+`/etc/powerotp/*.env` even if the secret leaks — so do not reintroduce a
+separate `scp` step or an inline remote command list, both of which require an
+unrestricted key. See `docs/AS_BUILT.md`'s "Droplet deploy hardening" section.
+
+**A manual redeploy
 (steps 0–8 below) is still the way to add a brand-new node from scratch**
 (installing Asterisk, hardening, the systemd unit, `/etc/powerotp/*.env`,
 etc. — none of that is automated) or to recover an already-provisioned
@@ -61,7 +71,8 @@ Manual steps (still needed for first-time setup, or as a fallback):
 1. From a clean local `main` checkout: `git archive --format=tar.gz -o /tmp/powerotp-deploy.tar.gz HEAD`.
 2. `scp` the archive to the droplet, extract it to `/opt/powerotp`, `npm ci`, then
    `npm run build -w @powerotp/contracts -w @powerotp/telephony-agent`.
-3. `chown -R potp-agent:asterisk /opt/powerotp`.
+3. `chown -R potp-deploy:asterisk /opt/powerotp && chmod 0750 /opt/powerotp` (see step 9 —
+   the CI user owns the tree and the agent only ever reads it, via the `asterisk` group).
 4. Copy `powerotp-agent.service` (this directory) to
    `/etc/systemd/system/powerotp-agent.service`, `systemctl daemon-reload`.
 5. Write `/etc/powerotp/agent.env` with `CONTROL_PLANE_URL=https://powerotp.com`,
@@ -97,6 +108,27 @@ Manual steps (still needed for first-time setup, or as a fallback):
    active transport, outbound registrations silently fail to be created at all. See that
    file's comment for the exact symptom this causes if skipped.
 8. `systemctl enable --now powerotp-agent`.
+9. **Set up the CI deploy path** (skip only for a node CI never deploys to):
+   - `useradd --system --create-home --home-dir /var/lib/potp-deploy --shell /bin/bash
+     --gid asterisk potp-deploy` — the `asterisk` primary group plus the entrypoint's
+     `umask 027` is what makes built files readable by `potp-agent` without a root `chown`.
+   - Install `potp-deploy` (this directory) as `/usr/local/bin/potp-deploy`, `0755
+     root:root`.
+   - `/etc/sudoers.d/potp-deploy` (`0440`), granting exactly:
+     `potp-deploy ALL=(root) NOPASSWD: /usr/bin/systemctl restart powerotp-agent,
+     /usr/bin/systemctl is-active powerotp-agent`. Validate with `visudo -c -f`.
+   - Put the CI public key in `/var/lib/potp-deploy/.ssh/authorized_keys` (`0600`) prefixed
+     with `command="/usr/local/bin/potp-deploy",restrict` — this pinning is the whole point;
+     without it the CI key is an unrestricted shell key.
+   - Set the four repo secrets listed above, including the node's `known_hosts` line as
+     `DROPLET_SSH_HOST_KEY`.
+10. **SSH hardening**: install `/etc/ssh/sshd_config.d/10-powerotp-hardening.conf`
+    (`PermitRootLogin no`, `AllowUsers opsadmin potp-deploy`, `AuthenticationMethods
+    publickey`, forwarding off). The `10-` prefix matters — sshd keeps the first value it
+    sees per keyword and the cloud-init drop-ins are `50-`/`60-`. **Confirm `opsadmin` logs
+    in and `sudo`s before reloading sshd**, or you lock yourself out. Also add the
+    `egress-abuse-guard` `ufw deny out` rules and `noload => chan_iax2.so`; both are
+    described in `docs/AS_BUILT.md`'s "Droplet deploy hardening" section.
 
 Do not add real SIP, ARI, or SSH credentials to the repository — `agent.env`/`ari.env`
 exist only on the droplet, never here. `NODE_SECRET` itself is entered in App Platform,
