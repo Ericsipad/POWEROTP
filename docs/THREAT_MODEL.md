@@ -1,5 +1,13 @@
 # Phase 0 threat model
 
+Covers the OTP/telephony platform (this top-level section, written for that product's own
+Phase 0) and, separately, the [BotBlocker threat model](#botblocker-threat-model) section below
+for the BotBlocker product. The two sections share this file because they share infrastructure
+and several controls, but "Phase 0" in a heading always refers to that product's own phase
+numbering — see [`PLAN.md`](PLAN.md) for the OTP platform's phases and
+[`POWEROTP_BOTBLOCKER_DEVELOPMENT_PHASES.md`](POWEROTP_BOTBLOCKER_DEVELOPMENT_PHASES.md) for
+BotBlocker's.
+
 ## Protected assets
 
 - Customer, admin, project, callback, provider, SIP, Spaces, and node credentials
@@ -102,5 +110,190 @@ Before unrestricted production traffic, obtain an appropriate legal review cover
 consent, TCPA/telemarketing restrictions, do-not-call handling, quiet hours, STIR/SHAKEN,
 caller-ID rules, recording disclosure, privacy notices, retention, deletion, supported
 countries, and provider acceptable-use requirements.
+
+---
+
+## BotBlocker threat model
+
+Scope: the BotBlocker product described in
+[`POWEROTP_BOTBLOCKER_PLAN.md`](POWEROTP_BOTBLOCKER_PLAN.md) and built in the order defined by
+[`POWEROTP_BOTBLOCKER_DEVELOPMENT_PHASES.md`](POWEROTP_BOTBLOCKER_DEVELOPMENT_PHASES.md). None
+of the controls below describe shipped behavior until the corresponding phase's as-built entry
+in [`POWEROTP_BOTBLOCKER_AS_BUILT.md`](POWEROTP_BOTBLOCKER_AS_BUILT.md) says so.
+
+### Additional protected assets
+
+- Site clearance tokens, signed policy releases, and BotBlocker Ed25519 signing/verification
+  keys.
+- Sanitized browser/behavior telemetry, derived risk signals, and scoring model inputs.
+- Cross-project fraud/security intelligence and each customer's own project-scoped visitor
+  data.
+- Passport identity records, per-client pairwise pseudonyms, and the internal pepper/derivation
+  key that produces them (see
+  [`PASSPORT_BUSINESS_AND_LEGAL_PLAN.md`](PASSPORT_BUSINESS_AND_LEGAL_PLAN.md)).
+
+### Additional trust boundaries
+
+9. Customer browser (BotBlocker runtime sensor) to the POWEROTP decision/report API.
+10. POWEROTP-hosted OTP iframe to the customer page, over `postMessage`.
+11. Customer server-side Gate Adapter (raw Node HTTP, Express, or Next.js wrapper) to the
+    customer's own trusted proxy/load balancer.
+12. RapidAuth Global Edge (Cloudflare Workers, later) to the DigitalOcean control plane.
+
+### Optimistic-load limitation
+
+The product is intentionally fail-open on timing: the customer's site renders before a
+decision resolves, and a late `otp` decision cannot retract page content already delivered to
+the visitor's browser. This is a stated design limit, not a defect. Mitigations only bound its
+impact — they cannot eliminate it:
+
+- Keep the default RapidAuth decision fast (sub-50 ms target from a warm edge) so most
+  decisions resolve before or very close to render.
+- Freeze the page and open the challenge immediately on any `otp` decision, including late and
+  revised ones, so exposure is time-bounded rather than unbounded.
+- Never describe the timeout as a security boundary in customer-facing copy; describe it as a
+  UX responsiveness setting only. The actual security boundary is the eventual `allow`/`otp`
+  decision and the OTP challenge, not the timeout window.
+- Advise customers to additionally opt genuinely sensitive server actions (payment
+  submission, account creation) into decision-blocking behavior rather than relying on the
+  optimistic default for those specific actions.
+
+### API-key separation
+
+- The site credential (`siteCredential`/`POWEROTP_SITE_CREDENTIAL`) is server-only. It must
+  never appear in browser JavaScript, a public bundle, a client-visible cookie, or a
+  `postMessage` payload.
+- A separate, low-privilege public site identifier (`siteId`) may appear in the browser; it
+  identifies the site for routing but authorizes nothing by itself.
+- Server-to-server calls (RapidAuth, browser-assessment, risk-events, challenge management) are
+  authenticated with the site credential; browser-to-POWEROTP calls (report submission,
+  challenge polling, iframe traffic) are authenticated with short-lived, narrowly scoped,
+  signed tokens issued by the server-side adapter — never the raw site credential.
+- Compromise of a public bundle must never be sufficient to mint a decision, forge a clearance,
+  or read another site's data.
+
+### Trusted proxy / IP rules
+
+- Client IP is extracted only from a header explicitly configured as trusted for that specific
+  deployment (e.g. a named `X-Forwarded-For` position behind a known reverse proxy count, or a
+  platform-provided field such as a serverless request's connection IP). Arbitrary
+  client-supplied forwarded-IP headers are never trusted by default.
+- Each wrapper (raw Node HTTP, Express, Next.js) documents its own trusted-proxy configuration
+  explicitly; there is no implicit "trust everything" default.
+- Misconfigured trusted-proxy settings are a known false-negative/false-positive risk and must
+  be covered by wrapper conformance tests before a wrapper ships.
+
+### Replay and session fixation
+
+- Every signed clearance, decision, and challenge token carries a nonce, issued/expiry
+  timestamps, and an audience (site/session) binding; servers reject reused nonces within the
+  replay window.
+- Challenge tokens are one-time and consumed on first accepted use or terminal state, mirroring
+  the existing OTP interaction-token pattern in `apps/api/src/interaction-tokens.ts`.
+- A visitor session identifier is never accepted as sufficient proof of continuity across a
+  privilege change (e.g. anonymous visitor to Passport holder) without a fresh signed
+  assertion; this prevents an attacker from fixating a pre-verification session ID and
+  inheriting a later-verified visitor's clearance.
+
+### Forged clearance and signed policy
+
+- Clearances and policy releases are Ed25519-signed by POWEROTP; adapters hold only public
+  verification keys, never signing keys.
+- Adapters reject any clearance or policy that fails signature verification, fails schema
+  validation, targets a different site audience, or attempts an unauthorized version rollback.
+- Key rotation maintains an active/previous key overlap window (Phase 4) so a rotation cannot
+  itself cause a denial-of-service by invalidating everything atomically.
+- A compromised policy-publication path is treated as a full incident: canary rollout and
+  signed rollback exist specifically to bound the blast radius of a bad or malicious release.
+
+### Iframe / postMessage authority
+
+- The hosted OTP iframe is the only source of an authoritative "verified" state. A
+  same-window/opener `postMessage` from the customer's own page script is never treated as
+  authoritative, exactly as already documented for the existing widget in
+  [`AS_BUILT.md`](AS_BUILT.md) ("the postMessage relay is a UX convenience, never
+  authoritative").
+- The adapter independently confirms verification status against the server (polling or a
+  signed callback) before lifting the page freeze; it never lifts the freeze on a `postMessage`
+  event alone.
+- `postMessage` payloads are validated for expected origin and shape before use; the customer
+  page's own script is treated as untrusted for this purpose since anything else running in
+  that browser tab can also post messages.
+- Response-specific CSP `frame-ancestors` restricts which origins may embed the hosted iframe.
+
+### Continuous decision revisions
+
+- Because a visitor can move from `allow` to `otp` at any time (initial evaluation, 30-second
+  report, or partial report), every decision carries a monotonic sequence/issuance time so a
+  stale cached "allow" cannot be replayed to suppress a later "otp".
+- The adapter and browser sensor must apply the most recent valid decision they have observed,
+  never a locally cached older one, and must reject a decision with an older sequence number
+  than one already applied for that session.
+- Pausing customer-page monitoring while the OTP iframe is open must not create a window where
+  a stale pre-OTP decision is reapplied; monitoring resumes only in a fresh interval after
+  authoritative success.
+
+### Fail-open timeout / network behavior
+
+- Ordinary page loads are fail-open on both the UI decision timeout and RapidAuth/network
+  failure: the site stays open. This is an explicit product decision (see
+  [`POWEROTP_BOTBLOCKER_PLAN.md`](POWEROTP_BOTBLOCKER_PLAN.md#failure-and-security-rules)), not
+  an oversight, and must be documented to customers as such.
+- A locally valid, unexpired, correctly signed clearance remains usable during control-plane
+  outage.
+- Fail-open must never be extended to bypass an already-issued `otp` decision or an
+  in-progress challenge; those states persist across outages.
+- Customers who need fail-closed behavior for a specific sensitive action must opt that action
+  into decision-blocking mode explicitly; this is a per-route customer choice, not a global
+  BotBlocker default.
+
+### Direct-origin bypass
+
+- Any adapter that runs at the application layer (Express, Next.js, raw Node HTTP) protects
+  only requests that reach that process. If the customer's origin is directly reachable
+  (bypassing a CDN/WAF the customer believes is in front of it, or bypassing the adapter
+  process itself via a misrouted path), BotBlocker cannot see or gate that traffic.
+- This is a known, customer-configuration-dependent limitation, not something BotBlocker can
+  fully close from inside the customer's own infrastructure. Wrapper documentation and MCP
+  installation output must state it plainly and recommend the customer restrict direct origin
+  access at their own network/CDN layer.
+- The later Cloudflare-edge and customer-owned-Worker adapters reduce this risk for customers
+  who adopt them, by moving enforcement in front of the origin, but do not eliminate it for
+  customers who do not.
+
+### Cross-project data access
+
+- All BotBlocker read APIs (`GET /v1/projects/{projectId}/botblocker/visitors`, dashboard
+  queries, MCP-facing documentation) are scoped by `projectId` and the caller's authenticated
+  session, exactly like existing project-scoped OTP endpoints.
+- A customer can query only observations that belong to their own project(s). Internal
+  cross-site fraud/security correlation (device/network reputation, blacklist provenance) is a
+  private, server-side signal that may *influence* a decision surfaced to a customer's project,
+  but the underlying cross-site evidence, other customers' visitor identities, and other
+  projects' raw events are never returned to any customer, admin dashboard scoping bugs
+  notwithstanding — this must be covered by an explicit cross-tenant-isolation test before
+  Phase 15/16 ship.
+- No API ever accepts a caller-supplied `projectId` without verifying the authenticated
+  caller's ownership of that project first.
+
+### Sanitized telemetry and prohibited data
+
+Every browser report is sanitized at the point of collection, before it ever leaves the
+visitor's browser:
+
+| Allowed | Prohibited |
+| --- | --- |
+| Route path, query string and fragment stripped | Full URL with query string/fragment |
+| Click element category and explicit `data-powerotp-id` | Clicked text, form values, arbitrary CSS selectors |
+| Mouse directness/straight-line metrics between clicks | Raw mouse coordinate trails |
+| Scroll smoothness / high-speed aggregate metrics | Raw scroll trails |
+| Honeypot/decoy activations | — |
+| Timing (5s initial, 30s recurring, partial-report triggers) | Raw keystrokes, passwords, emails, DOM snapshots, page content |
+
+Any new telemetry field proposed in a later phase must be checked against this table before
+it is added, and a field that cannot be justified as one of the "Allowed" rows must not ship.
+This mirrors the existing rule that PowerOTP's OTP platform never logs answers, tokens, or
+secrets (see [Enumeration and privacy](#enumeration-and-privacy) and
+[Challenge disclosure or manipulation](#challenge-disclosure-or-manipulation) above).
 
 This document is an engineering threat model, not legal advice.

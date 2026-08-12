@@ -328,6 +328,43 @@ independently. What we refuse to do is hand them the join key.
 **Do not "simplify" this to one shared cookie.** It is the property that makes the network
 defensible to the ICO and certifiable under ISO 27566-1.
 
+### BotBlocker's internal fraud correlation vs. the Passport pseudonym — four things that must never be confused
+
+[`POWEROTP_BOTBLOCKER_PLAN.md`](POWEROTP_BOTBLOCKER_PLAN.md) states that "PowerOTP may
+correlate pseudonymous fraud/security evidence across protected sites internally." That
+sentence describes a *different* mechanism from the Passport pseudonym above, and the two must
+stay distinguishable everywhere — in code, in this document, and in any customer-facing
+security answer:
+
+1. **Pairwise Passport identifiers exposed to customer sites.** `sub = HMAC(pepper, user_id ||
+   client_id)`, one distinct value per site, unlinkable across sites by anyone holding only
+   the sites' own data. This is the *only* identifier a customer site ever receives, and it
+   identifies a returning verified visitor on that one site — nothing more.
+2. **POWEROTP's private internal cross-site fraud correlation.** A capability that runs
+   entirely inside POWEROTP's own infrastructure and is never returned to any customer. For a
+   Passport-holding visitor it can use `HMAC(pepper, user_id)` (no `client_id` component — see
+   the Risk signals data class in [Data classes and legal roles](#2-data-classes-and-legal-roles))
+   to detect account/session takeover. For the much larger population of anonymous visitors
+   who never register a Passport — the population BotBlocker's bot-risk gate exists to
+   evaluate — the equivalent internal key is derived from device/network/behavioral evidence
+   (fingerprint, ASN, velocity, decoy signals), not a `user_id`, because that population never
+   has one. Both flavors are internal-only inputs to a risk decision; neither is ever surfaced
+   to a customer as a value they can store, log, or join against their own data.
+3. **No cross-site PowerOTP cookie.** Neither mechanism above is delivered as a cookie readable
+   by more than one site. The Passport pseudonym is a first-party, per-site token (see
+   [Passport delivery and the cookie constraint](#4-passport-delivery-and-the-cookie-constraint)).
+   The internal correlation key never leaves the server side at all, in any form, for either
+   population.
+4. **No network-global identifier exposed to customers.** A customer dashboard, API response,
+   or exported report may show that a specific visitor pattern matches other reports made
+   against their own project — an observation, decision, or risk flag — but it never receives
+   the pepper, the raw internal correlation key, another project's visitor data, or any single
+   identifier that a customer could use to recognize the same visitor on a different customer's
+   site. This is the same boundary [`POWEROTP_BOTBLOCKER_PLAN.md`](POWEROTP_BOTBLOCKER_PLAN.md)
+   states as "a customer may query only observations belonging to its own project(s)" and the
+   same boundary [`THREAT_MODEL.md`](THREAT_MODEL.md#cross-project-data-access) enforces as a
+   required test before cross-site intelligence ships.
+
 ### "Install once, works everywhere" — what it means mechanically
 
 There is no browser mechanism that stores one artifact readable across unrelated domains. The

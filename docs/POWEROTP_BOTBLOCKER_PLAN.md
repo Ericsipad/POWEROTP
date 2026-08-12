@@ -1,6 +1,7 @@
 # PowerOTP BotBlocker Development Plan
 
-Last updated: 2026-08-07
+Last updated: 2026-08-11 (Phase 0 — reconciled with the optimistic-load model in
+[`POWEROTP_BOTBLOCKER_DEVELOPMENT_PHASES.md`](POWEROTP_BOTBLOCKER_DEVELOPMENT_PHASES.md))
 
 Execution is split into small, dependency-ordered fresh-session phases in
 [`POWEROTP_BOTBLOCKER_DEVELOPMENT_PHASES.md`](POWEROTP_BOTBLOCKER_DEVELOPMENT_PHASES.md).
@@ -9,42 +10,108 @@ product and architecture specification.
 
 ## Purpose
 
-PowerOTP BotBlocker is the primary PowerOTP product: a centrally managed bot-risk gate installed in a customer's own request path. It prevents protected HTML and APIs from being served until PowerOTP returns an allow decision or the visitor completes the customer's available OTP challenge. PowerOTP does not relay the customer's normal website traffic.
+PowerOTP BotBlocker is the primary PowerOTP product: a centrally managed bot-risk and
+fraud-intelligence gate installed in a customer's own website or request path. Unlike a
+traditional blocking gate, BotBlocker's default behavior is **optimistic**: the customer's
+website loads immediately and is never held back waiting on PowerOTP. PowerOTP evaluates the
+visitor concurrently with page load and asks the adapter to apply one of exactly two
+decisions when it resolves:
 
-The existing OTP platform is the recovery and confidence mechanism. BotBlocker combines fast cookie checks, local IP intelligence, browser consistency, decoy interactions, request velocity, and post-load behavior. Ambiguous or high-risk traffic is challenged rather than permanently denied.
+- `allow`: keep the site open and continuously observe.
+- `otp`: freeze the page and open the POWEROTP-hosted iframe challenge.
+
+The customer chooses a decision timeout between 50 and 2,000 ms, 200 ms recommended. If the
+timeout elapses first, the website simply stays open — the timeout never cancels the pending
+decision, and a decision that arrives late still applies. A blacklist match produces `otp`,
+never permanent denial.
+
+**Optimistic-load limitation, stated plainly:** because the page can render before a decision
+resolves, a late `otp` — whether from the first evaluation, a routine 30-second report, or a
+partial report triggered by navigation/hide/exit — freezes the page and opens the challenge
+immediately, but it cannot retract customer content already delivered to the visitor's
+browser before that decision arrived. This is an inherent property of optimistic loading, not
+a bug to be engineered away, and every description of BotBlocker's timing guarantees must
+state it.
+
+The existing OTP platform is the recovery and confidence mechanism: BotBlocker's `otp`
+decision opens the same hosted challenge/iframe surface. BotBlocker's own evaluation combines
+fast signed-clearance checks, local IP intelligence, browser consistency, decoy interactions,
+request velocity, and continuous post-load behavior. Ambiguous or high-risk traffic is
+challenged rather than permanently denied, and a previously `allow`ed or cleared visitor can
+always be moved to `otp` by a later, better-informed decision.
 
 ## Product invariants
 
-- The Gate Adapter runs before protected static HTML, SSR routes, APIs, login, registration, and account creation.
+- The Gate Adapter runs in the customer's own request path but never blocks the initial
+  response on a PowerOTP decision; it applies `allow`/`otp` to a request only for actions the
+  customer has explicitly asked to gate this way (e.g. an SSR route configured as
+  decision-blocking), and otherwise reports the decision to the already-open page.
 - A fresh signed site clearance is verified locally with a target of approximately 1 ms.
-- A new-visitor RapidAuth decision targets less than 50 ms added latency from a nearby warm edge; this is a target, not a universal network guarantee.
-- Customer traffic stays on the customer's hosting platform. PowerOTP receives decision metadata, challenge traffic, summarized risk events, and optional agent-access traffic.
+- A new-visitor RapidAuth decision targets less than 50 ms added latency from a nearby warm
+  edge; this is a target, not a universal network guarantee, and it is independent of the
+  customer-configured 50–2,000 ms UI timeout described above.
+- The decision is exactly one of two values, `allow` or `otp`. There is no third "deny" or
+  "block" outcome anywhere in the protocol.
+- Every visitor is reassessed continuously, not just once: an initial browser/behavior report
+  five seconds after load, recurring reports every 30 seconds, and partial reports on route
+  navigation, page hide, close, or site exit. Every report is saved to the visitor's session
+  and reruns scoring; any of these may revise a prior `allow` or valid clearance to `otp`.
+- While the OTP iframe is open, customer-page behavior monitoring is paused; it resumes in a
+  fresh observation interval only after an authoritative OTP success.
+- Customer traffic stays on the customer's hosting platform. PowerOTP receives decision
+  metadata, challenge traffic, summarized/sanitized risk events, and optional agent-access
+  traffic — never the customer's page content.
+- Collected behavior evidence is sanitized at the source: route path without query string or
+  fragment, click element category and an explicit `data-powerotp-id` only (never clicked
+  text or form values), mouse-directness/straight-line metrics between clicks (never
+  coordinate trails), scroll smoothness and high-speed aggregate metrics (never raw scroll
+  trails), and honeypot activations. Raw keystrokes, passwords, emails, DOM snapshots, page
+  content, and arbitrary CSS selectors are never collected.
 - PowerOTP owns risk weights, thresholds, threat feeds, challenge logic, and sensor cadence.
-- Customers select protected routes, purchased OTP methods, optional curated agent content, and emergency bypass behavior.
+- Customers select protected routes, purchased OTP methods, optional curated agent content,
+  the decision timeout (50–2,000 ms, 200 ms default), and emergency bypass behavior.
 - No single weak IP, browser, behavioral, or decoy signal is treated as certain proof.
 - Elevated risk surfaces OTP; it does not create an unrecoverable permanent denial.
 - OTP proves access to a phone channel, not legal identity.
-- Negative reputation is server-side state. A bot can delete a cookie, so a “blocked cookie” is not enforcement.
-- Passport and runtime telemetry are purpose-limited security data. The extension does not collect or sell browsing or shopping histories.
-- Production and development never use fake threat data. Mocks are test-only.
+- Negative reputation is server-side state. A bot can delete a cookie, so a “blocked cookie”
+  is not enforcement.
+- PowerOTP may correlate pseudonymous fraud/security evidence across protected sites
+  internally (see [Risk Engine and Reputation Store](#risk-engine-and-reputation-store)).
+  A customer may query only observations belonging to its own project(s) — never another
+  site's visitor history or raw events.
+- Passport and runtime telemetry are purpose-limited security data. The extension does not
+  collect or sell browsing or shopping histories.
+- Production and development never use fake threat data, fake scores, fake blacklist matches,
+  fake Passport approvals, fake paid entitlements, or synthetic OTP success. Mocks are
+  test-only. Unfinished subsystems return explicit typed unavailable responses, and BotBlocker
+  stays disabled for real customers until the backing phases and end-to-end tests are
+  complete — see
+  [`POWEROTP_BOTBLOCKER_DEVELOPMENT_PHASES.md`](POWEROTP_BOTBLOCKER_DEVELOPMENT_PHASES.md).
+- Deployment is DigitalOcean-first: every capability ships on the existing DigitalOcean App
+  Platform control plane before any Cloudflare-global-edge implementation is built. Cloudflare
+  Workers are a later, additive latency optimization (see
+  [RapidAuth Global Edge](#rapidauth-global-edge)), never a launch dependency.
 
 ## System flow
 
+The customer's site always renders optimistically; PowerOTP's decision arrives concurrently
+and is applied to the already-open page, not used as a gate before render.
+
 ```mermaid
 flowchart LR
-    Browser --> GateAdapter
-    GateAdapter -->|"Fresh clearance"| CustomerApp
-    GateAdapter -->|"No fresh clearance"| RapidAuthEdge
-    RapidAuthEdge -->|"Allow and monitor"| GateAdapter
-    RapidAuthEdge -->|"Browser evidence"| GateShell
-    RapidAuthEdge -->|"High risk"| OtpChallenge
+    Browser -->|"Loads immediately"| CustomerApp
+    GateAdapter -->|"Fresh clearance"| DecisionApplied
+    GateAdapter -->|"No fresh clearance, concurrent request"| RapidAuthEdge
+    RapidAuthEdge -->|"allow"| DecisionApplied
+    RapidAuthEdge -->|"otp"| OtpChallenge
     RapidAuthEdge -->|"Agent lane"| AgentAccess
-    GateShell --> RapidAuthEdge
+    DecisionApplied -->|"allow: keep observing"| CustomerApp
+    DecisionApplied -->|"otp: freeze + open iframe"| OtpChallenge
     OtpChallenge --> VerificationCore
-    VerificationCore --> RapidAuthEdge
-    GateAdapter --> CustomerApp
+    VerificationCore -->|"Authoritative success"| DecisionApplied
     CustomerApp --> RuntimeSensor
-    RuntimeSensor --> RiskEngine
+    RuntimeSensor -->|"5s, 30s, partial reports"| RiskEngine
+    RiskEngine -->|"Revised decision, any time"| DecisionApplied
     RiskEngine --> PolicyPublisher
     PolicyPublisher --> RapidAuthEdge
 ```
@@ -53,33 +120,49 @@ flowchart LR
 
 ### Gate Adapter
 
-A small platform-specific package installed in the customer's request path.
+A small platform-specific package installed in the customer's request path. It never delays
+the customer's normal response waiting on a PowerOTP decision — it starts the decision
+request, lets the response continue, and applies the eventual `allow`/`otp` result through the
+browser gate shell/runtime sensor described below. A customer may additionally opt a specific
+sensitive route (e.g. checkout submission) into decision-blocking behavior, but that is an
+explicit customer choice per route, never the adapter's default for whole-site traffic.
 
 - Verifies PowerOTP Ed25519-signed clearances and signed policy locally.
 - Extracts client IP only from platform-approved trusted proxy headers.
-- Calls RapidAuth only when clearance is absent, expired, revocation-positive, or a sensitive action requires reassessment.
-- Serves a same-origin gate shell instead of invoking the customer application when challenged.
+- Calls RapidAuth for a fresh decision when clearance is absent, expired,
+  revocation-positive, or a sensitive action requires reassessment — always with a bounded
+  client-configured timeout (50–2,000 ms, 200 ms recommended) that, on expiry, leaves the
+  request/page open rather than canceling the in-flight decision.
+- Serves the same-origin gate shell (freeze + iframe) only once an `otp` decision is applied,
+  whether that decision was immediate or arrived after the page already rendered.
 - Sets HttpOnly cookies without exposing credentials to browser JavaScript.
 - Uses a signed last-known-good policy with bounded timeout behavior.
 - Never downloads or executes arbitrary backend code.
 
-Planned packages:
+Planned packages, each a thin wrapper over one shared protocol so no customer rewrites their
+integration when a wrapper changes:
 
-- `libraries/gate-core`
-- `libraries/gate-node`
-- `libraries/gate-next`
-- `libraries/contracts/src/botblocker.ts`
+- `libraries/gate-core`: framework-neutral browser state machine and shared protocol logic.
+- `libraries/gate-node`: dependency-free raw Node HTTP wrapper (`http.createServer` request
+  listeners) for customers not using Express or Next.js.
+- `libraries/gate-express`: Express middleware/router wrapper.
+- `libraries/gate-next`: Next.js native `proxy.ts`/App Router wrapper.
+- `libraries/contracts/src/botblocker.ts`: the versioned protocol contracts all three wrappers
+  share — see [Phase 1](POWEROTP_BOTBLOCKER_DEVELOPMENT_PHASES.md#phase-1--base-protocol-contracts).
 
-Reference TypeScript/Node/React installation:
+Reference TypeScript/Node/React installation (Express shown; the raw Node HTTP and Next.js
+wrappers expose the same `siteId`/`siteCredential`/timeout/`protect` options over their own
+idiomatic APIs):
 
 ```typescript
 import express from "express";
-import { createPowerOtpBotBlocker } from "@powerotp/botblocker-node";
+import { createPowerOtpBotBlocker } from "@powerotp/botblocker-express";
 
 const app = express();
 const botBlocker = createPowerOtpBotBlocker({
   siteId: process.env.POWEROTP_SITE_ID!,
   siteCredential: process.env.POWEROTP_SITE_CREDENTIAL!,
+  decisionTimeoutMs: 200, // 50-2000, 200 recommended
   protect: ({ path, method }) =>
     method !== "OPTIONS" && !path.startsWith("/.well-known/health"),
 });
@@ -90,7 +173,10 @@ app.use("/api", apiRouter);
 app.get("*", renderReactApplication);
 ```
 
-The middleware must precede static, SSR, and API handlers. The package owns `/_powerotp/*` challenge/callback routes. Frameworks that cannot safely inject into streamed or compressed HTML receive an explicit React root sensor helper.
+The middleware must precede static, SSR, and API handlers so it can attach the browser sensor
+and gate shell, but it does not block those handlers on a decision. The package owns
+`/_powerotp/*` challenge/callback routes. Frameworks that cannot safely inject into streamed
+or compressed HTML receive an explicit React root sensor helper.
 
 ### Signed Policy Client
 
@@ -99,7 +185,9 @@ The installed adapter remains stable while centrally controlled behavior arrives
 - Policy fields include version, activation, expiration, site audience, protocol compatibility, risk weights, challenge mapping, edge endpoints, sensor version, verification keys, dataset versions, and revocation-filter metadata.
 - The adapter verifies Ed25519 signatures and schema before activation.
 - It caches a last-known-good policy and rejects unauthorized rollback.
-- Allowed operations are restricted to `allow`, `monitor`, `browser_check`, `otp`, and `agent_access`.
+- The only visitor-facing decision values are `allow` and `otp`; policy fields such as
+  `agent_access` eligibility or browser-check cadence configure *how* PowerOTP arrives at that
+  decision, they never add a third outcome.
 - Policy releases use canary rollout and signed rollback.
 
 Customer adapters contain public verification keys, never PowerOTP signing secrets. Existing `apps/api/src/interaction-tokens.ts` and `apps/api/src/security.ts` provide useful security patterns, but BotBlocker clearance and policy use asymmetric signatures.
@@ -144,16 +232,33 @@ Immediate remote revocation and zero lookups cannot both be guaranteed. Short ac
 
 ### Browser Gate Shell and Runtime Sensor
 
-The same-origin shell contains no protected customer content. It collects low-entropy browser consistency evidence and presents OTP, Passport, or agent access according to the signed decision.
+The same-origin shell contains no protected customer content. It renders only when a decision
+resolves to `otp`, presenting the hosted challenge (and, after success, an optional Passport or
+agent-access offer). While the shell/iframe is active, the runtime sensor pauses customer-page
+observation; it resumes a fresh observation interval only after an authoritative OTP success.
 
-After allow, the runtime sensor:
+After `allow`, the runtime sensor:
 
-- Aggregates trusted pointer, touch, keyboard, scroll timing, navigation velocity, repeated actions, and API velocity locally.
-- Never transmits raw keystrokes, raw mouse trails, passwords, emails, or page content.
-- Sends an initial summary near 30 seconds, then uses less frequent healthy heartbeats and event-driven suspicious updates.
-- Receives `renew`, `reassess`, or `challenge`.
-- Shows an overlay for human UX while the Gate Adapter blocks future protected page/API requests.
-- Treats an AI/summary decoy activation as one centrally weighted risk signal, not permanent proof.
+- Aggregates trusted pointer, touch, keyboard, scroll timing, navigation velocity, repeated
+  actions, and API velocity locally, then sanitizes it before sending:
+  - Route path only, with query string and fragment stripped.
+  - Click element category and an explicit `data-powerotp-id`, never clicked text or form
+    values.
+  - Mouse directness/straight-line metrics between clicks, never raw coordinate trails.
+  - Scroll smoothness and high-speed aggregate metrics, never raw scroll trails.
+  - Honeypot/decoy activations.
+- Never transmits raw keystrokes, raw mouse trails, passwords, emails, DOM snapshots, page
+  content, or arbitrary CSS selectors.
+- Sends an initial report **five seconds** after load, recurring reports **every 30 seconds**,
+  and a partial report whenever an interval is cut short by route navigation, page hide,
+  close, or site exit. Every report is saved to the visitor's session and reruns scoring.
+- Receives a fresh signed decision after every report; any of them may revise a prior `allow`
+  or valid clearance to `otp` — reassessment is continuous, not one-shot.
+- On a revised `otp` decision, freezes the page immediately and opens the same hosted iframe
+  the initial evaluation would have used, subject to the optimistic-load limitation described
+  under [Purpose](#purpose).
+- Treats an AI/summary decoy activation as one centrally weighted risk signal, not permanent
+  proof.
 
 Versioned immutable sensor assets are selected through signed policy.
 
@@ -176,12 +281,27 @@ After OTP, offer an optional Passport.
 - Generate a device key and register only its public key.
 - Return pairwise site assertions and support pause, revoke, delete, device loss, and annual renewal.
 - Passport avoids repeat OTP but does not disable ongoing rate and behavior controls.
+- Each customer site receives only a per-site pairwise identifier
+  (`HMAC(pepper, user_id || client_id)`); no PowerOTP cookie, cross-site cookie, or
+  network-global identifier is ever exposed to a customer site. PowerOTP's internal
+  cross-site fraud/security correlation (see
+  [Risk Engine and Reputation Store](#risk-engine-and-reputation-store)) is a private,
+  server-side capability that never leaves PowerOTP's own systems — see
+  [`PASSPORT_BUSINESS_AND_LEGAL_PLAN.md`](PASSPORT_BUSINESS_AND_LEGAL_PLAN.md#portability-is-not-linkability)
+  for the full identity-separation design.
 
 ### Agent content and payments
 
 Participating site owners may provide curated machine-efficient Markdown, text, or JSON instead of loading human presentation.
 
-- Publish `/.well-known/powerotp-agent`.
+- Publish a discovery pointer at `/.well-known/powerotp-agent` that references the customer's
+  own curated content, served by the customer's site at `/powerotp/aisummary` (the wrapper
+  scaffolds this route; the customer edits its content).
+- `/powerotp/aisummary` is unrelated to the existing bot-signal honeypot at
+  `GET /v1/modal-sessions/{sessionId}/ai-index-summary` (see
+  [`AS_BUILT.md`](AS_BUILT.md)) — the honeypot is an invisible detection trap on
+  PowerOTP's own hosted widget, while `/powerotp/aisummary` is a customer-authored,
+  intentionally discoverable page for legitimate agent traffic. Neither replaces the other.
 - Expose explicit “Human verification” and “Automated access” lanes.
 - Version terms, permitted uses, scope, quotas, and expiry.
 - Start with prepaid balances and a server-side entitlement ledger.
@@ -208,7 +328,19 @@ MCP never reads or returns customer credentials, account state, project IDs, ris
 
 ### TypeScript/Node/React
 
-Express is the reference implementation, followed by Fastify only if the shared abstraction remains simple. It must handle trusted proxy IPs, CORS, health routes, callbacks, streaming, uploads, WebSockets, SSR, static files, and protected APIs explicitly.
+Three separate wrappers share one protocol (`libraries/contracts/src/botblocker.ts` plus
+`libraries/gate-core`), so a customer never rewrites their integration when a wrapper gains a
+capability:
+
+- **Raw Node HTTP** (`libraries/gate-node`): a dependency-free wrapper over
+  `http.createServer` request listeners, for customers not using Express or Next.js.
+- **Express** (`libraries/gate-express`): the fullest-featured reference implementation,
+  followed by Fastify only if the shared abstraction remains simple.
+- **Next.js** (`libraries/gate-next`): a native `proxy.ts`/App Router wrapper.
+
+All three must handle trusted proxy IPs, CORS, health routes, callbacks, streaming, uploads,
+WebSockets, SSR, static files, and protected APIs explicitly, and all three apply the same
+optimistic-load/timeout/allow-otp behavior defined under [Purpose](#purpose).
 
 ### Lovable
 
@@ -224,7 +356,9 @@ Use Lovable's advanced “Domain uses Cloudflare or a similar proxy” mode with
 
 ### Later adapters
 
-- Next.js/Vercel native `proxy.ts` and root sensor.
+Next.js/Vercel is one of the three initial TypeScript/Node/React wrappers above, not a later
+adapter.
+
 - WordPress early-request plugin.
 - Netlify Edge Function.
 - Customer-owned Cloudflare Worker.
@@ -237,100 +371,52 @@ Use Lovable's advanced “Domain uses Cloudflare or a similar proxy” mode with
 - `POST /v1/botblocker/browser-assessment`
 - `POST /v1/botblocker/risk-events`
 - `POST /v1/botblocker/challenges`
-- `POST /v1/botblocker/challenges/{id}/complete`
+- `GET /v1/botblocker/challenges/{challengeId}`
+- `POST /v1/botblocker/challenges/{challengeId}/complete`
 - `GET /v1/botblocker/policy/{siteId}`
 - `POST /v1/botblocker/passports/register`
 - `POST /v1/botblocker/passports/assert`
+- `POST /v1/botblocker/paid-passes/assert`
 - `POST /v1/botblocker/agent/entitlements`
+- `GET /v1/projects/{projectId}/botblocker/visitors` (project-scoped; a customer can never
+  query another project's visitors or raw events)
+- `GET/PATCH /v1/projects/{projectId}/botblocker` (site configuration, including the
+  50–2,000 ms decision timeout)
 - `GET /.well-known/powerotp-agent`
+- Admin-only: rapid-list management, decision trace, health, and policy-release routes.
 
-Mutations require idempotency, replay protection, hostname/audience binding, bounded timestamps, rate limits, and append-only audit events.
+Mutations require idempotency, replay protection, hostname/audience binding, bounded
+timestamps, rate limits, and append-only audit events. Every route not yet backed by a real
+implementation returns an explicit typed `*_unavailable` response — never a fabricated
+decision, score, or approval. The exact request/response shapes are defined in
+[Phase 1](POWEROTP_BOTBLOCKER_DEVELOPMENT_PHASES.md#phase-1--base-protocol-contracts) and
+[Phase 2](POWEROTP_BOTBLOCKER_DEVELOPMENT_PHASES.md#phase-2--decision-challenge-and-proof-contracts).
 
 ## Failure and security rules
 
-- Ordinary public content defaults to fail-open during RapidAuth failure; sensitive actions may challenge using cached policy.
+- Ordinary public content defaults to fail-open during RapidAuth failure or decision timeout —
+  the site stays open; sensitive actions opted into decision-blocking behavior may challenge
+  using cached policy instead.
 - A locally valid unexpired clearance remains usable during control-plane failure.
 - Use strict timeout, circuit breaker, last-known-good policy, signed rollback, key-rotation overlap, and emergency customer bypass.
 - Never trust arbitrary forwarded-IP headers.
 - Test direct-origin bypass, token replay, open redirect, challenge fixation, policy rollback, credential leakage, and compromised edge/policy publication.
 - Apply separate retention and decay to IP, network, device, session, account, and Passport evidence.
 - Perform privacy/legal review before cross-site reputation launch.
+- See [`THREAT_MODEL.md`](THREAT_MODEL.md#botblocker-threat-model) for the full BotBlocker
+  threat model, including the optimistic-load limitation, API-key separation, and cross-project
+  data-access controls.
 
 ## Development phases
 
-Each phase is one focused development session. A new agent must first read this document, `docs/AS_BUILT.md`, `docs/POWEROTP_BOTBLOCKER_AS_BUILT.md` when it exists, current git status, prior phase changes, and relevant tests. It must not implement later phases early.
-
-Each completed phase appends a dated entry to `docs/POWEROTP_BOTBLOCKER_AS_BUILT.md` containing:
-
-- Phase and date.
-- Outcome and architecture decisions.
-- Exact files and migrations.
-- Configuration and environment variables without secret values.
-- Tests and results.
-- Manual production/deployment steps.
-- New findings and changes to this plan.
-- Unresolved risks and next-phase prerequisites.
-
-### Phase 0 — Specification and contracts
-
-Materialize terminology, product specification, privacy/retention boundaries, trust model, SLOs, failure behavior, and complete protocol schemas. Update the threat model. Exit when token audiences/lifetimes, protected-route behavior, challenge recovery, and API semantics are unambiguous.
-
-### Phase 1 — Cryptographic token and policy foundation
-
-Implement Ed25519 signing/verification, key IDs, rotation overlap, timestamps, audiences, nonces, replay protection, the declarative policy schema/interpreter, signature verification, compatibility, last-known-good cache contract, and authorized rollback. Test forged, expired, wrong-site, replayed, downgraded, and rotated inputs. Build no edge service or platform adapter yet.
-
-### Phase 2 — Risk model and control plane
-
-Add BotBlocker site/session/device/network/event/policy collections, indexes, Valkey windows, retention/decay, kill switches, and authenticated dashboard/API operations for site credentials. Public MCP remains separate.
-
-### Phase 3 — One-region RapidAuth and real IP intelligence
-
-Build the reference decision path with real signed local datasets, central weighted scoring, signed decisions, and false-positive evaluation across VPN, CGNAT, mobile, corporate, IPv6, privacy-browser, cloud, and residential-proxy samples.
-
-### Phase 4 — TypeScript/Node/React Gate Adapter
-
-Build `gate-core`, Express reference adapter, protected challenge routes, React sensor hook, and public MCP installation documentation. Prove a sample React site's protected HTML is not reached before allow.
-
-### Phase 5 — OTP challenge orchestration
-
-Build the gate shell and existing-verification integration. Complete initial paid-tier transports and add idempotency, recovery, timeout, abuse, suppression, and spend controls. Prove end-to-end allow/challenge/return flows.
-
-### Phase 6 — Runtime Sensor
-
-Implement summarized adaptive behavior reporting, risk reassessment, token renewal, immediate challenge UX, and future request enforcement. Test accessibility, preview/prefetch decoy activations, copied profiles, deleted cookies, and automation velocity.
-
-### Phase 7 — Cloudflare global RapidAuth
-
-Port the validated reference path to Workers. Publish signed policy/IP snapshots from DigitalOcean, add queues, canaries, rollback, observability, probes, and failure controls, then measure global p50/p95/p99.
-
-### Phase 8 — Lovable/customer-Cloudflare adapter
-
-Build the reviewed customer-owned Worker template, Lovable origin flow, HTMLRewriter sensor insertion, exclusions, and public MCP instructions. Prove PowerOTP never relays customer content.
-
-### Phase 9 — Passport
-
-Build top-level redirect fallback, device registration, pairwise assertions, revocation/deletion/recovery, then Chrome/Edge and Firefox extensions. Complete browser-store and browser-storage testing.
-
-### Phase 10 — Curated agent content and prepaid access
-
-Build machine discovery, owner-authored summaries, terms, machine identity, entitlement ledger, prepaid funding, quotas, and scoped proof-of-possession credentials.
-
-### Phase 11 — x402
-
-Add Coinbase x402 into the same entitlement ledger with payment identifiers, replay safety, settlement confirmation, refunds, compliance events, and bundle/usage pricing.
-
-### Phase 12 — More adapters and launch
-
-Add adapters in demand order and complete accessibility, privacy/legal, load, disaster recovery, OTP abuse, origin bypass, false-positive, update, rollback, global probe, and runbook launch gates.
-
-## Phase handoff rules
-
-- Keep changes limited to the current phase.
-- Verify existing behavior before editing.
-- Prefer shared existing security, verification, queue, and contract patterns.
-- Keep modules focused and generally below 200–300 lines.
-- Never overwrite `.env`; document new variables and ask before changing local secret files.
-- Never add fake development or production data.
-- Update this plan when discoveries invalidate an assumption.
-- Append the BotBlocker as-built entry before declaring a phase complete.
-- Do not commit or push unless the user explicitly asks.
+The full 0–31 phase list, session-size rule, and required handoff-prompt format live only in
+[`POWEROTP_BOTBLOCKER_DEVELOPMENT_PHASES.md`](POWEROTP_BOTBLOCKER_DEVELOPMENT_PHASES.md#progressive-phases)
+so there is exactly one canonical execution order. This document does not duplicate that list;
+update it only when evidence invalidates a product/architecture assumption, and update the
+phases document when execution order or scope needs to change. General handoff rules (limit
+changes to the current phase, verify existing behavior first, prefer shared existing patterns,
+keep modules under 200–300 lines, never overwrite `.env`, never add fake data, append the
+BotBlocker as-built entry, never commit/push without explicit instruction) are defined once in
+that document's
+[Session-size and handoff rule](POWEROTP_BOTBLOCKER_DEVELOPMENT_PHASES.md#session-size-and-handoff-rule)
+section and are not repeated here.
