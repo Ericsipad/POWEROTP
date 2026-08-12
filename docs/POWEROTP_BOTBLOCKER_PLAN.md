@@ -2,6 +2,11 @@
 
 Last updated: 2026-08-07
 
+Execution is split into small, dependency-ordered fresh-session phases in
+[`POWEROTP_BOTBLOCKER_DEVELOPMENT_PHASES.md`](POWEROTP_BOTBLOCKER_DEVELOPMENT_PHASES.md).
+That document is the implementation sequence and handoff rule; this document remains the
+product and architecture specification.
+
 ## Purpose
 
 PowerOTP BotBlocker is the primary PowerOTP product: a centrally managed bot-risk gate installed in a customer's own request path. It prevents protected HTML and APIs from being served until PowerOTP returns an allow decision or the visitor completes the customer's available OTP challenge. PowerOTP does not relay the customer's normal website traffic.

@@ -1,0 +1,296 @@
+# POWEROTP BotBlocker progressive development phases
+
+This is the execution order for the architecture defined in
+[`POWEROTP_BOTBLOCKER_PLAN.md`](POWEROTP_BOTBLOCKER_PLAN.md). Ground truth for completed
+work belongs in `POWEROTP_BOTBLOCKER_AS_BUILT.md` once Phase 0 creates it, with only
+high-level architecture/deployment changes repeated in [`AS_BUILT.md`](AS_BUILT.md).
+
+## End goal
+
+BotBlocker is a customer-installed browser/request integration for React, Node,
+TypeScript, and later other platforms. It optimistically loads the customer's website,
+checks first-party clearance/Passport/PaidTokenPass proofs, gathers browser and behavior
+evidence, and asks POWEROTP for one of exactly two decisions:
+
+- `allow`: keep the site open and continuously observe.
+- `otp`: freeze the page and open the POWEROTP-hosted iframe.
+
+The first behavior report is sent after five seconds. Further reports are sent every
+30 seconds and when a partial interval ends because of navigation, page hide, or exit.
+Reports contain sanitized route paths (no query or fragment), element categories and
+explicit `data-powerotp-id` values (never clicked text or form values), mouse-directness
+metrics between clicks (never coordinate trails), scroll smoothness/speed aggregates,
+and honeypot activations. Every report is saved to the visitor session and may revise a
+previous `allow` or valid clearance to `otp`.
+
+The customer chooses a decision timeout from 50 through 2,000 ms; 200 ms is the
+recommended default. Timing out leaves the site open but does not cancel the pending
+decision. A late `otp` still opens the page lock. Network/service failure is fail-open.
+
+POWEROTP internally correlates pseudonymous fraud/security evidence across protected
+sites, while each customer can see only visitors and observations from its own projects.
+The customer's API key remains server-only. POWEROTP never receives customer page
+content, raw keystrokes, form values, raw pointer trails, or URL query strings.
+
+## Why the integration boundary is built before proprietary backends
+
+The public contract, endpoint names, browser state machine, framework wrappers, and MCP
+installation format are the compatibility boundary every customer will install. They
+must be designed first so the later blacklist, user-intelligence, scoring, OTP-policy,
+Passport, payment, billing, and Cloudflare implementations plug into one stable,
+auditable protocol instead of forcing every customer to rewrite their integration.
+
+This order does **not** permit fake production behavior. Unfinished services return
+typed unavailable responses, and wrappers use the real fail-open rule. No placeholder
+score, blacklist match, Passport approval, paid entitlement, or OTP success may be
+fabricated. The system is not activated for customers until the real backing phases and
+end-to-end acceptance tests are complete.
+
+## Session-size and handoff rule
+
+Each numbered phase is one fresh Cursor session and one independently verifiable unit.
+Normally touch no more than 3–8 closely related production modules plus tests/docs.
+If a phase would consume 20% or more of a fresh AI context, split it into lettered
+subphases before editing. Never start the next numbered phase in the same session.
+
+At every phase end:
+
+1. Run focused tests and proportionate workspace verification.
+2. Update `POWEROTP_BOTBLOCKER_AS_BUILT.md` with outcome, files, contracts,
+   configuration names, tests, deployment/manual steps, findings, and risks.
+3. Update `AS_BUILT.md` only for architecture, infrastructure, or deployment changes.
+4. Update the plans when evidence invalidates an assumption.
+5. Show git status and state commit/push/deploy status. Never commit or push without
+   explicit instruction.
+6. Print a complete, copyable fresh-session prompt for the next phase and stop.
+
+Every generated handoff prompt must include repository/path/branch/HEAD/status, first
+git checks, required docs and files, completed work, tests, deployment/manual actions,
+next scope and exclusions, unresolved user decisions, environment caveats, and no raw
+secrets or PII. End it with:
+
+> Do not start later phases in this session; finish this phase, update the as-built
+> record, and print the next fresh-session prompt.
+
+## Progressive phases
+
+### Phase 0 — Reconcile specification and threat model
+
+Update the BotBlocker plan, threat model, and Passport/legal plan for optimistic load,
+50–2,000 ms timeout, late OTP lockout, continuously revisable `allow | otp`, sanitized
+five-second/30-second telemetry, customer `/powerotp/aisummary`, internal cross-site
+fraud intelligence, and DigitalOcean-first/Cloudflare-later deployment. Create
+`POWEROTP_BOTBLOCKER_AS_BUILT.md` and a SOC 2/ISO 27001 control-status matrix.
+
+**Exit:** no contradiction remains between product, threat, privacy, Passport, and
+execution documents.
+
+### Phase 1 — Base protocol contracts
+
+Add versioned identifiers, adapter/request context, browser evidence, first/recurring/
+partial behavior reports, report sequence, decision revision, timeout, and stable error
+contracts in `libraries/contracts/src/botblocker.ts`, with boundary/prohibited-field
+tests.
+
+### Phase 2 — Decision, challenge, and proof contracts
+
+Add the only-two-outcome `allow | otp` union, challenge lifecycle, policy, clearance,
+Passport assertion, PaidTokenPass assertion, risk-event batch, and explicit unavailable
+responses. Reject unsigned clearance, browser-supplied scores, and fake valid proofs.
+
+### Phase 3 — Ed25519 signed-artifact primitive
+
+Implement canonical Ed25519 sign/verify helpers with key ID, audience, site/session,
+issued/expiry times, and nonce. Test forgery, audience, expiry, future issuance,
+canonicalization, and key mismatch. Do not reuse OTP HMAC secrets.
+
+### Phase 4 — Key rotation and replay controls
+
+Add active/previous key overlap, retirement/revocation, clock-skew bounds, and Valkey
+one-time nonce consumption. Document environment names without creating real values.
+
+### Phase 5 — Project configuration and timeout UI
+
+Add `botblockerSites`, `GET/PATCH /v1/projects/{projectId}/botblocker`, and a disabled-
+by-default dashboard panel with a numeric 50–2,000 ms timeout field and 200 ms
+recommendation. Use customer session + CSRF; activation waits for real readiness.
+
+### Phase 6 — Gate-session and intelligence persistence
+
+Define/index `gateSessions`, `userIntelligence`, `riskEvents`, and
+`botblockerChallenges`. Repeated IPs are observations, not unique identities. Encode
+approved variable TTL retention before real collection; never seed fake data.
+
+### Phase 7 — Signed policy service
+
+Add immutable `policyReleases` and `GET /v1/botblocker/policy/{siteId}` with signatures,
+ETag, compatibility, key set, timeout, sensor version, activation/expiry, last-known-
+good handling, and rollback protection. No active release means `policy_unavailable`.
+
+### Phase 8 — Complete central API surface
+
+Create permanent authenticated/rate-limited route handlers for:
+
+- `POST /v1/botblocker/rapid-auth`
+- `POST /v1/botblocker/browser-assessment`
+- `POST /v1/botblocker/risk-events`
+- `POST /v1/botblocker/challenges`
+- `GET /v1/botblocker/challenges/{challengeId}`
+- `POST /v1/botblocker/challenges/{challengeId}/complete`
+- `POST /v1/botblocker/passports/register`
+- `POST /v1/botblocker/passports/assert`
+- `POST /v1/botblocker/paid-passes/assert`
+- `POST /v1/botblocker/agent/entitlements`
+- `GET /v1/projects/{projectId}/botblocker/visitors`
+- admin rapid-list, decision trace, health, and policy-release routes
+
+Unimplemented services return typed unavailable responses, never synthetic outcomes.
+
+### Phase 9 — Framework-neutral browser gate
+
+Implement `checking`, `optimistic_allow`, `observing`, `otp_required`, `verified`, and
+`unavailable`. The timeout never aborts a pending request. Any newer signed report
+decision may transition optimistic/observing access to OTP. Implement safe returns,
+page lock, focus, and authoritative polling triggers with no API key in browser code.
+
+### Phase 10 — Continuous browser sensor
+
+Implement versioned environment evidence, first report at five seconds, recurring
+30-second reports, partial navigation/hide/exit reports, sanitized routes/clicks,
+mouse-directness and scroll-smoothness metrics, automation indicators, report ordering,
+and stale-decision handling. Prove prohibited raw data cannot be emitted.
+
+### Phase 11 — Raw Node HTTP wrapper
+
+Build the dependency-free Node 22 wrapper with local clearance verification,
+`/_powerotp/*` handlers, trusted proxy configuration, exclusions, limits, timeout,
+events, challenge polling, cookies, `/.well-known/powerotp-agent`, and the
+`/powerotp/aisummary` contract. Verify with a minimal Node fixture.
+
+### Phase 12 — Express wrapper
+
+Wrap the shared protocol in dedicated Express middleware/router and a React fixture.
+Document ordering before static/SSR/API routes and test proxy modes, streaming, uploads,
+errors-after-headers, exclusions, and WebSocket non-interference.
+
+### Phase 13 — Next.js wrapper
+
+Generate native `proxy.ts`, `app/_powerotp/*` handlers, root gate component, and
+`/powerotp/aisummary` scaffold. Test App Router navigation, server/client boundaries,
+assets, CSP, iframe behavior, runtime constraints, and absence of secrets in bundles.
+
+### Phase 14 — Public MCP generator
+
+Add BotBlocker architecture/data resources and integration/config/troubleshooting tools.
+Generate separate versioned/checksummed `node-http`, `express`, and `nextjs` source
+manifests with exact placement, env names, dashboard steps, tests, exclusions, readiness,
+and upgrades. MCP remains public, anonymous, read-only, and credential-free.
+
+### Phase 15 — Real intelligence/event ingestion
+
+Implement browser assessment and risk-event ingestion with idempotency, ordering,
+server-derived fingerprints, project scoping, retention, visitor-session reports, and
+project-only querying. Store sanitized route/click and aggregate behavior evidence; do
+not score yet.
+
+### Phase 16 — Rapid allowlist/blacklist
+
+Implement real versioned allow/blacklist entries with provenance, expiry, revocation,
+admin audit, lookup, and signed snapshots. Allowlist maps to `allow`; blacklist maps to
+`otp`; conflicts/staleness fail safely. Unknown visitors still require the next phase.
+
+### Phase 17 — Proprietary scoring
+
+After the user supplies exact weights, decay, closest-match, confidence, and threshold
+rules, score initial and every later behavior report deterministically. Store model/input
+versions and evaluate VPN, mobile, CGNAT, IPv6, privacy-browser, headless, datacenter,
+and residential-proxy cases. Split before editing if model design exceeds one session.
+
+### Phase 18 — Customer risk/OTP policy
+
+Add the 1–100 dashboard policy and score-band-to-enabled-OTP mapping, signed policy
+release, readiness/balance validation, fallback behavior, and immutable audit events.
+
+### Phase 19 — OTP orchestration
+
+Wire real OTP decisions to existing modal sessions, verification state machine, billing,
+transports, and authoritative status. Bind decision/challenge/interaction/project/
+fingerprint/expiry. Only authoritative success issues clearance; cover replay/retry/
+timeout/failure/cancel.
+
+### Phase 20 — Continuous reassessment and lockout
+
+Persist every complete/partial report, rerun scoring, return monotonic signed decision
+revisions, and reject stale responses. Any score reaching the customer's OTP threshold
+freezes the page and starts/resumes the challenge. Pause page sensing during OTP and
+resume a fresh interval after authoritative success. Clearance never disables reassessment.
+
+### Phase 21 — Passport cryptographic/storage foundation
+
+Finalize legally separated identity storage, consent/audit, device public keys, top-level
+redirect, and pairwise site assertions. Test unlinkability, revocation, expiry, device
+loss, and replay.
+
+### Phase 22 — Passport user lifecycle
+
+Offer Passport after OTP and implement registration, assertion, pause, revoke, delete,
+recovery, renewal, local fast-path integration, continuous observation, and required
+notices without exposing cross-site history.
+
+### Phase 23 — PaidTokenPass entitlement ledger
+
+Implement proof-of-possession credentials, one-time/all-sites scope, quota, expiry,
+revocation, idempotent consumption, refund/reversal model, and versioned owner terms.
+Keep machine access separate from human Passport and general abuse controls.
+
+### Phase 24 — Bot payment integration
+
+Integrate only a user-approved real payment rail/tool. Verify settlement before issuing
+entitlement; add replay/refund/failure/reconciliation and hosted iframe purchase choices.
+Client-side payment success alone never grants access.
+
+### Phase 25 — Visit metering and billing
+
+Using real gate sessions, implement idempotent monthly visitor counting and the documented
+100,000-visitor allowance/block charge at the customer's tier when visitor 100,001
+crosses the boundary. Reuse transactional balance/ledger and reporting patterns.
+
+### Phase 26 — Cloudflare edge publication
+
+Publish signed policy and rapid-list snapshots to edge storage with versions, freshness,
+revocation, canary, rollback, and probes. Keep MongoDB and synchronous third-party APIs
+out of the edge hot path.
+
+### Phase 27 — Global RapidAuth Worker
+
+Implement globally distributed auth/replay checks, edge-local known decisions, unknown
+escalation, signed responses, asynchronous event delivery, latency measurement, circuit
+breakers, DigitalOcean fallback, canary, and rollback without customer reinstall.
+
+### Phase 28 — Shopify integration
+
+Use current official Shopify capabilities and the relevant Shopify skill. Implement only
+gating surfaces Shopify actually permits, plus MCP generation and conformance tests.
+State whole-site/action exclusions accurately.
+
+### Phase 29 — Wix integration
+
+Implement the supported Wix backend/extension bridge, iframe UX, MCP instructions,
+credential separation, conformance tests, and explicit platform limitations.
+
+### Phase 30 — Additional wrappers
+
+Create one new numbered fresh-session phase per Fastify, customer Cloudflare Worker,
+Netlify, WordPress, PHP, Nginx/OpenResty, or other demanded platform. Never combine
+multiple wrappers in one AI context. Every wrapper reuses the protocol and conformance
+suite.
+
+### Phase 31 — Production hardening and launch
+
+Split into fresh subphases for load/latency, direct-origin bypass and penetration tests,
+false positives/appeal, privacy/legal/DPIA, accessibility, key compromise, backup/restore,
+disaster recovery, incident runbooks, abuse/spend/concurrency/kill switches, SOC 2/
+ISO 27001 evidence, canary cohorts, emergency bypass, rollback, and launch sign-off.
+
+**Final exit:** every launch criterion has evidence, an owner, and rollback; unresolved
+controls remain explicitly not ready.
