@@ -24,7 +24,10 @@ code yet. The only bot-related code that exists today is documented in
 (`apps/api/src/bot-signal-service.ts`, `GET
 /v1/modal-sessions/{sessionId}/ai-index-summary`) and the customer-facing "Visitors" dashboard
 panel/`GET /v1/projects/{projectId}/visitors` route, whose "Threat score" column is
-deliberately scaffolding that always reads "Coming soon."
+deliberately scaffolding that always reads "Coming soon." As of Phase 1, one library
+(`libraries/contracts/src/botblocker.ts`) exports versioned protocol/timeout/request-context/
+browser-evidence/behavior-report/decision-envelope/error contracts, but nothing yet imports or
+calls them — no route, middleware, or wrapper exists.
 
 ## Phase log
 
@@ -138,3 +141,127 @@ deployment action.
 **Phase 1 prerequisites.** None outstanding from Phase 0 — Phase 1 (Base protocol contracts)
 may start from a fresh session once this entry and the closeout below are recorded, per
 `POWEROTP_BOTBLOCKER_DEVELOPMENT_PHASES.md`.
+
+### Phase 1 — Base protocol contracts (2026-08-12)
+
+**Outcome.** Added the first BotBlocker code in the repository: a new, standalone contracts
+module (`libraries/contracts/src/botblocker.ts`) defining versioned protocol identifiers, the
+50–2,000 ms (200 ms default) decision-timeout contract, adapter/request-context types, the
+sanitized browser-evidence contract, first/recurring/partial behavior-report contracts with a
+report sequence/staleness helper, a decision-revision *envelope* (no `outcome` field — that is
+Phase 2's job), and stable typed error/unavailable-response contracts. No route, middleware,
+wrapper, or persistence was added — this phase is contracts only, exactly as scoped. Nothing in
+the rest of the codebase imports these exports yet.
+
+**Architecture decisions/clarifications recorded this phase:**
+
+- Followed the existing `libraries/contracts/src/*.ts` convention exactly: zod schemas named
+  `XxxSchema`, `as const` string-union arrays for enums, and `z.infer`-derived exported types at
+  the bottom of the file (see `verification.ts`, `projects.ts`, `nodes.ts` for the established
+  pattern this file matches).
+- Every browser-evidence-related schema (`ClickObservationSchema`, `MouseDirectnessSchema`,
+  `ScrollBehaviorSchema`, `HoneypotActivationSchema`, `BrowserEvidenceSchema`, and every
+  behavior-report schema, `RequestContextSchema`, `DecisionRevisionEnvelopeSchema`, and both
+  error/unavailable schemas) uses zod's `.strict()` so an unlisted field is rejected at parse
+  time, not just omitted from the TypeScript type — this is what makes the prohibited-field
+  tests meaningful at runtime, not only at compile time.
+- `DecisionRevisionEnvelopeSchema` mirrors the audience/nonce/issued-and-expiry-timestamp shape
+  of the existing `InteractionTokenClaimsSchema` pattern in
+  `apps/api/src/interaction-tokens.ts`, per the session's explicit instruction to reuse that
+  token-binding pattern. It deliberately has no `outcome` field; adding one before Phase 2 would
+  have fabricated a decision type this phase is not scoped to define.
+- Report ordering uses a `ReportSequenceSchema` (`gateSessionId` + monotonic `sequence` +
+  `issuedAt`) plus a pure `isStaleSequence()` helper, so "reject a sequence no newer than one
+  already applied for that session" (docs/THREAT_MODEL.md's "Continuous decision revisions") is
+  defined once and is independently unit-tested, not left as an unenforced field.
+- `BrowserEvidenceSchema` and its sub-schemas were checked field-by-field against the "Allowed"
+  column of `THREAT_MODEL.md`'s sanitized-telemetry table before being added; no field beyond
+  that table's five allowed rows (route path, click category + `data-powerotp-id`, mouse
+  directness, scroll smoothness, honeypot activations) exists in the type.
+- **Test-infrastructure fix required to make the "type-level exclusion" test requirement real**:
+  the pre-existing `libraries/contracts/tsconfig.json` excludes `src/**/*.test.ts` (needed so
+  `npm run build` doesn't emit test files into `dist`), and both `lint` and `typecheck` reused
+  that same build config — meaning **no test file in this package (including the pre-existing
+  `index.test.ts`) was ever actually type-checked by `npm run typecheck`/`npm run lint`
+  before this phase**, since `tsx` (used to *run* tests) only transpiles and never type-checks.
+  This made the required `@ts-expect-error` type-level prohibited-field tests unenforceable as
+  written. Fixed by adding `libraries/contracts/tsconfig.typecheck.json` (extends the same base
+  config, includes test files, `noEmit: true`, does not affect `dist` output) and pointing only
+  `lint`/`typecheck` (not `build`) at it. Verified the fix has teeth: temporarily removing a
+  `// @ts-expect-error` comment during development caused `npm run typecheck -w
+  @powerotp/contracts` to fail with a real `TS2353` excess-property error, then restored it
+  and confirmed a clean pass — see Tests and results below.
+- Also changed the contracts package's `test` script from a single hardcoded file
+  (`node --import tsx --test src/index.test.ts`) to a glob
+  (`node --import tsx --test "src/**/*.test.ts"`), matching the pattern `libraries/sdk-js`
+  already uses, so `botblocker.test.ts` runs alongside `index.test.ts` without either file
+  growing indefinitely (keeps both under the file-size guideline).
+
+**Exact files changed:**
+
+- `libraries/contracts/src/botblocker.ts` (new) — all Phase 1 contracts.
+- `libraries/contracts/src/botblocker.test.ts` (new) — boundary tests (49/50/2000/2001 ms),
+  prohibited-field tests (type-level `@ts-expect-error` plus runtime `safeParse` rejection),
+  behavior-report/discriminated-union tests, `isStaleSequence` tests, decision-envelope tests,
+  request-context tests, and unavailable/error-response tests.
+- `libraries/contracts/src/index.ts` (added `export * from "./botblocker.js";`).
+- `libraries/contracts/tsconfig.typecheck.json` (new) — see test-infrastructure fix above.
+- `libraries/contracts/package.json` (`lint`/`typecheck` scripts point at the new typecheck
+  config; `test` script now globs `src/**/*.test.ts` instead of naming one file).
+
+**Migrations.** None.
+
+**Configuration and environment variables.** None introduced, as expected for a contracts-only
+phase — no new environment variable exists for BotBlocker yet.
+
+**Tests and results.**
+
+- `npm run test -w @powerotp/contracts`: 43 tests / 14 suites, 0 failures (up from the
+  pre-existing suite's own count; all pre-existing tests still pass unchanged).
+- `npm run typecheck -w @powerotp/contracts` and `npm run lint -w @powerotp/contracts`: clean,
+  now actually type-checking both test files (see the test-infrastructure fix above).
+- `npm run build -w @powerotp/contracts`: clean; confirmed `dist/` contains only
+  `botblocker.js`/`botblocker.d.ts` (plus the pre-existing files) and no `.test.*` artifacts.
+- `npm run verify` (full monorepo: build + lint + test across every workspace): exit code 0,
+  zero failures anywhere, run in full before declaring this phase complete.
+
+**Manual production/deployment steps.** None. This phase shipped a library-only export with no
+consumer; there is nothing to deploy.
+
+**New findings / changes to the plan.**
+
+- The test-type-checking gap described above (test files silently never type-checked in this
+  package) pre-dates this phase and was not limited to BotBlocker code — `index.test.ts` had the
+  same exposure. It is now fixed for `libraries/contracts` specifically. Other packages
+  (`libraries/sdk-js`, `apps/api`, etc.) were not audited or changed this phase; if a future
+  phase relies on `@ts-expect-error`-style type-level tests elsewhere, check whether that
+  package's `lint`/`typecheck` scripts actually include its test files first.
+
+**Unresolved risks / open questions carried into later phases.**
+
+- The real `allow | otp` decision union, challenge/policy/clearance/Passport/PaidTokenPass
+  contracts, and rejection of unsigned clearance or browser-supplied scores are Phase 2's job —
+  none of that exists yet; `DecisionRevisionEnvelopeSchema` is an empty envelope with no outcome
+  field by design.
+- No cryptographic primitive exists yet (Phase 3) — `DecisionRevisionEnvelopeSchema`'s
+  `nonce`/`audience`/`expiresAt` fields are unsigned placeholders for what Phase 3's Ed25519
+  signing will eventually wrap.
+- `isStaleSequence()` is pure logic with no storage backing it yet — an actual "last applied
+  sequence per gate session" store arrives with Phase 6's persistence and Phase 20's continuous
+  reassessment; Phase 1 only guarantees the *comparison* is defined once and correctly, not that
+  anything durable enforces it yet.
+- Business/legal open questions in `PASSPORT_BUSINESS_AND_LEGAL_PLAN.md` section 10 remain open
+  and untouched, as instructed.
+- The SOC 2/ISO 27001 control matrix was not updated this phase: no row's actual implementation
+  status changed (A.8.24 cryptography correctly stays "Planned" since no signing exists yet; the
+  secure-development-lifecycle rows already reflected the process itself, not this specific
+  artifact).
+
+**Phase 2 prerequisites.** None outstanding — Phase 2 (Decision, challenge, and proof contracts)
+may start from a fresh session once this entry is recorded. Phase 2 should extend
+`libraries/contracts/src/botblocker.ts` (or add a sibling file re-exported from `index.ts`) with
+the `allow | otp` union, challenge lifecycle, policy, clearance, Passport assertion,
+PaidTokenPass assertion, risk-event batch, and explicit unavailable responses, reusing
+`BotBlockerProtocolVersionSchema`, `ReportSequenceSchema`/`isStaleSequence`,
+`DecisionRevisionEnvelopeSchema`, and the `BotBlockerUnavailableResponseSchema`/
+`BotBlockerErrorResponseSchema` shapes already defined here rather than duplicating them.

@@ -1,5 +1,6 @@
 export * from "./auth.js";
 export * from "./billing.js";
+export * from "./botblocker.js";
 export * from "./challenges.js";
 export * from "./modal-sessions.js";
 export * from "./nodes.js";
