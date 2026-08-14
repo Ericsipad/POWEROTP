@@ -6,6 +6,10 @@ export interface BotBlockerSiteDocument {
   customerId: string;
   enabled: boolean;
   decisionTimeoutMs: number;
+  /** Atomic monotonic publication head. Releases remain append-only; this
+   * pointer prevents concurrent publication from inserting a rollback. */
+  latestPolicyVersion?: number;
+  latestPolicyReleaseId?: string;
   createdAt: Date;
   updatedAt: Date;
 }

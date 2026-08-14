@@ -2,6 +2,9 @@ import { createAlertQueue, createAlertWorker, scheduleAlertChecks } from "@power
 import { AuthService } from "@powerotp/api/auth-service.js";
 import { BalanceService } from "@powerotp/api/balance-service.js";
 import { BillingChargeService } from "@powerotp/api/billing-charge-service.js";
+import { createBotBlockerKeyRing } from "@powerotp/api/botblocker-config.js";
+import { BotBlockerPolicyPersistence } from "@powerotp/api/botblocker-policy-persistence.js";
+import { BotBlockerPolicyService } from "@powerotp/api/botblocker-policy-service.js";
 import { BotBlockerSiteService } from "@powerotp/api/botblocker-site-service.js";
 import {
   createBillingDailyChargeQueue,
@@ -36,6 +39,7 @@ export interface ServerContext {
   auth: AuthService;
   projects: ProjectService;
   botBlockerSites: BotBlockerSiteService;
+  botBlockerPolicy: BotBlockerPolicyService;
   verifications: VerificationService;
   nodes: NodeService;
   challenges: ChallengeService;
@@ -110,6 +114,10 @@ async function buildServerContext(): Promise<ServerContext> {
 
   const projects = new ProjectService(dataStores.db, config, verifications);
   const botBlockerSites = new BotBlockerSiteService(dataStores.db);
+  const botBlockerPolicy = new BotBlockerPolicyService(
+    new BotBlockerPolicyPersistence(dataStores.db, dataStores.client),
+    createBotBlockerKeyRing(config),
+  );
   const nodes = new NodeService(dataStores.db, config);
   const modalSessions = new ModalSessionService(dataStores.db);
 
@@ -145,6 +153,7 @@ async function buildServerContext(): Promise<ServerContext> {
     auth,
     projects,
     botBlockerSites,
+    botBlockerPolicy,
     verifications,
     nodes,
     challenges,

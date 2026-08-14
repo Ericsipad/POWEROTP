@@ -926,3 +926,142 @@ must add immutable `policyReleases` and signed `GET /v1/botblocker/policy/{siteI
 including ETag, compatibility, active/expiry windows, key set, last-known-good handling, and
 rollback protection. It must not activate customer traffic, add RapidAuth/browser ingestion,
 perform intelligence matching/scoring, orchestrate OTP, or begin CleanDataPage work.
+
+## 2026-08-13 — Phase 7: Signed policy service
+
+**Outcome.** Complete in code and intentionally inactive in production. Added immutable,
+customer/project/site-scoped signed policy persistence, an internal publication service using
+the existing BotBlocker Ed25519 trust domain, and public
+`GET /v1/botblocker/policy/{siteId}` delivery. The route returns a verified active release and
+bounded decision-timeout metadata, supports strong ETags and conditional `304` responses, and
+returns typed `policy_unavailable` when no valid active release can be served. No production
+key, release, customer activation, deployment, fake policy, score, dataset, or risk weight was
+created.
+
+**Exact files added/changed:**
+
+- `libraries/contracts/src/botblocker-policy-persistence.ts` (new)
+- `libraries/contracts/src/botblocker-policy-persistence.test.ts` (new)
+- `libraries/contracts/src/index.ts`
+- `apps/api/src/botblocker-policy-persistence.ts` (new)
+- `apps/api/src/botblocker-policy-persistence.test.ts` (new)
+- `apps/api/src/botblocker-policy-service.ts` (new)
+- `apps/api/src/botblocker-policy-service.test.ts` (new)
+- `apps/api/src/botblocker-site-persistence.ts`
+- `apps/api/src/persistence.ts`
+- `apps/web/lib/botblocker-policy-http.ts` (new)
+- `apps/web/lib/http-etag.ts` (new)
+- `apps/web/lib/server-context.ts`
+- `apps/web/app/v1/botblocker/policy/[siteId]/route.ts` (new)
+- `apps/web/app/v1/botblocker/policy/[siteId]/route.test.ts` (new)
+- `docs/POWEROTP_BOTBLOCKER_SOC2_ISO27001_CONTROL_MATRIX.md`
+- `docs/POWEROTP_BOTBLOCKER_AS_BUILT.md`
+
+**Contracts and persistence.**
+
+- `PolicyReleaseRecordSchema` stores an opaque server-generated `bpr_*` ID, explicit
+  `customerId`, `projectId`, and `siteId`, duplicated query metadata (`policyVersion`,
+  `protocolVersion`, activation, expiry, and issuance timestamps), the existing strict
+  `SignedBotBlockerPolicyRelease`, and `createdAt`.
+- Contract refinements require every duplicated field, site binding, and release audience to
+  match the signed authority. The response contract contains only the signed release and the
+  existing bounded `decisionTimeoutMs`; the timeout remains a UX bound, not a security
+  decision.
+- `policyReleases` is append-only. There is no update or delete API. Its unique index is
+  `{ customerId, projectId, siteId, policyVersion }`; active selection uses
+  `{ customerId, projectId, siteId, policyVersion, activatesAt }`.
+- `botblockerSites.latestPolicyVersion` and `latestPolicyReleaseId` form the mutable publication
+  head. A MongoDB transaction conditionally advances that head only when the candidate version
+  is greater, then inserts the immutable release in the same transaction. Equal, older, and
+  cross-scope publications cannot insert a release.
+- `ensureIndexes()` creates the two `policyReleases` indexes during normal application startup.
+  No TTL applies: signed policy publications are immutable control records, not Phase 6
+  behavioral-retention data.
+
+**Signing, selection, and HTTP behavior.**
+
+- Publication accepts an unsigned strict `BotBlockerPolicy`, never a caller signature. It
+  resolves the authoritative site scope, requires a reference to the configured active
+  verification key, creates a server nonce, signs with `signBotBlockerPolicyRelease()`,
+  self-verifies with `verifyBotBlockerPolicyRelease()`, and then performs the transactional
+  monotonic insert.
+- The canonical policy audience is the public `siteId`. Fetch verification requires both that
+  audience and the path/site binding, uses the configured active/previous verification-key
+  ring and bounded skew, and re-verifies the stored signature before every response. Private
+  key material is never persisted or returned.
+- Protocol compatibility remains strict through the existing protocol-version literal.
+  Sensor version and verification-key references remain inside the signed policy. The owning
+  site's bounded decision timeout is delivered beside it.
+- Selection chooses the greatest policy version whose activation time has arrived. A newer
+  future release does not displace the current last-known-good-compatible release. Once a
+  newer release has activated, an expired, malformed, incompatible, wrongly bound, revoked-key,
+  or signature-invalid newest release yields `policy_unavailable`; the server never falls back
+  to an older version. Future adapters may continue using their own still-valid cached
+  last-known-good release.
+- A disabled site returns `policy_unavailable`. `enabled: true` is also insufficient by itself:
+  a configured key ring and valid active immutable release are required, and no production
+  readiness or traffic activation is implied.
+- Available responses use a strong SHA-256-derived ETag covering the signing key ID, signature,
+  and decision timeout. Exact, weak, list, and wildcard `If-None-Match` validators produce
+  bodyless `304` responses with ETag/cache headers. Unknown sites return typed `unknown_site`
+  with `404`; absent/invalid active policy returns typed `policy_unavailable` with `503`.
+  The existing route wrapper adds a correlation ID to every outcome.
+
+**Configuration names.** No configuration field was added. The service consumes the existing
+`BOTBLOCKER_ED25519_ACTIVE_KEY_ID`,
+`BOTBLOCKER_ED25519_ACTIVE_PRIVATE_KEY_PKCS8_BASE64`,
+`BOTBLOCKER_ED25519_PREVIOUS_KEY_ID`,
+`BOTBLOCKER_ED25519_PREVIOUS_PUBLIC_KEY_SPKI_BASE64`,
+`BOTBLOCKER_ED25519_PREVIOUS_VERIFY_UNTIL_MS`,
+`BOTBLOCKER_ED25519_REVOKED_KEY_IDS`, and `BOTBLOCKER_CLOCK_SKEW_MS` fields. No value was read,
+printed, written, or documented.
+
+**Tests and results.**
+
+- `@powerotp/contracts`: 138 tests / 35 suites, 0 failures. New tests cover strict scoped
+  persistence, signed/query metadata agreement, audience/site binding, unknown-field rejection,
+  and bounded timeout delivery.
+- `@powerotp/api`: 187 tests / 51 suites, 0 failures. New tests cover immutable/indexed
+  persistence, atomic equal/older rejection, cross-project selection, ephemeral-key signing,
+  tampering, wrong audience/site, protocol mismatch, future activation, exact expiry, version
+  regression, disabled sites, verification-key references, last-known-good-compatible
+  selection, rollback refusal, unavailable behavior, and ETag changes.
+- `@powerotp/web`: 5 tests / 2 suites, 0 failures. New tests cover exact/weak/list/wildcard ETag
+  matching and the `200`/`304`/`404`/`503` bodies and cache headers.
+- `npm run verify`: passed, including all workspace build/lint/test steps and the Next.js
+  production route build for `/v1/botblocker/policy/[siteId]`. No OneDrive retry was needed.
+- `npm audit`: 0 vulnerabilities. `git diff --check`: clean.
+
+**Manual/migration/deployment steps.** No one-off or remote MongoDB migration is required.
+Normal startup creates the indexes; publication uses the same transaction-capable MongoDB
+deployment already required by platform balance operations. No collection was seeded. No
+DigitalOcean setting, signing key, release, production database, customer configuration, or
+deployment was changed. A future operator must configure a real BotBlocker key through the
+existing secret-management path and publish through the authenticated Phase 8 administration
+surface before any release can exist; those actions were deliberately not performed here.
+
+**Findings and unresolved risks.**
+
+- The service-level publication primitive is intentionally not an HTTP surface. Phase 8 must
+  add authenticated, authorized, audited admin release-management routes without accepting
+  caller signatures or allowing in-place release edits.
+- Unit tests exercise transactional outcomes with a MongoDB-compatible fake; no remote
+  transaction or production database mutation was performed in this phase.
+- Adapter-side schema/signature verification, ETag caching, last-known-good storage, and local
+  rollback refusal remain wrapper work in Phases 11–13. The Phase 7 server behavior is designed
+  so those adapters can fail safely without a server-side downgrade.
+- No release exists. Absent keys/releases or a disabled site return `policy_unavailable`; this
+  is absence of an operational recommendation, not a block decision. Future customer adapters
+  must fail open for ordinary website access, and the customer's integration retains final
+  control of its page. The new route does not make `enabled: true` production-ready.
+- No RapidAuth, browser assessment, risk-event ingestion, intelligence matching/scoring,
+  sensor, gate shell, middleware, OTP orchestration, Passport, PaidTokenPass, billing,
+  metering, or CleanDataPage behavior was added.
+
+**Phase 8 prerequisites.** Build the remaining central API surface and authenticated policy
+release administration against these contracts and persistence boundaries. Reuse the existing
+correlation-ID/error patterns; require customer/project/site ownership or platform-admin
+authorization as applicable; return typed unavailable responses for unbacked services; never
+fabricate decisions, scores, challenge success, entitlements, or release signatures. Phase 8
+must not activate customer traffic, implement adapters/sensors/scoring/real ingestion, expose
+private signing material, reuse OTP secrets, or begin CleanDataPage work.

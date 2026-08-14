@@ -4,6 +4,7 @@ export * from "./botblocker.js";
 export * from "./botblocker-challenge.js";
 export * from "./botblocker-clearance.js";
 export * from "./botblocker-policy.js";
+export * from "./botblocker-policy-persistence.js";
 export * from "./botblocker-persistence.js";
 export * from "./botblocker-proofs.js";
 export * from "./botblocker-signing.js";
