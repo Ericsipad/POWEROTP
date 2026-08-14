@@ -42,6 +42,24 @@ and do not create a repository `.env` file.
 
 - `MONGODB_URI`: MongoDB Atlas TLS connection string
 - `VALKEY_URL`: authenticated `rediss://` connection string
+- `BOTBLOCKER_ED25519_ACTIVE_KEY_ID` /
+  `BOTBLOCKER_ED25519_ACTIVE_PRIVATE_KEY_PKCS8_BASE64`: optional until BotBlocker is
+  activated, but required together. The ID is 1–128 characters. The private key is an
+  Ed25519 PKCS#8 DER object encoded as canonical base64 and remains server-only; it must
+  be independent from every OTP HMAC, AES, password, API-key, and interaction-token
+  secret.
+- `BOTBLOCKER_ED25519_PREVIOUS_KEY_ID` /
+  `BOTBLOCKER_ED25519_PREVIOUS_PUBLIC_KEY_SPKI_BASE64` /
+  `BOTBLOCKER_ED25519_PREVIOUS_VERIFY_UNTIL_MS`: optional rotation-overlap group, required
+  all together when used. The previous key contains public SPKI DER only (canonical
+  base64), and the deadline is a positive Unix timestamp in milliseconds. Verification
+  rejects that key at the exact deadline.
+- `BOTBLOCKER_ED25519_REVOKED_KEY_IDS`: optional comma-separated key IDs with no spaces.
+  Revocation overrides an unexpired previous-key overlap immediately. The active key ID
+  cannot appear in this list; replace the active key first during incident rotation.
+- `BOTBLOCKER_CLOCK_SKEW_MS`: optional integer from `0` through `300000`; defaults to `0`,
+  preserving zero implicit skew. Configure the smallest operationally justified value.
+  It applies symmetrically to future issuance and expiry validation.
 - `INTERACTION_TOKEN_SECRET`: at least 32 random bytes
 - `CONFIG_ENCRYPTION_KEY`: at least 32 random bytes, independent from the token secret
 - `SESSION_HASH_SECRET`: at least 32 random bytes, independent from other secrets

@@ -131,6 +131,8 @@ in [`POWEROTP_BOTBLOCKER_AS_BUILT.md`](POWEROTP_BOTBLOCKER_AS_BUILT.md) says so.
 - Passport identity records, per-client pairwise pseudonyms, and the internal pepper/derivation
   key that produces them (see
   [`PASSPORT_BUSINESS_AND_LEGAL_PLAN.md`](PASSPORT_BUSINESS_AND_LEGAL_PLAN.md)).
+- Customer-authored CleanDataPage content/configuration, short-lived viewing tokens,
+  PaidTokenPass exchanges, and Ad Revenue accounting evidence.
 
 ### Additional trust boundaries
 
@@ -139,6 +141,9 @@ in [`POWEROTP_BOTBLOCKER_AS_BUILT.md`](POWEROTP_BOTBLOCKER_AS_BUILT.md) says so.
 11. Customer server-side Gate Adapter (raw Node HTTP, Express, or Next.js wrapper) to the
     customer's own trusted proxy/load balancer.
 12. RapidAuth Global Edge (Cloudflare Workers, later) to the DigitalOcean control plane.
+13. Suspected agent/bot in the hosted OTP iframe to the PowerOTP-hosted CleanDataPage token
+    exchange and viewing surface.
+14. Customer dashboard to project-scoped CleanDataPage configuration/content storage.
 
 ### Optimistic-load limitation
 
@@ -275,6 +280,30 @@ impact — they cannot eliminate it:
   Phase 15/16 ship.
 - No API ever accepts a caller-supplied `projectId` without verifying the authenticated
   caller's ownership of that project first.
+
+### CleanDataPage access, content, and revenue integrity
+
+- A CleanDataPage URL identifies a project/page but authorizes nothing. Every request requires
+  a short-lived token bound to the exact project, page, audience, requesting session, nonce,
+  issuance, and expiry; tokens are not placed in URLs, referrers, analytics, or logs.
+- Free access still receives a scoped token and remains rate/abuse limited. Paid access requires
+  a server-verified, atomically consumed PaidTokenPass entitlement. Client-declared payment,
+  iframe rendering, a click, or possession of a serial number never proves entitlement.
+- Token issuance and use fail closed on replay-store failure, expiry, page disablement,
+  cross-project/page mismatch, paid reversal, or entitlement-consumption failure. Disabling a
+  page must invalidate access server-side rather than waiting only for token expiry.
+- Customer-authored titles/content are stored input from an untrusted tenant. Management APIs
+  enforce project ownership; hosted rendering applies schema/type/size limits, output encoding,
+  restrictive CSP, and no arbitrary script execution. Cross-tenant isolation tests cover both
+  management and hosted reads.
+- The Ad Revenue toggle makes an offer eligible for display in the automated-access lane; it
+  does not weaken OTP, create a third decision, or grant access. Revenue qualification uses
+  server-side impressions, accepted token exchanges, qualified visits, and reversal/fraud
+  records. Client-reported clicks alone are untrusted, and self-click, replay, automation, and
+  customer/visitor collusion are explicit abuse cases.
+- Prices use a validated currency plus decimal-string or integer-minor-unit representation,
+  never binary floating point. Price/content revisions are versioned so an access exchange is
+  auditable against the exact terms accepted.
 
 ### Sanitized telemetry and prohibited data
 

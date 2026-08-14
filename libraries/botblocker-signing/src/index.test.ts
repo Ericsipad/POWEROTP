@@ -10,6 +10,8 @@ import type {
 import {
   signBotBlockerPolicyRelease,
   signSiteClearance,
+  type BotBlockerActiveSigningKey,
+  type BotBlockerVerificationKeySet,
   verifyBotBlockerPolicyRelease,
   verifySiteClearance,
 } from "./index.js";
@@ -19,6 +21,20 @@ const KEY_ID = "key_0000000000000001";
 
 function keys() {
   return generateKeyPairSync("ed25519");
+}
+
+function signingKey(
+  privateKey: ReturnType<typeof keys>["privateKey"],
+  keyId = KEY_ID,
+): BotBlockerActiveSigningKey {
+  return { keyId, privateKey };
+}
+
+function verificationKeys(
+  publicKey: ReturnType<typeof keys>["publicKey"],
+  keyId = KEY_ID,
+): BotBlockerVerificationKeySet {
+  return { active: { keyId, publicKey } };
 }
 
 function clearance(
@@ -65,7 +81,7 @@ function verifyClearance(
 ) {
   return verifySiteClearance({
     clearance: signed,
-    publicKeys: { [KEY_ID]: publicKey },
+    verificationKeys: verificationKeys(publicKey),
     expectedAudience: "https://customer.example",
     expectedSiteId: "site_0123456789abcdef",
     expectedGateSessionId: "gate_session_0123456789",
@@ -76,14 +92,14 @@ function verifyClearance(
 describe("site clearance Ed25519 signing", () => {
   it("signs and verifies a correctly bound clearance", () => {
     const { privateKey, publicKey } = keys();
-    const signed = signSiteClearance(clearance(), KEY_ID, privateKey);
+    const signed = signSiteClearance(clearance(), signingKey(privateKey));
 
     assert.equal(verifyClearance(signed, publicKey).ok, true);
   });
 
   it("rejects forgery and malformed signatures", () => {
     const { privateKey, publicKey } = keys();
-    const signed = signSiteClearance(clearance(), KEY_ID, privateKey);
+    const signed = signSiteClearance(clearance(), signingKey(privateKey));
 
     const tampered = { ...signed, nonce: "nonce_forged_1234567890" };
     const forgedResult = verifyClearance(tampered, publicKey);
@@ -97,11 +113,11 @@ describe("site clearance Ed25519 signing", () => {
 
   it("rejects audience, site, and session mismatches", () => {
     const { privateKey, publicKey } = keys();
-    const signed = signSiteClearance(clearance(), KEY_ID, privateKey);
+    const signed = signSiteClearance(clearance(), signingKey(privateKey));
 
     const audience = verifySiteClearance({
       clearance: signed,
-      publicKeys: { [KEY_ID]: publicKey },
+      verificationKeys: verificationKeys(publicKey),
       expectedAudience: "https://other.example",
       expectedSiteId: signed.siteId,
       expectedGateSessionId: signed.gateSessionId,
@@ -112,7 +128,7 @@ describe("site clearance Ed25519 signing", () => {
 
     const site = verifySiteClearance({
       clearance: signed,
-      publicKeys: { [KEY_ID]: publicKey },
+      verificationKeys: verificationKeys(publicKey),
       expectedAudience: signed.audience,
       expectedSiteId: "site_fedcba9876543210",
       expectedGateSessionId: signed.gateSessionId,
@@ -122,7 +138,7 @@ describe("site clearance Ed25519 signing", () => {
 
     const session = verifySiteClearance({
       clearance: signed,
-      publicKeys: { [KEY_ID]: publicKey },
+      verificationKeys: verificationKeys(publicKey),
       expectedAudience: signed.audience,
       expectedSiteId: signed.siteId,
       expectedGateSessionId: "gate_session_9876543210",
@@ -133,15 +149,14 @@ describe("site clearance Ed25519 signing", () => {
 
   it("rejects expiry and issuance in the future", () => {
     const { privateKey, publicKey } = keys();
-    const signed = signSiteClearance(clearance(), KEY_ID, privateKey);
+    const signed = signSiteClearance(clearance(), signingKey(privateKey));
     const expired = verifyClearance(signed, publicKey, signed.expiresAt);
     assert.equal(expired.ok, false);
     if (!expired.ok) assert.equal(expired.code, "expired");
 
     const future = signSiteClearance(
       clearance({ issuedAt: NOW + 1, expiresAt: NOW + 180_000 }),
-      KEY_ID,
-      privateKey,
+      signingKey(privateKey),
     );
     const futureResult = verifyClearance(future, publicKey);
     assert.equal(futureResult.ok, false);
@@ -151,8 +166,8 @@ describe("site clearance Ed25519 signing", () => {
   it("is deterministic and rejects a mismatched key", () => {
     const signer = keys();
     const other = keys();
-    const first = signSiteClearance(clearance(), KEY_ID, signer.privateKey);
-    const second = signSiteClearance(clearance(), KEY_ID, signer.privateKey);
+    const first = signSiteClearance(clearance(), signingKey(signer.privateKey));
+    const second = signSiteClearance(clearance(), signingKey(signer.privateKey));
     assert.equal(first.signature, second.signature);
 
     const mismatch = verifyClearance(first, other.publicKey);
@@ -166,14 +181,13 @@ describe("policy release Ed25519 signing", () => {
     const { privateKey, publicKey } = keys();
     const release = signBotBlockerPolicyRelease({
       policy: policy(),
-      keyId: KEY_ID,
       audience: "https://customer.example",
       nonce: "nonce_0123456789abcdef",
       issuedAt: NOW,
-      privateKey,
+      signingKey: signingKey(privateKey),
     });
     const options = {
-      publicKeys: { [KEY_ID]: publicKey },
+      verificationKeys: verificationKeys(publicKey),
       expectedAudience: release.audience,
       expectedSiteId: release.policy.siteId,
       now: NOW,
@@ -194,15 +208,14 @@ describe("policy release Ed25519 signing", () => {
     const { privateKey, publicKey } = keys();
     const release = signBotBlockerPolicyRelease({
       policy: policy(),
-      keyId: KEY_ID,
       audience: "https://customer.example",
       nonce: "nonce_0123456789abcdef",
       issuedAt: NOW,
-      privateKey,
+      signingKey: signingKey(privateKey),
     });
     const result = verifyBotBlockerPolicyRelease({
       release: { ...release, keyId: "key_unknown_00000001" },
-      publicKeys: { [KEY_ID]: publicKey },
+      verificationKeys: verificationKeys(publicKey),
       expectedAudience: release.audience,
       expectedSiteId: release.policy.siteId,
       now: NOW,

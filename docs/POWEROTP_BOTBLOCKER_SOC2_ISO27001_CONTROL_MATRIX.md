@@ -69,15 +69,15 @@ Update this matrix's status column in the same phase that changes it — never m
 | A.5.34 | Privacy and protection of PII | Partially implemented | Sanitization and retention design exists; real enforcement is Phase 6/10/15 |
 | A.8.2 | Privileged access rights | Planned | Admin BotBlocker routes (Phase 8) will require the same IP-allowlisted, short-session admin pattern documented in `THREAT_MODEL.md`'s OTP section |
 | A.8.5 | Secure authentication | Partially implemented | Phase 3 implements strict signed-clearance contracts and canonical Ed25519 sign/verify helpers with audience, site, session, nonce, issuance, and expiry binding; no gate consumes them until later phases |
-| A.8.9 | Configuration management | Not applicable yet | No BotBlocker service configuration exists to manage |
+| A.8.9 | Configuration management | Partially implemented | Phase 4 adds validated, independently named active/previous/revoked Ed25519 key and bounded-skew configuration; no BotBlocker service consumes it until later phases |
 | A.8.16 | Monitoring activities | Planned | Phase 8 onward |
 | A.8.20 | Networks security | Implemented | Existing App Platform network posture (no public ARI/AMI/DB ports, etc. — see `THREAT_MODEL.md`'s "Node compromise" section) already applies; nothing BotBlocker-specific changes it |
 | A.8.23 | Web filtering | Not applicable | BotBlocker does not filter outbound web traffic for its own users |
-| A.8.24 | Use of cryptography | Partially implemented | Phase 3 implements and tests the separate BotBlocker Ed25519 trust domain; production key configuration, rotation, revocation, and replay consumption remain Phase 4 |
+| A.8.24 | Use of cryptography | Partially implemented | Phase 3 implements the separate Ed25519 trust domain; Phase 4 adds active/previous overlap, exact retirement, immediate revocation, bounded skew, validated DER key configuration, and atomic nonce consumption, but no deployed BotBlocker route consumes them yet |
 | A.8.25 | Secure development lifecycle | Implemented | The phase-gated development process itself (fresh-session scoping, mandatory tests before phase closeout, explicit unavailable responses instead of fabricated behavior) is the SDLC control, effective from Phase 0 |
 | A.8.26 | Application security requirements | Partially implemented | Captured in `THREAT_MODEL.md#botblocker-threat-model`; enforcement is per-phase as each surface is built |
 | A.8.28 | Secure coding | Implemented | Existing repository conventions (input validation via schemas, no secrets in browser bundles, parameterized queries) apply to BotBlocker code from the first line written |
-| A.8.29 | Security testing in development and acceptance | Planned | Each phase's exit criteria in `POWEROTP_BOTBLOCKER_DEVELOPMENT_PHASES.md` requires "focused tests and proportionate workspace verification" before closeout — this is the mechanism, effective from Phase 1 onward |
+| A.8.29 | Security testing in development and acceptance | Partially implemented | Phase 1–4 unit suites now exercise contract boundaries, signature forgery/binding, key lifecycle/skew boundaries, concurrent nonce replay, and fail-closed storage errors; deployed end-to-end acceptance and penetration testing remain Phase 31 |
 | A.8.32 | Change management | Implemented | Same as SOC 2 CC8.1 above |
 
 ## What this matrix intentionally does not claim

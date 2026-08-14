@@ -24,12 +24,13 @@ code yet. The only bot-related code that exists today is documented in
 (`apps/api/src/bot-signal-service.ts`, `GET
 /v1/modal-sessions/{sessionId}/ai-index-summary`) and the customer-facing "Visitors" dashboard
 panel/`GET /v1/projects/{projectId}/visitors` route, whose "Threat score" column is
-deliberately scaffolding that always reads "Coming soon." As of Phase 2, `libraries/contracts`
-exports the full BotBlocker wire-protocol contract surface — versioned protocol/timeout/
-request-context/browser-evidence/behavior-report contracts (Phase 1), the real `allow | otp`
-decision outcome, challenge lifecycle, unsigned clearance, policy, Passport assertion,
-PaidTokenPass assertion, and risk-event batch contracts (Phase 2) — but nothing yet imports or
-calls them: no route, middleware, wrapper, signing, or persistence exists.
+deliberately scaffolding that always reads "Coming soon." `libraries/contracts` exports the
+Phase 1–3 BotBlocker wire and signed-artifact contracts. The server-only
+`@powerotp/botblocker-signing` workspace implements canonical Ed25519 signing/verification,
+active/previous key lifecycle, bounded skew, and atomic Valkey nonce consumption (Phases 3–4).
+The API validates optional independent key configuration and exposes a production Valkey
+adapter, but no route, middleware, wrapper, policy publisher, risk engine, customer activation,
+or persistence beyond bounded-TTL replay markers consumes any of it yet.
 
 ## Phase log
 
@@ -543,3 +544,143 @@ deployment, commit, or push was performed.
   material, without creating or documenting real values.
 - Keep all HTTP routes, persistence beyond nonce replay, middleware, risk scoring, Passport,
   PaidTokenPass, and customer wrappers in their assigned later phases.
+
+## 2026-08-13 — Phase 4: Key rotation and replay controls
+
+**Outcome.** Complete. The server-only `@powerotp/botblocker-signing` workspace now signs
+through an explicit active key, verifies active and time-bounded previous public keys, retires
+the previous key at the exact overlap deadline, and lets revocation override overlap
+immediately. Artifact verification has a validated `0`–`300000` ms clock-skew option while
+preserving Phase 3's zero-implicit-skew default. A production-compatible Valkey adapter consumes
+trusted nonces atomically with one `SET NX PX` operation and fails closed on storage errors.
+The API validates independent BotBlocker key configuration at startup but remains deliberately
+unconfigured and inactive when no active key is supplied. No route, policy publisher,
+middleware, production key, or deployment was added.
+
+The product plan was also amended, at the user's request, for a later PowerOTP-hosted
+CleanDataPage feature. That documentation is planned behavior only: no CleanDataPage contract,
+storage, route, token, dashboard control, payment exchange, ad/revenue logic, or customer
+content exists yet. Its implementation is split into future Phases 24A–24C so none of it was
+implemented early in Phase 4.
+
+**Implemented behavior and security decisions.**
+
+- `BotBlockerKeyRing` keeps the active private signing key separate from the public-only
+  verification set. Configuration derives the active public key from its private key; the
+  previous key accepts public SPKI material only.
+- The previous key verifies strictly before `verifyUntil`; equality means retired. Revoked key
+  IDs are rejected before active/previous lookup, so emergency revocation overrides an overlap
+  window. Startup rejects an active key listed as revoked and rejects equal active/previous IDs.
+- Active private material must parse as Ed25519 PKCS#8 DER and previous public material as
+  Ed25519 SPKI DER. Both environment encodings are canonical base64. Tests generate all key
+  material ephemerally in memory.
+- Artifact time validation accepts issuance through `now + clockSkewMs` and treats expiry at
+  `now - clockSkewMs` as expired. Omitted skew remains exactly zero; invalid or excessive
+  bounds reject verification.
+- Replay keys hash artifact type, site, audience, optional session, and nonce under a versioned
+  Valkey prefix, preventing raw nonce disclosure and cross-site/cross-artifact collisions.
+  Storage TTL extends through the explicit skew-adjusted validity boundary.
+- Replay consumption returns `replay_detected` when `SET NX` loses, `expired` before writing an
+  already-invalid nonce, and `storage_unavailable` on a Valkey exception. The latter is a
+  rejection, never a fail-open success.
+- `apps/api/src/botblocker-replay.ts` passes the existing authenticated ioredis client directly
+  to the atomic consumer; TypeScript verifies the production client implements the required
+  `SET key value PX ttl NX` interface. Test fakes exist only in test files.
+
+**Exact files added/changed for Phase 4 implementation:**
+
+- `libraries/botblocker-signing/src/key-ring.ts` (new)
+- `libraries/botblocker-signing/src/key-ring.test.ts` (new)
+- `libraries/botblocker-signing/src/replay.ts` (new)
+- `libraries/botblocker-signing/src/replay.test.ts` (new)
+- `libraries/botblocker-signing/src/index.ts`
+- `libraries/botblocker-signing/src/index.test.ts`
+- `apps/api/src/botblocker-config.ts` (new)
+- `apps/api/src/botblocker-config.test.ts` (new)
+- `apps/api/src/botblocker-replay.ts` (new)
+- `apps/api/src/config.ts`
+- `apps/api/src/config.test.ts`
+- `apps/api/package.json`
+- `package-lock.json`
+- `infrastructure/app-platform/README.md`
+- `docs/POWEROTP_BOTBLOCKER_SOC2_ISO27001_CONTROL_MATRIX.md`
+- `docs/POWEROTP_BOTBLOCKER_AS_BUILT.md`
+
+**Planning-only files changed for CleanDataPage:**
+
+- `docs/POWEROTP_BOTBLOCKER_PLAN.md`
+- `docs/POWEROTP_BOTBLOCKER_DEVELOPMENT_PHASES.md`
+- `docs/THREAT_MODEL.md`
+
+**Migrations.** None. Valkey stores only bounded-TTL nonce markers and requires no durable
+schema migration. MongoDB was not used or changed.
+
+**Configuration names and formats (no values created):**
+
+- `BOTBLOCKER_ED25519_ACTIVE_KEY_ID`: 1–128-character key ID.
+- `BOTBLOCKER_ED25519_ACTIVE_PRIVATE_KEY_PKCS8_BASE64`: canonical base64 of an Ed25519 PKCS#8
+  DER private key; server-only and required with the active key ID.
+- `BOTBLOCKER_ED25519_PREVIOUS_KEY_ID`: 1–128-character previous key ID, distinct from active.
+- `BOTBLOCKER_ED25519_PREVIOUS_PUBLIC_KEY_SPKI_BASE64`: canonical base64 of the previous
+  Ed25519 public key in SPKI DER; no previous private key is accepted.
+- `BOTBLOCKER_ED25519_PREVIOUS_VERIFY_UNTIL_MS`: positive Unix timestamp in milliseconds; all
+  three previous-key fields are required together.
+- `BOTBLOCKER_ED25519_REVOKED_KEY_IDS`: optional comma-separated key IDs without spaces.
+- `BOTBLOCKER_CLOCK_SKEW_MS`: optional integer `0`–`300000`, default `0`.
+- Existing `VALKEY_URL` supplies the authenticated `rediss://` client. No new replay-store
+  credential was introduced.
+
+These names are independent from `INTERACTION_TOKEN_SECRET`, `CONFIG_ENCRYPTION_KEY`,
+`SESSION_HASH_SECRET`, `API_KEY_HASH_SECRET`, `PASSWORD_PEPPER`, `PII_ENCRYPTION_KEY`, and
+every OTP HMAC/AES/password secret.
+
+**Tests and results.**
+
+- `npm run typecheck -w @powerotp/botblocker-signing`: passed.
+- `npm run test -w @powerotp/botblocker-signing`: 18 tests / 6 suites, 0 failures. Coverage
+  includes active/previous verification, exact overlap retirement, revocation override,
+  canonical DER loading, public-only verifier exposure, invalid grouped configuration,
+  zero/bounded skew boundaries, first-use/replay, 20-way concurrent consumption, scope
+  separation, expiry, and fail-closed storage errors.
+- `npm run build -w @powerotp/botblocker-signing`: passed.
+- `npm run typecheck -w @powerotp/api`: passed, including structural compatibility with the
+  real ioredis client.
+- `npm run test -w @powerotp/api`: 162 tests / 47 suites, 0 failures.
+- `npm run verify`: exit code 0. Full monorepo build, lint/typecheck, and tests passed,
+  including the Next.js production build; contracts remained at 119 tests / 32 suites with
+  0 failures.
+- `git diff --check`: clean.
+
+**Manual production/deployment steps.** None performed. No key was generated for production,
+no App Platform variable was changed, and nothing was deployed. Before a later activation
+phase, an operator must generate an independent Ed25519 active key outside the repository,
+store only the named values in DigitalOcean App Platform, publish/distribute only public
+verification material, and rehearse rotation/revocation with a bounded overlap. Phase 4 does
+not authorize configuring these values yet because no production BotBlocker consumer exists.
+
+**Findings and control evidence.**
+
+- Direct API tests/typechecks resolve workspace dependencies through built package exports, so
+  `@powerotp/botblocker-signing` must be built first after its export surface changes. The root
+  build already guarantees that order.
+- ISO 27001 A.8.9 moves from not-applicable to partially implemented because validated
+  BotBlocker service configuration now exists. A.8.24 remains partially implemented with
+  concrete key-lifecycle/skew/replay evidence, and A.8.29 moves to partially implemented based
+  on the Phase 1–4 negative/boundary/concurrency suites. No certification claim is made.
+- Current dependency audit is clean at this HEAD; Phase 4 introduced no third-party package.
+
+**Unresolved risks / Phase 5 prerequisites.**
+
+- No route or middleware consumes these helpers yet. Later consumers must verify signatures
+  before passing trusted claims to nonce consumption and must never treat
+  `storage_unavailable` as success.
+- Public-key distribution, signed policy publication, revocation-filter distribution, and
+  production rotation operations remain later phases. The in-process revoked-ID set is not a
+  substitute for those distribution mechanisms.
+- Local site clearance is intentionally reusable during its short lifetime; one-time nonce
+  consumption applies only where the later protocol marks an exchange/action as one-time.
+  Phase 5 must not attach replay consumption blindly to every clearance read.
+- Phase 5 may add only project BotBlocker configuration and timeout UI. It must reuse existing
+  customer session/CSRF/project ownership patterns, stay disabled by default, and must not add
+  policy routes, gate-session persistence, wrappers, CleanDataPage implementation, or later
+  BotBlocker behavior.

@@ -164,8 +164,9 @@ and stale-decision handling. Prove prohibited raw data cannot be emitted.
 
 Build the dependency-free Node 22 wrapper with local clearance verification,
 `/_powerotp/*` handlers, trusted proxy configuration, exclusions, limits, timeout,
-events, challenge polling, cookies, `/.well-known/powerotp-agent`, and the
-`/powerotp/aisummary` contract. Verify with a minimal Node fixture.
+events, challenge polling, cookies, and the `/.well-known/powerotp-agent` discovery
+contract. Verify with a minimal Node fixture. CleanDataPage itself is PowerOTP-hosted and
+must not be scaffolded into customer applications.
 
 ### Phase 12 — Express wrapper
 
@@ -175,9 +176,10 @@ errors-after-headers, exclusions, and WebSocket non-interference.
 
 ### Phase 13 — Next.js wrapper
 
-Generate native `proxy.ts`, `app/_powerotp/*` handlers, root gate component, and
-`/powerotp/aisummary` scaffold. Test App Router navigation, server/client boundaries,
-assets, CSP, iframe behavior, runtime constraints, and absence of secrets in bundles.
+Generate native `proxy.ts`, `app/_powerotp/*` handlers, root gate component, and the
+`/.well-known/powerotp-agent` discovery contract. Test App Router navigation,
+server/client boundaries, assets, CSP, iframe behavior, runtime constraints, and absence
+of secrets in bundles. Do not create a customer-hosted CleanDataPage route.
 
 ### Phase 14 — Public MCP generator
 
@@ -248,6 +250,35 @@ Keep machine access separate from human Passport and general abuse controls.
 Integrate only a user-approved real payment rail/tool. Verify settlement before issuing
 entitlement; add replay/refund/failure/reconciliation and hosted iframe purchase choices.
 Client-side payment success alone never grants access.
+
+### Phase 24A — CleanDataPage contracts and persistence
+
+Define strict project-scoped CleanDataPage configuration/content contracts and durable
+storage for multiple pages per project: server-generated serial, unique validated project
+slug, independent enabled state, `free | paid` access mode, four-decimal amount plus
+currency, Ad Revenue toggle, content revision, and audit metadata. Add authorized project
+management APIs. Treat content as untrusted stored input and never use the route serial as
+authorization.
+
+### Phase 24B — CleanDataPage token gate and hosted surface
+
+Build `https://powerotp.com/{projectSlug}/cleandatapage/{serialNumber}` as a
+PowerOTP-hosted, safely rendered page. Require a short-lived token even for free access,
+bound to project/page/audience/requesting session/nonce/expiry and kept out of URLs and
+logs. Free issuance still applies abuse controls; paid issuance atomically exchanges a
+valid PaidTokenPass entitlement and fails closed on replay, storage error, disablement, or
+reversal. Add discovery metadata and hosted-iframe automated-access navigation without
+changing the only BotBlocker decisions (`allow | otp`).
+
+### Phase 24C — CleanDataPage dashboard and Ad Revenue
+
+Add nested CleanDataPage rows to expanded Project cards with shared create/`+`, Edit,
+enable, `free | paid` amount, and Ad Revenue controls. Collapsed cards show accessible
+green/red per-page status dots and a green/gray paid-access dollar indicator. When Ad
+Revenue is enabled, the OTP iframe may present a clearly labeled CleanDataPage offer to
+eligible suspected bot/scraper traffic. Implement server-authoritative impression,
+accepted-token-exchange, qualified-visit, reversal/fraud, reporting, and customer-revenue
+accounting; client-reported clicks alone never create revenue.
 
 ### Phase 25 — Visit metering and billing
 

@@ -1,6 +1,7 @@
 # PowerOTP BotBlocker Development Plan
 
-Last updated: 2026-08-11 (Phase 0 — reconciled with the optimistic-load model in
+Last updated: 2026-08-13 (added the PowerOTP-hosted CleanDataPage product surface;
+execution remains governed by
 [`POWEROTP_BOTBLOCKER_DEVELOPMENT_PHASES.md`](POWEROTP_BOTBLOCKER_DEVELOPMENT_PHASES.md))
 
 Execution is split into small, dependency-ordered fresh-session phases in
@@ -68,8 +69,9 @@ always be moved to `otp` by a later, better-informed decision.
   trails), and honeypot activations. Raw keystrokes, passwords, emails, DOM snapshots, page
   content, and arbitrary CSS selectors are never collected.
 - PowerOTP owns risk weights, thresholds, threat feeds, challenge logic, and sensor cadence.
-- Customers select protected routes, purchased OTP methods, optional curated agent content,
-  the decision timeout (50–2,000 ms, 200 ms default), and emergency bypass behavior.
+- Customers select protected routes, purchased OTP methods, optional PowerOTP-hosted
+  CleanDataPages for agent access, the decision timeout (50–2,000 ms, 200 ms default), and
+  emergency bypass behavior.
 - No single weak IP, browser, behavioral, or decoy signal is treated as certain proof.
 - Elevated risk surfaces OTP; it does not create an unrecoverable permanent denial.
 - OTP proves access to a phone channel, not legal identity.
@@ -290,23 +292,59 @@ After OTP, offer an optional Passport.
   [`PASSPORT_BUSINESS_AND_LEGAL_PLAN.md`](PASSPORT_BUSINESS_AND_LEGAL_PLAN.md#portability-is-not-linkability)
   for the full identity-separation design.
 
-### Agent content and payments
+### CleanDataPage agent content and payments
 
-Participating site owners may provide curated machine-efficient Markdown, text, or JSON instead of loading human presentation.
+Participating site owners may publish one or more curated, machine-efficient AI summary pages
+for each project. These **CleanDataPages are hosted by PowerOTP**, not by the customer's
+website, so customers do not need to add or maintain a `/powerotp/aisummary` route. A project's
+discovery document at `/.well-known/powerotp-agent` points to the applicable PowerOTP-hosted
+offer/discovery metadata.
 
-- Publish a discovery pointer at `/.well-known/powerotp-agent` that references the customer's
-  own curated content, served by the customer's site at `/powerotp/aisummary` (the wrapper
-  scaffolds this route; the customer edits its content).
-- `/powerotp/aisummary` is unrelated to the existing bot-signal honeypot at
-  `GET /v1/modal-sessions/{sessionId}/ai-index-summary` (see
-  [`AS_BUILT.md`](AS_BUILT.md)) — the honeypot is an invisible detection trap on
-  PowerOTP's own hosted widget, while `/powerotp/aisummary` is a customer-authored,
-  intentionally discoverable page for legitimate agent traffic. Neither replaces the other.
-- Expose explicit “Human verification” and “Automated access” lanes.
-- Version terms, permitted uses, scope, quotas, and expiry.
+- Each CleanDataPage has a stable server-generated ID/serial number and a URL using a
+  validated, unique project slug:
+  `https://powerotp.com/{projectSlug}/cleandatapage/{serialNumber}`. A display name is never
+  interpolated directly into the path, and the serial number is an identifier, not an
+  authorization secret.
+- Every CleanDataPage is independently enabled or disabled. Disabled pages are neither offered
+  in the OTP iframe nor available through the hosted route, even to a previously issued token.
+- Every enabled page is token-gated, including a free page. Access uses a short-lived,
+  page-specific token bound to the project, CleanDataPage, audience, requesting agent/visitor
+  session, issuance/expiry, and nonce. Bearer tokens are never placed in the URL, referrer, or
+  logs.
+- A page has an explicit access mode: `free`, with a displayed amount of `0.0000`, or `paid`,
+  with a customer-configured non-negative four-decimal amount and explicit currency. A paid
+  amount must be greater than zero. Monetary values use decimal strings or integer minor units,
+  never binary floating point.
+- A free request receives the same short-lived scoped viewing token after abuse/rate checks,
+  without fabricating a paid entitlement. A paid request exchanges its valid PaidTokenPass
+  access proof through a server-side, atomic, replay-protected entitlement consumption before
+  PowerOTP issues the viewing token. Client-side payment success never grants page access.
+- The existing hosted OTP iframe exposes separate “Human verification” and “Automated access”
+  lanes. When a page's **Ad Revenue** toggle is active, eligible suspected bot/scraper visitors
+  may be shown a clearly labeled CleanDataPage offer in the automated-access lane and may
+  choose to open it. The toggle controls offer eligibility; it never changes an `otp` decision
+  to `allow`, weakens OTP, or bypasses payment/token checks.
+- Ad Revenue accounting requires auditable server-side impressions, accepted token exchanges,
+  qualified visits, reversal/fraud handling, customer reporting, and explicit commercial/legal
+  terms. Mere iframe rendering or a client-reported click is not billable evidence.
+- Project cards manage CleanDataPages as nested rows when expanded. The first row and the `+`
+  control use the same create flow, allowing a second and further pages without duplicate
+  settings logic. Each row shows its own enable toggle, `free`/`paid` amount setting, Ad Revenue
+  toggle, and Edit action.
+- A collapsed project card shows compact per-page enabled/disabled status dots (green/red) and
+  a paid-access dollar indicator (green when at least one enabled page is paid, gray otherwise).
+  Text/tooltips and accessible names accompany color-only indicators.
+- Customer-authored content is schema-limited and safely rendered with output encoding, a
+  restrictive CSP, no arbitrary scripts, and size/type limits. It remains project-scoped and
+  cannot expose another customer's content or visitor data.
+- Version terms, permitted uses, scope, quotas, expiry, price changes, and content revisions.
 - Start with prepaid balances and a server-side entitlement ledger.
 - Add Coinbase x402 later as a payment/funding rail into the same ledger.
 - Payment never restores a human Passport or disables general abuse controls.
+- CleanDataPage is unrelated to the existing bot-signal honeypot at
+  `GET /v1/modal-sessions/{sessionId}/ai-index-summary` (see [`AS_BUILT.md`](AS_BUILT.md)).
+  The existing route remains an invisible detection trap on PowerOTP's hosted widget;
+  CleanDataPage is deliberately discoverable, customer-curated content.
 
 ### Public MCP instruction system
 
@@ -378,6 +416,11 @@ adapter.
 - `POST /v1/botblocker/passports/assert`
 - `POST /v1/botblocker/paid-passes/assert`
 - `POST /v1/botblocker/agent/entitlements`
+- `GET/POST /v1/projects/{projectId}/clean-data-pages`
+- `GET/PATCH /v1/projects/{projectId}/clean-data-pages/{cleanDataPageId}`
+- `POST /v1/clean-data-pages/{cleanDataPageId}/access-tokens` (free issuance or paid
+  PaidTokenPass exchange; never accepts a client-declared entitlement)
+- `GET /{projectSlug}/cleandatapage/{serialNumber}` (PowerOTP-hosted token-gated page)
 - `GET /v1/projects/{projectId}/botblocker/visitors` (project-scoped; a customer can never
   query another project's visitors or raw events)
 - `GET/PATCH /v1/projects/{projectId}/botblocker` (site configuration, including the
@@ -401,6 +444,13 @@ decision, score, or approval. The exact request/response shapes are defined in
 - Use strict timeout, circuit breaker, last-known-good policy, signed rollback, key-rotation overlap, and emergency customer bypass.
 - Never trust arbitrary forwarded-IP headers.
 - Test direct-origin bypass, token replay, open redirect, challenge fixation, policy rollback, credential leakage, and compromised edge/policy publication.
+- CleanDataPage access fails closed for missing, expired, replayed, wrong-project, wrong-page,
+  disabled-page, or unconfirmed paid-entitlement tokens. Page disablement and paid-access
+  reversal take effect server-side and cannot depend only on token expiry.
+- Treat customer-authored CleanDataPage content and labels as untrusted stored input; enforce
+  project authorization on every management route and safe rendering on every hosted response.
+- Keep ad-revenue qualification server-authoritative and resistant to self-clicks, automated
+  click inflation, replay, and customer/visitor collusion.
 - Apply separate retention and decay to IP, network, device, session, account, and Passport evidence.
 - Perform privacy/legal review before cross-site reputation launch.
 - See [`THREAT_MODEL.md`](THREAT_MODEL.md#botblocker-threat-model) for the full BotBlocker
@@ -409,7 +459,8 @@ decision, score, or approval. The exact request/response shapes are defined in
 
 ## Development phases
 
-The full 0–31 phase list, session-size rule, and required handoff-prompt format live only in
+The full 0–31 phase sequence (including lettered subphases), session-size rule, and required
+handoff-prompt format live only in
 [`POWEROTP_BOTBLOCKER_DEVELOPMENT_PHASES.md`](POWEROTP_BOTBLOCKER_DEVELOPMENT_PHASES.md#progressive-phases)
 so there is exactly one canonical execution order. This document does not duplicate that list;
 update it only when evidence invalidates a product/architecture assumption, and update the

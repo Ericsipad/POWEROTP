@@ -1,9 +1,46 @@
 import { z } from "zod";
 
+import { createBotBlockerKeyRing } from "./botblocker-config.js";
+
+const CanonicalBase64Schema = z
+  .string()
+  .regex(
+    /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/,
+    "Expected canonical base64",
+  );
+const BotBlockerKeyIdSchema = z.string().min(1).max(128);
+
 const ProductionConfigSchema = z.object({
   PORT: z.coerce.number().int().positive().default(3001),
   MONGODB_URI: z.string().startsWith("mongodb"),
   VALKEY_URL: z.string().startsWith("rediss://"),
+  /**
+   * Independent BotBlocker Ed25519 trust domain. The active private key is
+   * PKCS#8 DER encoded as canonical base64. A previous key carries public
+   * SPKI DER only and is accepted strictly before its overlap deadline.
+   * All fields remain optional while BotBlocker is disabled.
+   */
+  BOTBLOCKER_ED25519_ACTIVE_KEY_ID: BotBlockerKeyIdSchema.optional(),
+  BOTBLOCKER_ED25519_ACTIVE_PRIVATE_KEY_PKCS8_BASE64:
+    CanonicalBase64Schema.optional(),
+  BOTBLOCKER_ED25519_PREVIOUS_KEY_ID: BotBlockerKeyIdSchema.optional(),
+  BOTBLOCKER_ED25519_PREVIOUS_PUBLIC_KEY_SPKI_BASE64:
+    CanonicalBase64Schema.optional(),
+  BOTBLOCKER_ED25519_PREVIOUS_VERIFY_UNTIL_MS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .optional(),
+  BOTBLOCKER_ED25519_REVOKED_KEY_IDS: z
+    .string()
+    .regex(/^[^,\s]+(?:,[^,\s]+)*$/)
+    .optional(),
+  BOTBLOCKER_CLOCK_SKEW_MS: z.coerce
+    .number()
+    .int()
+    .min(0)
+    .max(300_000)
+    .default(0),
   INTERACTION_TOKEN_SECRET: z.string().min(32),
   CONFIG_ENCRYPTION_KEY: z.string().min(32),
   SESSION_HASH_SECRET: z.string().min(32),
@@ -173,7 +210,56 @@ const ProductionConfigSchema = z.object({
    */
   STRIPE_SECRET_KEY: z.string().min(1).optional(),
   STRIPE_WEBHOOK_SECRET: z.string().min(1).optional(),
+}).superRefine((configuration, context) => {
+  const active = [
+    configuration.BOTBLOCKER_ED25519_ACTIVE_KEY_ID,
+    configuration.BOTBLOCKER_ED25519_ACTIVE_PRIVATE_KEY_PKCS8_BASE64,
+  ];
+  const previous = [
+    configuration.BOTBLOCKER_ED25519_PREVIOUS_KEY_ID,
+    configuration.BOTBLOCKER_ED25519_PREVIOUS_PUBLIC_KEY_SPKI_BASE64,
+    configuration.BOTBLOCKER_ED25519_PREVIOUS_VERIFY_UNTIL_MS,
+  ];
+  requireAllOrNone(active, "active BotBlocker key", context);
+  requireAllOrNone(previous, "previous BotBlocker key", context);
+
+  if (
+    configuration.BOTBLOCKER_ED25519_ACTIVE_KEY_ID &&
+    configuration.BOTBLOCKER_ED25519_ACTIVE_KEY_ID ===
+      configuration.BOTBLOCKER_ED25519_PREVIOUS_KEY_ID
+  ) {
+    context.addIssue({
+      code: "custom",
+      message: "Active and previous BotBlocker key IDs must differ",
+    });
+  }
+  const revoked = new Set(
+    configuration.BOTBLOCKER_ED25519_REVOKED_KEY_IDS?.split(",") ?? [],
+  );
+  if (
+    configuration.BOTBLOCKER_ED25519_ACTIVE_KEY_ID &&
+    revoked.has(configuration.BOTBLOCKER_ED25519_ACTIVE_KEY_ID)
+  ) {
+    context.addIssue({
+      code: "custom",
+      message: "The active BotBlocker key cannot be revoked",
+    });
+  }
 });
+
+function requireAllOrNone(
+  values: readonly unknown[],
+  label: string,
+  context: z.RefinementCtx,
+): void {
+  const configured = values.filter((value) => value !== undefined).length;
+  if (configured !== 0 && configured !== values.length) {
+    context.addIssue({
+      code: "custom",
+      message: `Every field for the ${label} must be configured together`,
+    });
+  }
+}
 
 export type ProductionConfig = z.infer<typeof ProductionConfigSchema>;
 
@@ -190,5 +276,7 @@ export function loadConfig(
   const sanitized = Object.fromEntries(
     Object.entries(environment).filter(([, value]) => value !== ""),
   );
-  return ProductionConfigSchema.parse(sanitized);
+  const configuration = ProductionConfigSchema.parse(sanitized);
+  createBotBlockerKeyRing(configuration);
+  return configuration;
 }

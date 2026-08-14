@@ -18,6 +18,16 @@ import {
   type UnsignedSiteClearance,
 } from "@powerotp/contracts";
 
+import {
+  resolveBotBlockerVerificationKey,
+  validateBotBlockerClockSkew,
+  type BotBlockerActiveSigningKey,
+  type BotBlockerVerificationKeySet,
+} from "./key-ring.js";
+
+export * from "./key-ring.js";
+export * from "./replay.js";
+
 const SIGNING_DOMAIN = "POWEROTP_BOTBLOCKER_ED25519_V1";
 
 export interface BotBlockerArtifactClaims<T> {
@@ -39,12 +49,13 @@ export type BotBlockerVerificationResult<T> =
 interface VerifyArtifactOptions<T> {
   claims: BotBlockerArtifactClaims<T>;
   signature: string;
-  publicKeys: Readonly<Record<string, KeyLike | undefined>>;
+  verificationKeys: BotBlockerVerificationKeySet;
   expectedAudience: string;
   expectedSiteId: string;
   expectedSessionId?: string;
   expectedNonce?: string;
   now?: number;
+  clockSkewMs?: number;
 }
 
 export function signBotBlockerArtifact<T>(
@@ -59,6 +70,12 @@ export function verifyBotBlockerArtifact<T>(
 ): BotBlockerVerificationResult<BotBlockerArtifactClaims<T>> {
   const { claims } = options;
   const now = options.now ?? Date.now();
+  let clockSkewMs: number;
+  try {
+    clockSkewMs = validateBotBlockerClockSkew(options.clockSkewMs);
+  } catch {
+    return failure("invalid_signature", "The configured clock-skew bound is invalid");
+  }
 
   if (claims.audience !== options.expectedAudience) {
     return failure("audience_mismatch", "The artifact audience does not match");
@@ -75,23 +92,30 @@ export function verifyBotBlockerArtifact<T>(
   if (options.expectedNonce !== undefined && claims.nonce !== options.expectedNonce) {
     return failure("invalid_signature", "The artifact nonce does not match");
   }
-  if (claims.expiresAt <= now) {
+  if (claims.expiresAt <= now - clockSkewMs) {
     return failure("expired", "The artifact has expired");
   }
-  if (claims.issuedAt > now) {
+  if (claims.issuedAt > now + clockSkewMs) {
     return failure("invalid_signature", "The artifact was issued in the future");
   }
 
-  const publicKey = options.publicKeys[claims.keyId];
-  if (!publicKey) {
-    return failure("invalid_signature", "The signing key is not trusted");
+  const resolvedKey = resolveBotBlockerVerificationKey(
+    options.verificationKeys,
+    claims.keyId,
+    now,
+  );
+  if (!resolvedKey.ok) {
+    return failure(
+      "invalid_signature",
+      `The signing key is ${resolvedKey.reason}`,
+    );
   }
 
   try {
     const signature = Buffer.from(options.signature, "base64url");
     if (
       signature.length !== 64 ||
-      !verifyBytes(null, signingBytes(claims), publicKey, signature)
+      !verifyBytes(null, signingBytes(claims), resolvedKey.publicKey, signature)
     ) {
       return failure("invalid_signature", "The Ed25519 signature is invalid");
     }
@@ -104,27 +128,27 @@ export function verifyBotBlockerArtifact<T>(
 
 export function signSiteClearance(
   unsignedClearance: UnsignedSiteClearance,
-  keyId: string,
-  privateKey: KeyLike,
+  signingKey: BotBlockerActiveSigningKey,
 ): SignedSiteClearance {
   const clearance = UnsignedSiteClearanceSchema.parse(unsignedClearance);
-  const claims = clearanceClaims(clearance, keyId);
+  const claims = clearanceClaims(clearance, signingKey.keyId);
   return SignedSiteClearanceSchema.parse({
     ...clearance,
     signatureStatus: "signed",
-    keyId,
-    signature: signBotBlockerArtifact(claims, privateKey),
+    keyId: signingKey.keyId,
+    signature: signBotBlockerArtifact(claims, signingKey.privateKey),
   });
 }
 
 export function verifySiteClearance(options: {
   clearance: unknown;
-  publicKeys: Readonly<Record<string, KeyLike | undefined>>;
+  verificationKeys: BotBlockerVerificationKeySet;
   expectedAudience: string;
   expectedSiteId: string;
   expectedGateSessionId: string;
   expectedNonce?: string;
   now?: number;
+  clockSkewMs?: number;
 }): BotBlockerVerificationResult<SignedSiteClearance> {
   const parsed = SignedSiteClearanceSchema.safeParse(options.clearance);
   if (!parsed.success) {
@@ -134,36 +158,36 @@ export function verifySiteClearance(options: {
   const verified = verifyBotBlockerArtifact({
     claims: clearanceClaims(clearance, clearance.keyId),
     signature: clearance.signature,
-    publicKeys: options.publicKeys,
+    verificationKeys: options.verificationKeys,
     expectedAudience: options.expectedAudience,
     expectedSiteId: options.expectedSiteId,
     expectedSessionId: options.expectedGateSessionId,
     expectedNonce: options.expectedNonce,
     now: options.now,
+    clockSkewMs: options.clockSkewMs,
   });
   return verified.ok ? { ok: true, value: clearance } : verified;
 }
 
 export function signBotBlockerPolicyRelease(options: {
   policy: BotBlockerPolicy;
-  keyId: string;
   audience: string;
   nonce: string;
   issuedAt: number;
-  privateKey: KeyLike;
+  signingKey: BotBlockerActiveSigningKey;
 }): SignedBotBlockerPolicyRelease {
   const policy = BotBlockerPolicySchema.parse(options.policy);
   const claims = policyClaims({
     policy,
-    keyId: options.keyId,
+    keyId: options.signingKey.keyId,
     audience: options.audience,
     nonce: options.nonce,
     issuedAt: options.issuedAt,
   });
   return SignedBotBlockerPolicyReleaseSchema.parse({
     signatureStatus: "signed",
-    keyId: options.keyId,
-    signature: signBotBlockerArtifact(claims, options.privateKey),
+    keyId: options.signingKey.keyId,
+    signature: signBotBlockerArtifact(claims, options.signingKey.privateKey),
     audience: options.audience,
     nonce: options.nonce,
     issuedAt: options.issuedAt,
@@ -173,11 +197,12 @@ export function signBotBlockerPolicyRelease(options: {
 
 export function verifyBotBlockerPolicyRelease(options: {
   release: unknown;
-  publicKeys: Readonly<Record<string, KeyLike | undefined>>;
+  verificationKeys: BotBlockerVerificationKeySet;
   expectedAudience: string;
   expectedSiteId: string;
   expectedNonce?: string;
   now?: number;
+  clockSkewMs?: number;
 }): BotBlockerVerificationResult<SignedBotBlockerPolicyRelease> {
   const parsed = SignedBotBlockerPolicyReleaseSchema.safeParse(options.release);
   if (!parsed.success) {
@@ -187,11 +212,12 @@ export function verifyBotBlockerPolicyRelease(options: {
   const verified = verifyBotBlockerArtifact({
     claims: policyClaims(release),
     signature: release.signature,
-    publicKeys: options.publicKeys,
+    verificationKeys: options.verificationKeys,
     expectedAudience: options.expectedAudience,
     expectedSiteId: options.expectedSiteId,
     expectedNonce: options.expectedNonce,
     now: options.now,
+    clockSkewMs: options.clockSkewMs,
   });
   return verified.ok ? { ok: true, value: release } : verified;
 }
