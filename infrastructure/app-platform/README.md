@@ -60,6 +60,14 @@ and do not create a repository `.env` file.
 - `BOTBLOCKER_CLOCK_SKEW_MS`: optional integer from `0` through `300000`; defaults to `0`,
   preserving zero implicit skew. Configure the smallest operationally justified value.
   It applies symmetrically to future issuance and expiry validation.
+- `BOTBLOCKER_SITE_CREDENTIAL_HASH_SECRET`: optional until BotBlocker runtime credentials
+  are deliberately provisioned; at least 32 random characters and independent from
+  `API_KEY_HASH_SECRET` and every OTP/signing secret. It keys hashes of server-only
+  `potp_bb_*` site credentials.
+- `BOTBLOCKER_RUNTIME_ORIGIN`: optional exact HTTPS origin for the runtime API. The
+  permanent public origin is `https://verify.powerotp.com`; leave it unset until that
+  hostname is routed to the DigitalOcean application. Phase 27 may move the hostname to
+  Cloudflare without changing `/v1/botblocker/*` paths.
 - `INTERACTION_TOKEN_SECRET`: at least 32 random bytes
 - `CONFIG_ENCRYPTION_KEY`: at least 32 random bytes, independent from the token secret
 - `SESSION_HASH_SECRET`: at least 32 random bytes, independent from other secrets

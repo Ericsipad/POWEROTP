@@ -129,6 +129,12 @@ good handling, and rollback protection. No active release means `policy_unavaila
 
 ### Phase 8 — Complete central API surface
 
+The canonical authenticated runtime origin is
+`https://verify.powerotp.com/v1/botblocker/*`. DigitalOcean serves that origin through
+Phase 26; Phase 27 moves its implementation to the global Cloudflare Worker without changing
+the public URL. Operator routes are separately authenticated under
+`/v1/control/botblocker/*`.
+
 Create permanent authenticated/rate-limited route handlers for:
 
 - `POST /v1/botblocker/rapid-auth`
@@ -142,7 +148,9 @@ Create permanent authenticated/rate-limited route handlers for:
 - `POST /v1/botblocker/paid-passes/assert`
 - `POST /v1/botblocker/agent/entitlements`
 - `GET /v1/projects/{projectId}/botblocker/visitors`
-- admin rapid-list, decision trace, health, and policy-release routes
+- operator `/v1/control/botblocker/rapid-list`,
+  `/v1/control/botblocker/decision-traces/{gateSessionId}`,
+  `/v1/control/botblocker/health`, and `/v1/control/botblocker/policy-releases` routes
 
 Unimplemented services return typed unavailable responses, never synthetic outcomes.
 

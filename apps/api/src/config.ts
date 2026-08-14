@@ -41,6 +41,20 @@ const ProductionConfigSchema = z.object({
     .min(0)
     .max(300_000)
     .default(0),
+  /**
+   * Independent runtime-authentication domain. Site credentials are
+   * server-only and are hashed with this secret before persistence. The
+   * runtime origin is exact and HTTPS so requests cannot be replayed through
+   * an unexpected host. Both remain optional while BotBlocker is inactive.
+   */
+  BOTBLOCKER_SITE_CREDENTIAL_HASH_SECRET: z.string().min(32).optional(),
+  BOTBLOCKER_RUNTIME_ORIGIN: z
+    .string()
+    .url()
+    .refine((value) => new URL(value).protocol === "https:", {
+      message: "BotBlocker runtime origin must use HTTPS",
+    })
+    .optional(),
   INTERACTION_TOKEN_SECRET: z.string().min(32),
   CONFIG_ENCRYPTION_KEY: z.string().min(32),
   SESSION_HASH_SECRET: z.string().min(32),

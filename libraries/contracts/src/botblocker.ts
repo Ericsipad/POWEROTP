@@ -366,6 +366,10 @@ export const botBlockerErrorCodes = [
   "invalid_timeout",
   "invalid_evidence",
   "unknown_site",
+  "authentication_required",
+  "invalid_request",
+  "replay_detected",
+  "idempotency_key_conflict",
   /** Phase 2: a policy release version no newer than the currently active
    * one — see `botblocker-policy.ts`'s `isPolicyVersionRegression`. */
   "policy_version_regression",

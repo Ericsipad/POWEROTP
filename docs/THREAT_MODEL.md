@@ -145,6 +145,12 @@ in [`POWEROTP_BOTBLOCKER_AS_BUILT.md`](POWEROTP_BOTBLOCKER_AS_BUILT.md) says so.
     exchange and viewing surface.
 14. Customer dashboard to project-scoped CleanDataPage configuration/content storage.
 
+The canonical authenticated BotBlocker runtime boundary is
+`https://verify.powerotp.com/v1/botblocker/*`. The DigitalOcean application owns that origin
+until the Phase 27 Cloudflare Worker takeover; the takeover must preserve the origin and its
+authentication/audience semantics. Operator traffic crosses a distinct, authenticated
+`/v1/control/botblocker/*` boundary and must never be authorized by a runtime site credential.
+
 ### Optimistic-load limitation
 
 The product is intentionally fail-open on timing: the customer's site renders before a

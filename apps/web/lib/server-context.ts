@@ -3,8 +3,14 @@ import { AuthService } from "@powerotp/api/auth-service.js";
 import { BalanceService } from "@powerotp/api/balance-service.js";
 import { BillingChargeService } from "@powerotp/api/billing-charge-service.js";
 import { createBotBlockerKeyRing } from "@powerotp/api/botblocker-config.js";
+import { BotBlockerIntelligencePersistence } from "@powerotp/api/botblocker-intelligence-persistence.js";
+import { BotBlockerOperationsService } from "@powerotp/api/botblocker-operations-service.js";
+import { BotBlockerPolicyControlService } from "@powerotp/api/botblocker-policy-control-service.js";
 import { BotBlockerPolicyPersistence } from "@powerotp/api/botblocker-policy-persistence.js";
 import { BotBlockerPolicyService } from "@powerotp/api/botblocker-policy-service.js";
+import { BotBlockerRuntimeSecurity } from "@powerotp/api/botblocker-runtime-security.js";
+import { BotBlockerSiteCredentialPersistence } from "@powerotp/api/botblocker-site-credential-persistence.js";
+import { BotBlockerSiteCredentialService } from "@powerotp/api/botblocker-site-credential-service.js";
 import { BotBlockerSiteService } from "@powerotp/api/botblocker-site-service.js";
 import {
   createBillingDailyChargeQueue,
@@ -39,7 +45,11 @@ export interface ServerContext {
   auth: AuthService;
   projects: ProjectService;
   botBlockerSites: BotBlockerSiteService;
+  botBlockerSiteCredentials: BotBlockerSiteCredentialService;
+  botBlockerRuntimeSecurity: BotBlockerRuntimeSecurity;
   botBlockerPolicy: BotBlockerPolicyService;
+  botBlockerPolicyControl: BotBlockerPolicyControlService;
+  botBlockerOperations: BotBlockerOperationsService;
   verifications: VerificationService;
   nodes: NodeService;
   challenges: ChallengeService;
@@ -114,9 +124,34 @@ async function buildServerContext(): Promise<ServerContext> {
 
   const projects = new ProjectService(dataStores.db, config, verifications);
   const botBlockerSites = new BotBlockerSiteService(dataStores.db);
+  const botBlockerSiteCredentials = new BotBlockerSiteCredentialService(
+    dataStores.db,
+    new BotBlockerSiteCredentialPersistence(dataStores.db, dataStores.client),
+    config,
+  );
+  const botBlockerRuntimeSecurity = new BotBlockerRuntimeSecurity(
+    botBlockerSiteCredentials,
+    dataStores.rateLimitStore,
+    config,
+  );
+  const botBlockerPolicyPersistence = new BotBlockerPolicyPersistence(
+    dataStores.db,
+    dataStores.client,
+  );
   const botBlockerPolicy = new BotBlockerPolicyService(
-    new BotBlockerPolicyPersistence(dataStores.db, dataStores.client),
+    botBlockerPolicyPersistence,
     createBotBlockerKeyRing(config),
+  );
+  const botBlockerPolicyControl = new BotBlockerPolicyControlService(
+    dataStores.db,
+    botBlockerPolicyPersistence,
+    botBlockerPolicy,
+  );
+  const botBlockerOperations = new BotBlockerOperationsService(
+    dataStores.db,
+    new BotBlockerIntelligencePersistence(dataStores.db),
+    dataStores.isReady,
+    config,
   );
   const nodes = new NodeService(dataStores.db, config);
   const modalSessions = new ModalSessionService(dataStores.db);
@@ -153,7 +188,11 @@ async function buildServerContext(): Promise<ServerContext> {
     auth,
     projects,
     botBlockerSites,
+    botBlockerSiteCredentials,
+    botBlockerRuntimeSecurity,
     botBlockerPolicy,
+    botBlockerPolicyControl,
+    botBlockerOperations,
     verifications,
     nodes,
     challenges,

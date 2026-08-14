@@ -112,6 +112,21 @@ export class BotBlockerPolicyPersistence {
     if (document) validateDocument(document);
     return document;
   }
+
+  listReleases(scope: BotBlockerPolicyScope, limit = 50) {
+    return this.#releases
+      .find(scope)
+      .sort({ policyVersion: -1 })
+      .limit(limit)
+      .toArray();
+  }
+
+  findReleaseByVersion(
+    scope: BotBlockerPolicyScope,
+    policyVersion: number,
+  ) {
+    return this.#releases.findOne({ ...scope, policyVersion });
+  }
 }
 
 function createDocument(

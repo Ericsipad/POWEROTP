@@ -219,6 +219,26 @@ export class BotBlockerIntelligencePersistence {
     return this.#gateSessions.findOne({ _id: gateSessionId, ...scope });
   }
 
+  listGateSessions(
+    scope: BotBlockerScope,
+    options: { limit: number; before?: Date },
+  ) {
+    return this.#gateSessions
+      .find({
+        ...scope,
+        ...(options.before
+          ? { startedAt: { $lt: options.before } }
+          : {}),
+      })
+      .sort({ startedAt: -1 })
+      .limit(options.limit)
+      .toArray();
+  }
+
+  findGateSessionById(gateSessionId: string) {
+    return this.#gateSessions.findOne({ _id: gateSessionId });
+  }
+
   advanceGateSessionSequence(
     scope: BotBlockerScope,
     gateSessionId: string,
@@ -250,8 +270,31 @@ export class BotBlockerIntelligencePersistence {
     });
   }
 
+  listUserIntelligence(
+    scope: BotBlockerScope,
+    options: { limit: number; before?: Date },
+  ) {
+    return this.#userIntelligence
+      .find({
+        ...scope,
+        ...(options.before
+          ? { lastObservedAt: { $lt: options.before } }
+          : {}),
+      })
+      .sort({ lastObservedAt: -1 })
+      .limit(options.limit)
+      .toArray();
+  }
+
   findChallenge(scope: BotBlockerScope, challengeId: string) {
     return this.#challenges.findOne({ _id: challengeId, ...scope });
+  }
+
+  listChallenges(scope: BotBlockerScope, gateSessionId: string) {
+    return this.#challenges
+      .find({ ...scope, gateSessionId })
+      .sort({ issuedAt: 1 })
+      .toArray();
   }
 
   listRiskEvents(scope: BotBlockerScope, gateSessionId: string) {

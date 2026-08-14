@@ -17,20 +17,20 @@ never here.
 
 ## Current status
 
-BotBlocker is **not active for any real customer**. No BotBlocker middleware, RapidAuth
-service, risk scoring, Passport, PaidTokenPass, or BotBlocker persistence exists in production
-code yet. The only bot-related code that exists today is documented in
-[`AS_BUILT.md`](AS_BUILT.md): the hosted-widget bot-signal honeypot
-(`apps/api/src/bot-signal-service.ts`, `GET
-/v1/modal-sessions/{sessionId}/ai-index-summary`) and the customer-facing "Visitors" dashboard
-panel/`GET /v1/projects/{projectId}/visitors` route, whose "Threat score" column is
-deliberately scaffolding that always reads "Coming soon." `libraries/contracts` exports the
-Phase 1–3 BotBlocker wire and signed-artifact contracts. The server-only
-`@powerotp/botblocker-signing` workspace implements canonical Ed25519 signing/verification,
-active/previous key lifecycle, bounded skew, and atomic Valkey nonce consumption (Phases 3–4).
-The API validates optional independent key configuration and exposes a production Valkey
-adapter, but no route, middleware, wrapper, policy publisher, risk engine, customer activation,
-or persistence beyond bounded-TTL replay markers consumes any of it yet.
+BotBlocker is **not active for any real customer**. Phases 1–8 now provide strict protocol and
+API contracts, an independent Ed25519 trust domain, disabled project/site configuration,
+durable scoped persistence boundaries, immutable signed policy publication/delivery, and the
+complete authenticated central HTTP surface. Runtime site credentials use an independent
+hashed credential domain and every later-phase runtime capability returns a typed unavailable
+response rather than a fabricated decision, score, challenge result, Passport result, paid
+entitlement, or visitor.
+
+There is still no customer middleware, browser gate/sensor, real intelligence ingestion,
+matching, scoring, OTP orchestration, Passport/PaidTokenPass implementation, billing/metering,
+production BotBlocker key, policy release, credential, deployment, or traffic activation.
+`enabled: true` remains only stored preference and is insufficient for readiness. The existing
+hosted-widget bot-signal honeypot and `/v1/projects/{projectId}/visitors` OTP dashboard route
+remain separate from BotBlocker.
 
 ## Phase log
 
@@ -1065,3 +1065,155 @@ authorization as applicable; return typed unavailable responses for unbacked ser
 fabricate decisions, scores, challenge success, entitlements, or release signatures. Phase 8
 must not activate customer traffic, implement adapters/sensors/scoring/real ingestion, expose
 private signing material, reuse OTP secrets, or begin CleanDataPage work.
+
+## 2026-08-13 — Phase 8: Complete central API surface
+
+**Outcome.** Complete in code and intentionally inactive in production. The permanent runtime
+origin is `https://verify.powerotp.com/v1/botblocker/*`; DigitalOcean remains the origin until
+Phase 27 can move that same hostname to Cloudflare without changing adapter paths. Platform
+operator routes use `/v1/control/botblocker/*` and retain the existing platform-admin session,
+CSRF, IP-allowlisted login, rate-limit, correlation-ID, and error controls. No route name is
+treated as authorization.
+
+Phase 8 adds a separate hashed `potp_bb_*` site-credential lifecycle, strict runtime request
+envelopes, bounded issuance, exact runtime/customer-origin and site binding, required mutation
+idempotency, atomic Valkey nonce replay rejection, scoped rate limits, customer-owned visitor
+reads, operator decision trace/health reads, and audited immutable policy publication. Every
+service assigned to a later phase returns strict typed unavailable; no synthetic result is
+returned or persisted.
+
+**Exact files added/changed.**
+
+- Contracts: `libraries/contracts/src/botblocker.ts`,
+  `libraries/contracts/src/botblocker-api-runtime.ts`,
+  `libraries/contracts/src/botblocker-api-runtime.test.ts`,
+  `libraries/contracts/src/botblocker-api-control.ts`,
+  `libraries/contracts/src/botblocker-api-control.test.ts`, and
+  `libraries/contracts/src/index.ts`.
+- API: `apps/api/src/config.ts`, `apps/api/src/config.test.ts`,
+  `apps/api/src/persistence.ts`, `apps/api/src/botblocker-errors.ts`,
+  `apps/api/src/botblocker-site-credential-persistence.ts`,
+  `apps/api/src/botblocker-site-credential-persistence.test.ts`,
+  `apps/api/src/botblocker-site-credential-service.ts`,
+  `apps/api/src/botblocker-site-credential-service.test.ts`,
+  `apps/api/src/botblocker-runtime-security.ts`,
+  `apps/api/src/botblocker-runtime-security.test.ts`,
+  `apps/api/src/botblocker-intelligence-persistence.ts`,
+  `apps/api/src/botblocker-operations-service.ts`,
+  `apps/api/src/botblocker-operations-service.test.ts`,
+  `apps/api/src/botblocker-policy-persistence.ts`, and
+  `apps/api/src/botblocker-policy-control-service.ts`.
+- Shared web wiring: `apps/web/lib/api-errors.ts`,
+  `apps/web/lib/botblocker-http.ts`, `apps/web/lib/botblocker-responses.ts`,
+  and `apps/web/lib/server-context.ts`.
+- Runtime/customer routes:
+  `apps/web/app/v1/botblocker/rapid-auth/route.ts`,
+  `apps/web/app/v1/botblocker/browser-assessment/route.ts`,
+  `apps/web/app/v1/botblocker/risk-events/route.ts`,
+  `apps/web/app/v1/botblocker/challenges/route.ts`,
+  `apps/web/app/v1/botblocker/challenges/[challengeId]/route.ts`,
+  `apps/web/app/v1/botblocker/challenges/[challengeId]/complete/route.ts`,
+  `apps/web/app/v1/botblocker/passports/register/route.ts`,
+  `apps/web/app/v1/botblocker/passports/assert/route.ts`,
+  `apps/web/app/v1/botblocker/paid-passes/assert/route.ts`,
+  `apps/web/app/v1/botblocker/agent/entitlements/route.ts`,
+  `apps/web/app/v1/projects/[projectId]/botblocker/visitors/route.ts`, and
+  `apps/web/app/v1/projects/[projectId]/botblocker/rotate-site-credential/route.ts`.
+- Operator routes: `apps/web/app/v1/control/botblocker/rapid-list/route.ts`,
+  `apps/web/app/v1/control/botblocker/decision-traces/[gateSessionId]/route.ts`,
+  `apps/web/app/v1/control/botblocker/health/route.ts`, and
+  `apps/web/app/v1/control/botblocker/policy-releases/route.ts`.
+- Web tests: `apps/web/app/v1/botblocker/phase8-http.test.ts`.
+- Documentation: `docs/POWEROTP_BOTBLOCKER_PLAN.md`,
+  `docs/POWEROTP_BOTBLOCKER_DEVELOPMENT_PHASES.md`, `docs/THREAT_MODEL.md`,
+  `docs/POWEROTP_BOTBLOCKER_AS_BUILT.md`,
+  `docs/POWEROTP_BOTBLOCKER_SOC2_ISO27001_CONTROL_MATRIX.md`, and
+  `infrastructure/app-platform/README.md`.
+
+**Route inventory and boundaries.**
+
+- Real: existing public `GET /v1/botblocker/policy/{siteId}`; customer
+  `POST /v1/projects/{projectId}/botblocker/rotate-site-credential` and
+  `GET /v1/projects/{projectId}/botblocker/visitors`; operator
+  `GET /v1/control/botblocker/decision-traces/{gateSessionId}`,
+  `GET /v1/control/botblocker/health`, and
+  `GET/POST /v1/control/botblocker/policy-releases`.
+- Strict unavailable: runtime rapid-auth, browser-assessment, risk-events, challenge
+  create/read/complete, Passport register/assert, PaidTokenPass assert, agent entitlement, and
+  operator rapid-list management. These handlers validate permanent authentication/security
+  boundaries but do not invoke later-phase business logic.
+- Customer routes require a customer session and non-enumerating project ownership; mutations
+  also require CSRF. Operator routes require a platform-admin session; mutations also require
+  CSRF and idempotency. Runtime mutations require the independent Bearer site credential,
+  strict body schema, exact site/customer origin/runtime host, bounded issuance, idempotency,
+  replay protection, and IP/site rate limits. Public `siteId` authorizes nothing.
+
+**Persistence, indexes, and audit evidence.**
+
+- `botblockerSiteCredentials` stores only scoped credential hashes, display prefix/last four,
+  rotation-idempotency hash, creation, and revocation metadata. Unique indexes protect
+  credential hashes, one active credential per site, and scoped rotation idempotency; a scope
+  index supports lifecycle audit. Rotation revokes the prior active credential and inserts the
+  replacement in one MongoDB transaction.
+- Runtime idempotency and nonce claims use namespaced bounded-TTL Valkey keys. Storage failure
+  returns dependency unavailable and never accepts the request.
+- Credential rotation, policy publication, and operator decision-trace reads append to the
+  existing `auditEvents` collection. Policy releases remain immutable; there is no update or
+  delete route, and publication still signs only inside `BotBlockerPolicyService` with
+  transactional version-regression protection.
+- Visitor responses project only real project/site-scoped `userIntelligence` counts and
+  timestamps. Decision traces project real stored event/challenge metadata without
+  fingerprint/IP hashes, raw evidence, scores, or weights. Health is derived from actual
+  dependency/configuration/release state and exposes no values.
+
+**Configuration names (no values created).**
+
+- `BOTBLOCKER_SITE_CREDENTIAL_HASH_SECRET`: optional independent secret for hashing site
+  credentials; never reuse `API_KEY_HASH_SECRET` or any OTP/signing secret.
+- `BOTBLOCKER_RUNTIME_ORIGIN`: optional exact HTTPS runtime origin; intended value is configured
+  operationally only when `verify.powerotp.com` is routed.
+- Existing `BOTBLOCKER_ED25519_*`, `BOTBLOCKER_CLOCK_SKEW_MS`, `MONGODB_URI`, and `VALKEY_URL`
+  remain unchanged. No `.env` or DigitalOcean value was read, printed, or modified.
+
+**Tests and results.**
+
+- `@powerotp/contracts`: build/typecheck passed; 151 tests / 39 suites, 0 failures.
+  New suites cover strict runtime envelopes, scope/protocol agreement, prohibited caller
+  authority, credential response metadata, visitor/control projections, and unsigned policy
+  publication input.
+- `@powerotp/botblocker-signing`: 18 tests / 6 suites, 0 failures.
+- `@powerotp/api`: build/typecheck passed; 202 tests / 55 suites, 0 failures. New tests cover
+  credential indexes/transactional replacement/idempotent rotation/authentication,
+  independent hashing, tenant isolation, exact host/site/audience and timestamp binding,
+  idempotency conflict, nonce replay, fail-closed Valkey errors, data-minimized visitors,
+  audited traces, and real degraded health.
+- `@powerotp/web`: typecheck passed; 8 tests / 3 suites, 0 failures. New tests cover strict
+  unavailable/authentication/replay/rate-limit response bodies.
+- `npm run verify`: passed, including the Next.js production build and every new
+  `/v1/botblocker/*`, `/v1/control/botblocker/*`, visitor, and credential-rotation route. No
+  OneDrive retry was needed.
+- `npm audit`: 0 vulnerabilities. `git diff --check`: clean.
+
+**Manual/migration/deployment steps.** Normal startup creates the new indexes; there is no
+one-off migration and no seeded record. Before any future activation, an operator must
+independently configure the credential hash secret/runtime origin, route
+`verify.powerotp.com` to the application, configure a real BotBlocker signing key, rotate a
+customer site credential through its authenticated route, and publish an approved policy.
+None of those actions is authorized or performed by this phase.
+
+**Findings, unresolved risks, and Phase 9 prerequisites.**
+
+- A site credential is server-only. Direct browser challenge/report calls still require the
+  narrowly scoped adapter-issued runtime-token lifecycle assigned to the browser gate/wrapper
+  phases; a browser must never receive `potp_bb_*`.
+- The runtime routes deliberately remain unavailable until Phase 15/17/19/21–24 backing
+  services exist. The real visitor/trace collections remain empty unless real later-phase
+  ingestion occurs; no empty response is represented as evidence that ingestion is active.
+- No remote MongoDB transaction test was performed. Production hostname/DNS, secret setup,
+  rotation/revocation rehearsal, rate/load testing, penetration testing, and DPIA/LIA remain
+  pre-launch work.
+- Phase 9 may implement only the framework-neutral browser gate state machine and its
+  authoritative client transitions. It must consume these stable unavailable/error contracts,
+  keep ordinary access fail-open, never cancel a pending decision at the UX timeout, and must
+  not start the Phase 10 sensor, Phase 15 ingestion, Phase 17 scoring, Phase 19 OTP binding,
+  Passport/PaidTokenPass, deployment, or CleanDataPage work.

@@ -405,6 +405,12 @@ adapter.
 
 ## API surface
 
+The canonical authenticated runtime origin is
+`https://verify.powerotp.com/v1/botblocker/*`. That stable public origin is served by the
+DigitalOcean application through Phase 26; the Phase 27 Cloudflare Worker takeover changes
+the serving layer, not customer URLs. Operator-only routes use the separately authenticated
+`/v1/control/botblocker/*` namespace.
+
 - `POST /v1/botblocker/rapid-auth`
 - `POST /v1/botblocker/browser-assessment`
 - `POST /v1/botblocker/risk-events`
@@ -426,7 +432,9 @@ adapter.
 - `GET/PATCH /v1/projects/{projectId}/botblocker` (site configuration, including the
   50–2,000 ms decision timeout)
 - `GET /.well-known/powerotp-agent`
-- Admin-only: rapid-list management, decision trace, health, and policy-release routes.
+- Operator-only: `/v1/control/botblocker/rapid-list`,
+  `/v1/control/botblocker/decision-traces/{gateSessionId}`,
+  `/v1/control/botblocker/health`, and `/v1/control/botblocker/policy-releases`.
 
 Mutations require idempotency, replay protection, hostname/audience binding, bounded
 timestamps, rate limits, and append-only audit events. Every route not yet backed by a real
