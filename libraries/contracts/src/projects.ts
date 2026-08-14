@@ -12,7 +12,13 @@ export const ProjectSlugSchema = z
 export const HttpsUrlSchema = z
   .string()
   .url()
-  .refine((value) => new URL(value).protocol === "https:", "HTTPS is required");
+  .refine((value) => {
+    try {
+      return new URL(value).protocol === "https:";
+    } catch {
+      return false;
+    }
+  }, "HTTPS is required");
 
 /** A customer-entered display name used only to brand `email_code`
  * delivery emails sent to their own end users (see

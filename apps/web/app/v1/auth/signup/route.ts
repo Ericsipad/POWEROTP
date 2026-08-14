@@ -43,11 +43,10 @@ export const POST = apiRoute(async (request) => {
     return NextResponse.json(body, { status: 200 });
   }
 
-  const hostname = new URL(input.website).hostname;
   const created = await projects.create(userId, {
-    name: hostname,
+    name: "My Project",
     enabledMethods: ["call_reachability", "voice_code", "voice_challenge", "sms_code"],
-    allowedOrigins: [input.website],
+    allowedOrigins: [],
   });
 
   const body: SignupResponse = {

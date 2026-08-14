@@ -2,15 +2,18 @@ import { z } from "zod";
 
 /**
  * BotBlocker base protocol contracts (Phase 1 of
- * `docs/POWEROTP_BOTBLOCKER_DEVELOPMENT_PHASES.md`). This file defines only
- * the shared envelope, timeout, request-context, sanitized browser-evidence,
- * behavior-report, decision-revision-envelope, and error/unavailable shapes —
- * see `docs/POWEROTP_BOTBLOCKER_PLAN.md` for the product/architecture spec
- * and `docs/THREAT_MODEL.md`'s "BotBlocker threat model" section for the
- * controls these contracts must not contradict. The real `allow | otp`
- * decision union, challenge/policy/clearance/Passport/PaidTokenPass
- * contracts, and Ed25519 signing are later phases — nothing here fabricates
- * a decision, score, or approval.
+ * `docs/POWEROTP_BOTBLOCKER_DEVELOPMENT_PHASES.md`), extended in Phase 2
+ * with the real `allow | otp` decision-outcome union. This file defines the
+ * shared envelope, timeout, request-context, sanitized browser-evidence,
+ * behavior-report, decision-revision-envelope (now carrying that outcome),
+ * and error/unavailable shapes — see `docs/POWEROTP_BOTBLOCKER_PLAN.md` for
+ * the product/architecture spec and `docs/THREAT_MODEL.md`'s "BotBlocker
+ * threat model" section for the controls these contracts must not
+ * contradict. Challenge/policy/clearance/Passport/PaidTokenPass/risk-event
+ * contracts live in sibling `botblocker-*.ts` files added in Phase 2 (see
+ * `docs/POWEROTP_BOTBLOCKER_DEVELOPMENT_PHASES.md#phase-2--decision-challenge-and-proof-contracts`)
+ * and reuse the exports here rather than duplicating them. Ed25519 signing
+ * is Phase 3 — nothing here fabricates a score or approval.
  */
 
 // ---------------------------------------------------------------------------
@@ -283,27 +286,43 @@ export const BehaviorReportSchema = z.discriminatedUnion("trigger", [
 ]);
 
 // ---------------------------------------------------------------------------
-// Decision revision envelope (Phase 2 defines the real allow|otp union)
+// Decision outcome (Phase 2 — the only two values anywhere in the protocol)
 // ---------------------------------------------------------------------------
 
 /**
- * The envelope every decision revision is wrapped in, regardless of what
- * decision value eventually goes inside it. Phase 2 adds the real
- * `allow | otp` outcome (see
- * `docs/POWEROTP_BOTBLOCKER_DEVELOPMENT_PHASES.md#phase-2--decision-challenge-and-proof-contracts`);
- * Phase 1 fixes only the versioning/sequence/audience/expiry wrapper so
- * every later phase's real decision values inherit the same staleness and
+ * The only two visitor-facing decision values in the entire protocol (see
+ * `docs/POWEROTP_BOTBLOCKER_PLAN.md`'s Purpose/Product-invariants sections
+ * and `docs/POWEROTP_BOTBLOCKER_DEVELOPMENT_PHASES.md`'s "End goal"). There
+ * is no third "deny", "block", or "monitor" outcome — a policy field like
+ * `agent_access` eligibility or challenge cadence configures *how* a
+ * decision is reached, it never becomes a third outcome value here.
+ */
+export const botBlockerDecisionOutcomes = ["allow", "otp"] as const;
+export const BotBlockerDecisionOutcomeSchema = z.enum(botBlockerDecisionOutcomes);
+
+// ---------------------------------------------------------------------------
+// Decision revision envelope
+// ---------------------------------------------------------------------------
+
+/**
+ * The envelope every decision revision is wrapped in. Phase 1 fixed the
+ * versioning/sequence/audience/expiry wrapper only; Phase 2 fills in the
+ * real `outcome` so every decision inherits the same staleness and
  * audience-binding guarantees from day one, mirroring the existing
  * `InteractionTokenClaimsSchema` pattern in
  * `apps/api/src/interaction-tokens.ts` (audience + nonce + issued/expiry).
- * Deliberately has no `outcome` field yet — adding one before Phase 2
- * would fabricate a decision type this phase is not allowed to define.
+ * `.strict()` means a browser- or adapter-supplied field beyond this exact
+ * shape (e.g. a client-computed score or a duplicate "decision" field) is
+ * rejected at parse time, not silently ignored — see
+ * `docs/THREAT_MODEL.md`'s "Iframe / postMessage authority" and
+ * `botblocker.test.ts`'s envelope tests.
  */
 export const DecisionRevisionEnvelopeSchema = z
   .object({
     protocolVersion: BotBlockerProtocolVersionSchema,
     siteId: SiteIdSchema,
     sequence: ReportSequenceSchema,
+    outcome: BotBlockerDecisionOutcomeSchema,
     audience: z.string().min(1),
     nonce: z.string().min(16),
     expiresAt: z.number().int().positive(),
@@ -347,6 +366,13 @@ export const botBlockerErrorCodes = [
   "invalid_timeout",
   "invalid_evidence",
   "unknown_site",
+  /** Phase 2: a policy release version no newer than the currently active
+   * one — see `botblocker-policy.ts`'s `isPolicyVersionRegression`. */
+  "policy_version_regression",
+  /** Phase 2: a challenge lifecycle transition not permitted from its
+   * current state — see `botblocker-challenge.ts`'s
+   * `isValidBotBlockerChallengeTransition`. */
+  "invalid_challenge_transition",
 ] as const;
 export const BotBlockerErrorCodeSchema = z.enum(botBlockerErrorCodes);
 
@@ -388,6 +414,7 @@ export type RecurringBehaviorReport = z.infer<typeof RecurringBehaviorReportSche
 export type PartialBehaviorReportReason = z.infer<typeof PartialBehaviorReportReasonSchema>;
 export type PartialBehaviorReport = z.infer<typeof PartialBehaviorReportSchema>;
 export type BehaviorReport = z.infer<typeof BehaviorReportSchema>;
+export type BotBlockerDecisionOutcome = z.infer<typeof BotBlockerDecisionOutcomeSchema>;
 export type DecisionRevisionEnvelope = z.infer<typeof DecisionRevisionEnvelopeSchema>;
 export type BotBlockerUnavailableReason = z.infer<typeof BotBlockerUnavailableReasonSchema>;
 export type BotBlockerUnavailableResponse = z.infer<typeof BotBlockerUnavailableResponseSchema>;

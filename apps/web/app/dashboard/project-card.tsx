@@ -21,12 +21,35 @@ export function ProjectCard({
   authenticatedFetch,
 }: ProjectCardProps) {
   const [showCallback, setShowCallback] = useState(false);
+  const [showOrigins, setShowOrigins] = useState(false);
+  const [originsError, setOriginsError] = useState("");
 
   async function saveCallback(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const callbackUrl = String(new FormData(event.currentTarget).get("callbackUrl"));
     await onSetCallback(project.id, callbackUrl);
     setShowCallback(false);
+  }
+
+  async function saveOrigins(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setOriginsError("");
+    const allowedOrigins = String(
+      new FormData(event.currentTarget).get("allowedOrigins") ?? "",
+    )
+      .split(/[\n,]/)
+      .map((origin) => origin.trim())
+      .filter(Boolean);
+    const response = await authenticatedFetch(`/v1/projects/${project.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ allowedOrigins }),
+    });
+    if (!response.ok) {
+      setOriginsError("Origins could not be saved. Enter complete https:// URLs only.");
+      return;
+    }
+    onProjectUpdated((await response.json()) as Project);
+    setShowOrigins(false);
   }
 
   return (
@@ -52,6 +75,9 @@ export function ProjectCard({
         </span>
         <span>
           Callback: {project.callbackConfigured ? project.callbackUrl : "not configured"}
+        </span>
+        <span>
+          Website origins: {project.allowedOrigins.length ? project.allowedOrigins.join(", ") : "not configured"}
         </span>
         <span>Activated: {new Date(project.activatedAt).toLocaleDateString()}</span>
       </div>
@@ -86,6 +112,25 @@ export function ProjectCard({
           </button>
         </form>
       )}
+      {showOrigins && (
+        <form className="formStack" onSubmit={saveOrigins}>
+          <label className="field">
+            Allowed HTTPS website origins, one per line
+            <textarea
+              name="allowedOrigins"
+              defaultValue={project.allowedOrigins.join("\n")}
+              placeholder="https://example.com"
+            />
+          </label>
+          <p>
+            Optional. Add origins only when this project is used from a website or browser widget.
+          </p>
+          {originsError && <div className="formError">{originsError}</div>}
+          <button className="button buttonSmall" type="submit">
+            Save website origins
+          </button>
+        </form>
+      )}
       <div className="projectActions">
         <button
           className="button buttonSmall buttonGhost"
@@ -93,6 +138,16 @@ export function ProjectCard({
           type="button"
         >
           Configure callback
+        </button>
+        <button
+          className="button buttonSmall buttonGhost"
+          onClick={() => {
+            setOriginsError("");
+            setShowOrigins((current) => !current);
+          }}
+          type="button"
+        >
+          Configure website origins
         </button>
         <button
           className="button buttonSmall buttonGhost"

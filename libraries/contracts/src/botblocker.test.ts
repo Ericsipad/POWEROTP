@@ -8,6 +8,8 @@ import {
   type BrowserEvidence,
   BrowserEvidenceSchema,
   type ClickObservation,
+  BotBlockerDecisionOutcomeSchema,
+  type DecisionRevisionEnvelope,
   DecisionRevisionEnvelopeSchema,
   DecisionTimeoutMsSchema,
   BotBlockerErrorResponseSchema,
@@ -219,32 +221,66 @@ describe("isStaleSequence", () => {
   });
 });
 
+describe("BotBlockerDecisionOutcomeSchema", () => {
+  it("accepts 'allow'", () => {
+    assert.equal(BotBlockerDecisionOutcomeSchema.safeParse("allow").success, true);
+  });
+
+  it("accepts 'otp'", () => {
+    assert.equal(BotBlockerDecisionOutcomeSchema.safeParse("otp").success, true);
+  });
+
+  for (const thirdOutcome of ["deny", "block", "monitor", "allowed", ""]) {
+    it(`rejects the non-existent third outcome '${thirdOutcome}'`, () => {
+      assert.equal(BotBlockerDecisionOutcomeSchema.safeParse(thirdOutcome).success, false);
+    });
+  }
+});
+
 describe("DecisionRevisionEnvelopeSchema", () => {
-  it("accepts a fully populated envelope with no outcome field", () => {
+  function validEnvelope(): DecisionRevisionEnvelope {
+    return {
+      protocolVersion: 1,
+      siteId: "site_0123456789abcdef",
+      sequence: { gateSessionId: "gate_session_0123456789", sequence: 0, issuedAt: Date.now() },
+      outcome: "allow",
+      audience: "https://customer.example",
+      nonce: "nonce_0123456789abcdef",
+      expiresAt: Date.now() + 60_000,
+    };
+  }
+
+  it("accepts a fully populated envelope with an 'allow' outcome", () => {
+    assert.equal(DecisionRevisionEnvelopeSchema.safeParse(validEnvelope()).success, true);
+  });
+
+  it("accepts a fully populated envelope with an 'otp' outcome", () => {
     assert.equal(
-      DecisionRevisionEnvelopeSchema.safeParse({
-        protocolVersion: 1,
-        siteId: "site_0123456789abcdef",
-        sequence: { gateSessionId: "gate_session_0123456789", sequence: 0, issuedAt: Date.now() },
-        audience: "https://customer.example",
-        nonce: "nonce_0123456789abcdef",
-        expiresAt: Date.now() + 60_000,
-      }).success,
+      DecisionRevisionEnvelopeSchema.safeParse({ ...validEnvelope(), outcome: "otp" }).success,
       true,
     );
   });
 
-  it("rejects an envelope carrying a fabricated outcome field", () => {
+  it("rejects an envelope missing the outcome field", () => {
+    const { outcome, ...withoutOutcome } = validEnvelope();
+    assert.equal(DecisionRevisionEnvelopeSchema.safeParse(withoutOutcome).success, false);
+  });
+
+  it("rejects an envelope with a fabricated third outcome value", () => {
     const result = DecisionRevisionEnvelopeSchema.safeParse({
-      protocolVersion: 1,
-      siteId: "site_0123456789abcdef",
-      sequence: { gateSessionId: "gate_session_0123456789", sequence: 0, issuedAt: Date.now() },
-      audience: "https://customer.example",
-      nonce: "nonce_0123456789abcdef",
-      expiresAt: Date.now() + 60_000,
-      outcome: "allow",
+      ...validEnvelope(),
+      outcome: "deny",
     });
     assert.equal(result.success, false);
+  });
+
+  it("rejects a browser-supplied score alongside a valid outcome (and cannot be assigned at compile time)", () => {
+    const valid = validEnvelope();
+
+    // @ts-expect-error -- a decision envelope must never carry a client-computed score.
+    const withScore: DecisionRevisionEnvelope = { ...valid, score: 87 };
+
+    assert.equal(DecisionRevisionEnvelopeSchema.safeParse(withScore).success, false);
   });
 });
 

@@ -10,8 +10,8 @@ interface SignupModalProps {
 type Step = "form" | "submitting" | "success" | "already_registered";
 
 /**
- * The "rapid signup" modal: email + password (entered twice) + website,
- * live password-requirement checklist, and — on submit — the newly issued
+ * The "rapid signup" modal: email + password (entered twice), a live
+ * password-requirement checklist, and — on submit — the newly issued
  * API key shown once, right in the modal. See `docs/AS_BUILT.md`'s
  * "Customer signup flow" section.
  */
@@ -19,14 +19,13 @@ export function SignupModal({ onClose }: SignupModalProps) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [website, setWebsite] = useState("");
   const [step, setStep] = useState<Step>("form");
   const [error, setError] = useState("");
   const [result, setResult] = useState<SignupResponse>();
 
   const passwordsMatch = password.length > 0 && password === confirmPassword;
   const allRequirementsMet = PASSWORD_REQUIREMENTS.every((requirement) => requirement.test(password));
-  const canSubmit = allRequirementsMet && passwordsMatch && email.trim().length > 0 && website.trim().length > 0;
+  const canSubmit = allRequirementsMet && passwordsMatch && email.trim().length > 0;
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -34,19 +33,23 @@ export function SignupModal({ onClose }: SignupModalProps) {
     setError("");
     setStep("submitting");
 
-    const normalizedWebsite = /^https?:\/\//.test(website.trim())
-      ? website.trim()
-      : `https://${website.trim()}`;
-
     try {
       const response = await fetch("/v1/auth/signup", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ email, password, website: normalizedWebsite }),
+        body: JSON.stringify({ email, password }),
       });
-      const data = (await response.json().catch(() => undefined)) as SignupResponse | undefined;
+      const data = (await response.json().catch(() => undefined)) as
+        | (SignupResponse & { error?: string })
+        | undefined;
       if (!response.ok || !data) {
-        setError("Signup could not be completed. Check the entered details, including that your website is a valid https:// URL.");
+        const messages: Record<string, string> = {
+          invalid_request: "Check your email and make sure the password meets every requirement.",
+          origin_not_allowed: "Signup is not available from this page.",
+          rate_limited: "Too many signup attempts. Please wait a minute and try again.",
+          internal_error: "Signup is temporarily unavailable. Please try again shortly.",
+        };
+        setError((data?.error && messages[data.error]) || "Signup could not be completed.");
         setStep("form");
         return;
       }
@@ -117,15 +120,6 @@ export function SignupModal({ onClose }: SignupModalProps) {
                   <span aria-hidden>{passwordsMatch ? "✓" : "○"}</span> Passwords match
                 </li>
               </ul>
-              <label className="field">
-                Website
-                <input
-                  value={website}
-                  onChange={(event) => setWebsite(event.target.value)}
-                  placeholder="https://your website"
-                  required
-                />
-              </label>
               {error && <div className="formError">{error}</div>}
               <button className="button" type="submit" disabled={!canSubmit || step === "submitting"}>
                 {step === "submitting" ? "Creating…" : "Create account"}

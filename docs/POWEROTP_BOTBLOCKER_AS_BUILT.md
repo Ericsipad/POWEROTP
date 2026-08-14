@@ -24,10 +24,12 @@ code yet. The only bot-related code that exists today is documented in
 (`apps/api/src/bot-signal-service.ts`, `GET
 /v1/modal-sessions/{sessionId}/ai-index-summary`) and the customer-facing "Visitors" dashboard
 panel/`GET /v1/projects/{projectId}/visitors` route, whose "Threat score" column is
-deliberately scaffolding that always reads "Coming soon." As of Phase 1, one library
-(`libraries/contracts/src/botblocker.ts`) exports versioned protocol/timeout/request-context/
-browser-evidence/behavior-report/decision-envelope/error contracts, but nothing yet imports or
-calls them — no route, middleware, or wrapper exists.
+deliberately scaffolding that always reads "Coming soon." As of Phase 2, `libraries/contracts`
+exports the full BotBlocker wire-protocol contract surface — versioned protocol/timeout/
+request-context/browser-evidence/behavior-report contracts (Phase 1), the real `allow | otp`
+decision outcome, challenge lifecycle, unsigned clearance, policy, Passport assertion,
+PaidTokenPass assertion, and risk-event batch contracts (Phase 2) — but nothing yet imports or
+calls them: no route, middleware, wrapper, signing, or persistence exists.
 
 ## Phase log
 
@@ -265,3 +267,279 @@ PaidTokenPass assertion, risk-event batch, and explicit unavailable responses, r
 `BotBlockerProtocolVersionSchema`, `ReportSequenceSchema`/`isStaleSequence`,
 `DecisionRevisionEnvelopeSchema`, and the `BotBlockerUnavailableResponseSchema`/
 `BotBlockerErrorResponseSchema` shapes already defined here rather than duplicating them.
+
+### Phase 2 — Decision, challenge, and proof contracts (2026-08-12)
+
+**Outcome.** Completed the BotBlocker contract surface named in
+`docs/POWEROTP_BOTBLOCKER_DEVELOPMENT_PHASES.md`'s Phase 2 scope: the real `allow | otp`
+decision outcome (now filling `DecisionRevisionEnvelopeSchema`'s previously absent `outcome`
+field), BotBlocker challenge lifecycle contracts, signed-policy payload contracts, an unsigned
+site-clearance contract, and Passport-assertion/PaidTokenPass-assertion/risk-event-batch proof
+shapes — every one of them reusing Phase 1's `BotBlockerProtocolVersionSchema`, `SiteIdSchema`,
+`ReportSequenceSchema`, `HoneypotActivationSchema`, `DecisionRevisionEnvelopeSchema`, and the
+`BotBlockerUnavailableResponseSchema`/`BotBlockerErrorResponseSchema` shapes rather than
+duplicating them. No route, middleware, signing, scoring, or persistence was added — this phase
+is contracts only, exactly as scoped.
+
+**Architecture decisions/clarifications recorded this phase:**
+
+- `DecisionRevisionEnvelopeSchema` (defined in Phase 1, in `botblocker.ts`) now requires an
+  `outcome: BotBlockerDecisionOutcomeSchema` field (`"allow" | "otp"` only, `.strict()` object)
+  — the two prior Phase 1 tests asserting "no outcome field" and "rejects a fabricated outcome
+  field" were rewritten in `botblocker.test.ts` to assert the opposite (outcome is now required
+  and validated), since keeping the old assertions would have contradicted this phase's explicit
+  scope. `BotBlockerDecisionOutcomeSchema` was added directly in `botblocker.ts` next to the
+  envelope it fills, not a new sibling file, since it is a single three-line enum tightly coupled
+  to that existing schema.
+- Four new sibling files (not edits to `botblocker.ts`, to keep that file from growing past
+  Phase 1's already-large size) hold the rest of Phase 2's scope, each re-exported from
+  `index.ts`:
+  - `botblocker-challenge.ts` — BotBlocker's own bot-detection-interaction challenge lifecycle
+    (`pending → presented → {completed, expired, canceled}`), explicitly a different concept
+    from the OTP `ChallengeSchema` in `verification.ts` (a phone-verification "select what you
+    heard" challenge). Only the genuinely shared UX conventions — minimum 2 options, a
+    single-answer challenge must require exactly one selection — are mirrored, not imported,
+    so the two concepts can never be silently conflated by sharing a type. Added
+    `isValidBotBlockerChallengeTransition()` and `isBotBlockerChallengeExpired()` as pure
+    functions mirroring Phase 1's `isStaleSequence()` pattern (logic defined and unit-tested
+    once, no storage backing it until Phase 6/8).
+  - `botblocker-policy.ts` — the policy fields listed in
+    `docs/POWEROTP_BOTBLOCKER_PLAN.md`'s "Signed Policy Client" section, as an unsigned payload
+    shape: `riskWeights` is an opaque `{ modelVersion, payload: Record<string, unknown> }` blob
+    (real weights are Phase 17), `verificationKeys` is an opaque `{ keyId }[]` reference list
+    with no key material field at all (signing is Phase 3), and `protocolVersion` reuses the
+    Phase 1 literal schema so "protocol compatibility" is enforced by the existing versioned
+    identifier rather than a new parallel field. Added `isPolicyVersionRegression()`, mirroring
+    `isStaleSequence()` exactly (equal-or-older is a rejectable regression), to satisfy the
+    session's required "rollback/version-regression rejection test."
+  - `botblocker-clearance.ts` — the unsigned site-clearance shape referenced in
+    `docs/POWEROTP_BOTBLOCKER_PLAN.md`'s "Tokens and cookies" section
+    (`powerotp_access`)/`docs/THREAT_MODEL.md`'s "Forged clearance and signed policy". Modeled
+    as `SiteClearanceSchema = z.discriminatedUnion("signatureStatus", [UnsignedSiteClearanceSchema])`
+    with exactly one member today (`signatureStatus: "unsigned"`) specifically so "this clearance
+    has no signature" is a fact the schema expresses structurally — a `signatureStatus: "signed"`
+    value is rejected today because no such union member exists yet, not merely because a field
+    happens to be absent. Phase 3 adds a `SignedSiteClearanceSchema` member alongside this one;
+    nothing before Phase 3 can be parsed as signed through this contract.
+  - `botblocker-proofs.ts` — Passport-assertion, PaidTokenPass-assertion, and risk-event-batch
+    proof shapes, grouped in one file because all three are "what a caller presents/submits"
+    contracts with the same reject-by-construction property: every object is `.strict()`, so a
+    self-declared `verified`, `passed`, `score`, or `decision` field is rejected at parse time.
+    `RiskEventSchema` reuses Phase 1's `HoneypotActivationSchema` for its one honeypot-carrying
+    event kind rather than duplicating that shape.
+- Extended `botblocker.ts`'s existing `botBlockerErrorCodes` enum (rather than creating a
+  parallel error-code type) with two new codes this phase's rejections need and the existing
+  seven don't cover: `policy_version_regression` and `invalid_challenge_transition`.
+- Followed the exact reject-by-construction test pattern Phase 1 established for
+  `BrowserEvidenceSchema` (type-level `@ts-expect-error` assignment plus a runtime `safeParse`
+  rejection) for every new prohibited-field case this phase required: a decision envelope with a
+  browser-computed `score`, a challenge completion with a self-declared `passed`, an unsigned
+  clearance with a forged `signature`/`keyId`, a policy verification-key entry with embedded key
+  material, a policy with a forged `signature` field, a Passport assertion with a self-declared
+  `verified` claim or a cross-site global identifier, a PaidTokenPass assertion with a
+  self-declared `remainingQuota`, and a risk event with a self-declared `score` or `decision`.
+
+**Exact files changed:**
+
+- `libraries/contracts/src/botblocker.ts` (edited) — added `botBlockerDecisionOutcomes`/
+  `BotBlockerDecisionOutcomeSchema`, added `outcome` to `DecisionRevisionEnvelopeSchema`, added
+  `policy_version_regression`/`invalid_challenge_transition` to `botBlockerErrorCodes`, updated
+  the file's top-of-file and envelope doc comments to describe Phase 2's changes instead of
+  deferring them.
+- `libraries/contracts/src/botblocker-challenge.ts` (new) — challenge lifecycle contracts.
+- `libraries/contracts/src/botblocker-policy.ts` (new) — signed-policy payload contracts.
+- `libraries/contracts/src/botblocker-clearance.ts` (new) — unsigned site-clearance contract.
+- `libraries/contracts/src/botblocker-proofs.ts` (new) — Passport/PaidTokenPass assertion and
+  risk-event-batch contracts.
+- `libraries/contracts/src/botblocker.test.ts` (edited) — replaced the two Phase 1 envelope
+  tests that asserted "no outcome field" with outcome-union boundary tests (accepts `allow`/
+  `otp`, rejects five different fabricated third values including an empty string) and envelope
+  tests (accepts/rejects with and without `outcome`, rejects a browser-supplied `score`).
+- `libraries/contracts/src/botblocker-challenge.test.ts` (new).
+- `libraries/contracts/src/botblocker-policy.test.ts` (new).
+- `libraries/contracts/src/botblocker-clearance.test.ts` (new).
+- `libraries/contracts/src/botblocker-proofs.test.ts` (new).
+- `libraries/contracts/src/index.ts` (edited) — added the four new sibling-file exports.
+
+**Migrations.** None.
+
+**Configuration and environment variables.** None introduced, as expected for a contracts-only
+phase — no new environment variable exists for BotBlocker yet.
+
+**Tests and results.**
+
+- `npm run test -w @powerotp/contracts`: 111 tests / 29 suites, 0 failures (up from Phase 1's 43
+  tests / 14 suites; every pre-existing test still passes unchanged except the two intentionally
+  rewritten envelope tests described above).
+- `npm run typecheck -w @powerotp/contracts` and `npm run lint -w @powerotp/contracts`: clean —
+  both point at `tsconfig.typecheck.json` (Phase 1's fix), so every new `@ts-expect-error`
+  assertion in the five test files this phase touched was confirmed to correspond to a real
+  compile-time error, not merely an unused/unenforced directive. (One authoring mistake was
+  caught this way during development: an inline array-literal `@ts-expect-error` in
+  `botblocker-policy.test.ts` didn't trigger TypeScript's excess-property check because the
+  literal wasn't directly assigned to an explicitly typed variable; fixed by assigning the
+  forged object to an explicitly `PolicyKeyReference`-typed `const` first, matching the pattern
+  every other reject-by-construction test in this codebase already uses.)
+- `npm run build -w @powerotp/contracts`: clean; confirmed `dist/` contains
+  `botblocker-challenge.js`/`.d.ts`, `botblocker-clearance.js`/`.d.ts`,
+  `botblocker-policy.js`/`.d.ts`, `botblocker-proofs.js`/`.d.ts`, and the updated
+  `botblocker.js`/`.d.ts` — no `.test.*` artifacts.
+- `npm run verify` (full monorepo: build + lint + test across every workspace, including
+  `apps/web`'s Next.js production build and `apps/api`'s test suite): exit code 0, zero failures
+  in any workspace, run in full before declaring this phase complete.
+
+**Manual production/deployment steps.** None. This phase shipped a library-only export with no
+consumer; there is nothing to deploy.
+
+**New findings / changes to the plan.**
+
+- No product/architecture assumption was invalidated this phase; every contract shape traces
+  directly to an existing field list in `POWEROTP_BOTBLOCKER_PLAN.md`, `THREAT_MODEL.md`, or
+  Phase 1's own contracts, so neither `POWEROTP_BOTBLOCKER_PLAN.md` nor `THREAT_MODEL.md` needed
+  an update this phase.
+- The SOC 2/ISO 27001 control matrix was not updated this phase: no row's actual implementation
+  status changed. A.8.5/A.8.24 (secure authentication / use of cryptography) correctly remain
+  "Planned"/"Partially implemented" since this phase deliberately shipped only unsigned contract
+  shapes — Ed25519 signing itself is still Phase 3, unimplemented.
+
+**Unresolved risks / open questions carried into later phases.**
+
+- No Ed25519 signing implementation exists yet (Phase 3) — `SiteClearanceSchema` has exactly one
+  discriminated-union member (`"unsigned"`) and `BotBlockerPolicySchema` carries no `signature`
+  field; Phase 3 must add the signed variants/fields as new schema members alongside these,
+  never by mutating the unsigned shapes in place, so existing unsigned-shape tests keep meaning
+  what they say.
+- `isValidBotBlockerChallengeTransition()`, `isBotBlockerChallengeExpired()`, and
+  `isPolicyVersionRegression()` are pure logic with no storage backing them yet — persistence
+  for challenges (`botblockerChallenges`) and policy releases (`policyReleases`) arrives in
+  Phase 6/7, same caveat as Phase 1's `isStaleSequence()`.
+- No HTTP route exists yet for any Phase 2 contract (`/v1/botblocker/challenges`,
+  `/v1/botblocker/policy/{siteId}`, `/v1/botblocker/passports/*`, `/v1/botblocker/paid-passes/*`,
+  `/v1/botblocker/risk-events`) — that is Phase 8. Every one of those routes must return
+  `BotBlockerUnavailableResponseSchema` (reused, not duplicated) until its real backing phase
+  ships.
+- Business/legal open questions in `PASSPORT_BUSINESS_AND_LEGAL_PLAN.md` section 10 remain open
+  and untouched, as instructed.
+- `isStaleSequence()`'s Phase 1 storage gap remains unresolved (still Phase 6/20), unaffected by
+  this phase.
+
+**Phase 3 prerequisites.** None outstanding — Phase 3 (Ed25519 signed-artifact primitive) may
+start from a fresh session once this entry is recorded. Phase 3 should add the canonical
+sign/verify helpers and then extend `SiteClearanceSchema` with a new `SignedSiteClearanceSchema`
+discriminated-union member (`signatureStatus: "signed"`) and add a genuine `signature`/`keyId`
+field set to `BotBlockerPolicySchema`'s payload envelope, reusing this phase's
+`UnsignedSiteClearanceSchema`/`BotBlockerPolicySchema`/`PolicyKeyReferenceSchema` shapes as the
+payload the new signature covers rather than duplicating them.
+
+## 2026-08-13 — Phase 3: Ed25519 signed-artifact primitive
+
+**Outcome.** Complete. BotBlocker now has a separate, real Ed25519 trust domain with
+domain-separated canonical signing bytes, strict signed-clearance and signed-policy-release
+contracts, and shared Node 22 sign/verify helpers. No OTP HMAC secret or helper is imported or
+reused. This remains a library primitive only: no route, middleware, production key, rotation,
+or replay store exists yet.
+
+Before Phase 3, the live rapid-signup flow was corrected because its required website field was
+blocking users who do not own a website. The modal's generic failure text also blamed every API
+failure on HTTPS validation, so a valid URL could appear to be the cause when the actual failure
+was rate limiting, credentials, email delivery, or another server error. Signup now accepts only
+email/password, creates a neutral `My Project` with `allowedOrigins: []`, maps known API errors
+to accurate messages, and lets customers add/replace/clear optional HTTPS origins on each
+dashboard Project card later. `HttpsUrlSchema` also rejects malformed values without allowing a
+`new URL()` exception to escape schema parsing.
+
+**Implemented contracts and behavior.**
+
+- `botblocker-signing.ts` defines the opaque signing-key ID, exact unpadded base64url Ed25519
+  signature, artifact type, and signature-metadata schemas. Its browser-safe canonicalizer
+  recursively sorts object keys, retains array order, and rejects non-JSON values, non-finite
+  numbers, and non-plain objects.
+- `SignedSiteClearanceSchema` is the second `SiteClearanceSchema` discriminated-union member.
+  The Phase 2 unsigned shape remains strict and cannot carry a key ID or signature. The signed
+  member covers the same audience/site/gate-session/nonce/issued/expiry claims plus required
+  `keyId` and `signature`.
+- `SignedBotBlockerPolicyReleaseSchema` is a strict envelope around the unchanged
+  `BotBlockerPolicySchema`. The envelope adds audience, nonce, issuance, key ID, and signature;
+  the signed payload retains the policy's authoritative site and expiry.
+- New workspace `@powerotp/botblocker-signing` owns the Node-only `node:crypto` implementation,
+  keeping it out of the browser-consumed contracts barrel. Canonical bytes include the
+  `POWEROTP_BOTBLOCKER_ED25519_V1` domain, artifact type, key ID, audience, site, optional
+  session, nonce, issued/expiry times, and payload.
+- Verification requires an expected audience/site and, for clearance, expected gate session;
+  it can also require an expected nonce. It rejects malformed/forged signatures, untrusted or
+  mismatched keys, audience/site/session/nonce mismatch, expiry at the exact boundary, and any
+  future issuance. There is deliberately no hidden clock-skew allowance; Phase 4 owns explicit
+  skew policy.
+
+**Exact files changed for the signup correction:**
+
+- `libraries/contracts/src/auth.ts`
+- `libraries/contracts/src/projects.ts`
+- `libraries/contracts/src/index.test.ts`
+- `apps/web/app/signup-modal.tsx`
+- `apps/web/app/v1/auth/signup/route.ts`
+- `apps/web/app/dashboard/project-card.tsx`
+- `docs/AS_BUILT.md`
+
+**Exact files added/changed for Phase 3:**
+
+- `libraries/contracts/src/botblocker-signing.ts` (new)
+- `libraries/contracts/src/botblocker-signing.test.ts` (new)
+- `libraries/contracts/src/botblocker-clearance.ts`
+- `libraries/contracts/src/botblocker-clearance.test.ts`
+- `libraries/contracts/src/botblocker-policy.ts`
+- `libraries/contracts/src/botblocker-policy.test.ts`
+- `libraries/contracts/src/index.ts`
+- `libraries/botblocker-signing/package.json` (new)
+- `libraries/botblocker-signing/tsconfig.json` (new)
+- `libraries/botblocker-signing/src/index.ts` (new)
+- `libraries/botblocker-signing/src/index.test.ts` (new)
+- `package.json`
+- `package-lock.json`
+- `docs/POWEROTP_BOTBLOCKER_SOC2_ISO27001_CONTROL_MATRIX.md`
+- `docs/POWEROTP_BOTBLOCKER_AS_BUILT.md`
+
+**Migrations.** None.
+
+**Configuration and environment variables.** None introduced. Sign/verify functions take key
+material explicitly. Tests generate ephemeral Ed25519 keypairs in memory; no key is written to
+disk, an environment file, documentation, or chat. Phase 4 must name and validate independent
+BotBlocker active/previous key configuration without reusing any OTP secret.
+
+**Tests and results.**
+
+- `npm run typecheck -w @powerotp/contracts`: clean.
+- `npm run test -w @powerotp/contracts`: 119 tests / 32 suites, 0 failures.
+- `npm run build -w @powerotp/contracts`: clean.
+- `npm run typecheck -w @powerotp/botblocker-signing`: clean.
+- `npm run test -w @powerotp/botblocker-signing`: 7 tests / 2 suites, 0 failures. Covered valid
+  clearance/policy round trips, forgery, malformed signatures, audience/site/session mismatch,
+  exact expiry, future issuance, deterministic canonical signatures, wrong public key, unknown
+  key ID, and policy-payload tampering.
+- `npm run build -w @powerotp/botblocker-signing`: clean.
+- `npm run verify`: exit code 0; full monorepo build, lint/typecheck, and tests passed, including
+  the Next.js production build.
+
+**Manual production/deployment steps.** None. No production configuration, key generation,
+deployment, commit, or push was performed.
+
+**Findings and control evidence.**
+
+- A dedicated server-safe workspace is required because `@powerotp/contracts` is imported by
+  client components; exporting `node:crypto` from its root barrel would risk a browser bundle
+  boundary violation.
+- ISO 27001 A.8.5 remains partially implemented with concrete signed-clearance evidence.
+  A.8.24 moves from Planned to Partially implemented because cryptographic code and negative
+  tests now exist, while production key lifecycle controls do not.
+- `npm audit` reports one existing high-severity transitive `nanoid@3.3.17` advisory through
+  Next.js's bundled PostCSS dependency. It is unrelated to Phase 3 and was not auto-fixed or
+  widened into an unrequested dependency upgrade.
+
+**Unresolved risks / Phase 4 prerequisites.**
+
+- Add active/previous key overlap, retirement and revocation behavior, explicit clock-skew
+  bounds, and Valkey-backed atomic one-time nonce consumption.
+- Define production environment-variable names and validation for independent BotBlocker key
+  material, without creating or documenting real values.
+- Keep all HTTP routes, persistence beyond nonce replay, middleware, risk scoring, Passport,
+  PaidTokenPass, and customer wrappers in their assigned later phases.

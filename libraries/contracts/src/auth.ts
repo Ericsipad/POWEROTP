@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { HttpsUrlSchema, ProjectSchema } from "./projects.js";
+import { ProjectSchema } from "./projects.js";
 
 export const EmailSchema = z.string().trim().toLowerCase().email().max(254);
 export const PasswordSchema = z
@@ -43,13 +43,10 @@ export const CustomerRegistrationSchema = z.object({
  * The combined "rapid signup" flow (`POST /v1/auth/signup`): one submission
  * creates the account *and* a first project/API key together, shown once in
  * the same modal — see `docs/AS_BUILT.md`'s "Customer signup flow" section.
- * `website` seeds that first project's name and its one allowed origin.
+ * Website origins are configured later on the project and never gate account
+ * creation.
  */
-export const SignupSchema = z.object({
-  email: EmailSchema,
-  password: PasswordSchema,
-  website: HttpsUrlSchema,
-});
+export const SignupSchema = CustomerRegistrationSchema;
 
 export const SignupResponseSchema = z.object({
   status: z.enum(["verification_email_queued", "already_registered"]),

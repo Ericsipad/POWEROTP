@@ -1314,8 +1314,8 @@ normally."
 - **The rapid signup modal** (`apps/web/app/signup-modal.tsx`, triggered from
   a "Sign up" nav link and the homepage hero CTA via
   `apps/web/app/signup-cta.tsx`): one modal collects email, password (typed
-  twice, with the live checklist above), and a website URL — then, on
-  submit, creates the account **and** its first project/API key together,
+  twice, with the live checklist above) — then, on submit, creates the
+  account **and** its first project/API key together,
   showing the raw API key once directly in the same modal with the note
   "This key is shown once — copy it to a safe place. Your API key will work
   immediately on the free tier upon pressing the activation link in your
@@ -1325,9 +1325,12 @@ normally."
   `libraries/contracts/src/auth.ts`) does this in one request:
   `AuthService#register` (unchanged core logic, now returns `{ userId,
   alreadyVerified }` instead of `void` so the route can act on it) followed
-  by `ProjectService#create` using the website's hostname as the project
-  name and the website itself as its one `allowedOrigins` entry, with every
-  verification method enabled by default. A resubmission of an
+  by `ProjectService#create` using the neutral name `My Project`, no allowed
+  website origins, and every verification method enabled by default.
+  Website ownership is not an account-creation requirement: each dashboard
+  project card lets the customer add, replace, or clear its optional HTTPS
+  browser/widget origins later through the existing authenticated project
+  update endpoint. A resubmission of an
   already-unverified email reuses the existing project (never fabricates a
   second API key — the first one was already shown once and is
   non-recoverable); an already-verified email returns a generic

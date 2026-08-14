@@ -7,6 +7,7 @@ import {
   CreateVerificationSchema,
   CustomerRegistrationSchema,
   InteractionTokenClaimsSchema,
+  SignupSchema,
   UpdateProjectSchema,
 } from "./index.js";
 
@@ -139,6 +140,30 @@ describe("Phase 2 contracts", () => {
     assert.equal(
       UpdateProjectSchema.safeParse({
         callbackUrl: "http://customer.example/callback",
+      }).success,
+      false,
+    );
+  });
+
+  it("allows rapid signup without a website", () => {
+    assert.equal(
+      SignupSchema.safeParse({
+        email: "customer@example.com",
+        password: "Strong-password1",
+      }).success,
+      true,
+    );
+  });
+
+  it("rejects malformed HTTPS URLs without throwing", () => {
+    assert.doesNotThrow(() =>
+      UpdateProjectSchema.safeParse({
+        allowedOrigins: ["https://not a valid host"],
+      }),
+    );
+    assert.equal(
+      UpdateProjectSchema.safeParse({
+        allowedOrigins: ["https://not a valid host"],
       }).success,
       false,
     );
