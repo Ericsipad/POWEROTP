@@ -3,6 +3,7 @@
 import type { Project } from "@powerotp/contracts";
 import { useState, type FormEvent } from "react";
 
+import { BotBlockerPanel } from "./botblocker-panel";
 import { VerificationTabs } from "./verification-tabs";
 
 interface ProjectCardProps {
@@ -157,6 +158,10 @@ export function ProjectCard({
           Rotate API key
         </button>
       </div>
+      <BotBlockerPanel
+        projectId={project.id}
+        authenticatedFetch={authenticatedFetch}
+      />
       <VerificationTabs
         project={project}
         authenticatedFetch={authenticatedFetch}

@@ -36,11 +36,11 @@ Update this matrix's status column in the same phase that changes it — never m
 | CC3 | Risk assessment | Partially implemented | `THREAT_MODEL.md#botblocker-threat-model` is the current risk assessment; no formal recurring risk-assessment process exists yet |
 | CC4 | Monitoring activities | Planned | Requires Phase 8 (API surface) and Phase 15 (real ingestion) before there is anything to monitor |
 | CC5 | Control activities (segregation of duties) | Partially implemented | Admin/customer separation already exists on the OTP platform; BotBlocker admin routes (Phase 8) will reuse it, not duplicate it |
-| CC6.1 | Logical access — least privilege | Planned | Project-scoped API keys exist for OTP; BotBlocker site credentials follow the same pattern from Phase 5 onward |
+| CC6.1 | Logical access — least privilege | Partially implemented | Phase 5's configuration GET/PATCH requires an existing customer session and verifies project ownership on every read/mutation; BotBlocker runtime site credentials remain a later-phase control |
 | CC6.1 | Logical access — encryption at rest for sensitive data | Partially implemented | `PII_ENCRYPTION_KEY`-based envelope encryption exists for OTP account email (`docs/AS_BUILT.md`); BotBlocker persistence (Phase 6) must use an equivalent, separately keyed pattern for any PII it stores |
 | CC6.1 | Logical access — encryption in transit | Implemented | The whole platform is served over HTTPS today; no BotBlocker-specific work needed |
-| CC6.2 | Access provisioning/de-provisioning | Not applicable yet | No BotBlocker user/role model exists; applies once Phase 5's dashboard panel ships |
-| CC6.3 | Role-based access restrictions | Planned | Phase 5 (project configuration) and Phase 8 (admin routes) |
+| CC6.2 | Access provisioning/de-provisioning | Partially implemented | Phase 5 reuses the existing customer account/session lifecycle for its dashboard panel; no BotBlocker-specific runtime credential lifecycle exists yet |
+| CC6.3 | Role-based access restrictions | Partially implemented | Phase 5 configuration routes require the existing customer role plus project ownership; Phase 8 admin routes remain planned |
 | CC6.6 | Boundary protection against external threats | Partially implemented | Trusted-proxy/IP rules are documented (`THREAT_MODEL.md`) but not implemented; existing App Platform network posture applies today |
 | CC6.7 | Data transmission/removal controls | Planned | Retention/TTL design exists in `PASSPORT_BUSINESS_AND_LEGAL_PLAN.md` and `POWEROTP_BOTBLOCKER_DEVELOPMENT_PHASES.md` Phase 6; not yet built |
 | CC6.8 | Malicious software prevention | Not applicable | BotBlocker does not execute customer-supplied code; adapters explicitly "never download or execute arbitrary backend code" (`POWEROTP_BOTBLOCKER_PLAN.md`) |
@@ -62,14 +62,14 @@ Update this matrix's status column in the same phase that changes it — never m
 | Annex A ref | Control | Status | Evidence / target phase |
 | --- | --- | --- | --- |
 | A.5.1 | Policies for information security | Planned | No published BotBlocker-specific security policy yet; company-level policy exists for the OTP platform |
-| A.5.9 | Inventory of information and assets | Partially implemented | `POWEROTP_BOTBLOCKER_PLAN.md#risk-engine-and-reputation-store` enumerates planned collections; no real inventory exists until Phase 6 |
-| A.5.15 | Access control | Planned | Phase 5/8, reusing the OTP platform's existing session/CSRF/API-key patterns |
+| A.5.9 | Inventory of information and assets | Partially implemented | Phase 5 adds the documented `botblockerSites` collection and indexes; the remaining planned intelligence/session collections arrive in Phase 6 |
+| A.5.15 | Access control | Partially implemented | Phase 5 configuration GET/PATCH reuses customer sessions, CSRF on mutation, non-enumerating ownership checks, and cross-tenant tests; runtime/admin access controls remain Phase 8+ |
 | A.5.23 | Information security for cloud services | Implemented | DigitalOcean App Platform + MongoDB Atlas + Valkey are already the OTP platform's production posture; BotBlocker reuses the same infrastructure, not new cloud services |
 | A.5.31 | Legal, statutory, regulatory, contractual requirements | Partially implemented | `PASSPORT_BUSINESS_AND_LEGAL_PLAN.md` §5/§10 catalogs applicable regimes and open counsel questions; not all are resolved |
 | A.5.34 | Privacy and protection of PII | Partially implemented | Sanitization and retention design exists; real enforcement is Phase 6/10/15 |
 | A.8.2 | Privileged access rights | Planned | Admin BotBlocker routes (Phase 8) will require the same IP-allowlisted, short-session admin pattern documented in `THREAT_MODEL.md`'s OTP section |
 | A.8.5 | Secure authentication | Partially implemented | Phase 3 implements strict signed-clearance contracts and canonical Ed25519 sign/verify helpers with audience, site, session, nonce, issuance, and expiry binding; no gate consumes them until later phases |
-| A.8.9 | Configuration management | Partially implemented | Phase 4 adds validated, independently named active/previous/revoked Ed25519 key and bounded-skew configuration; no BotBlocker service consumes it until later phases |
+| A.8.9 | Configuration management | Partially implemented | Phase 4 adds validated Ed25519/skew service configuration; Phase 5 adds strict, durable, audited project settings with disabled/200 ms defaults, but no BotBlocker runtime consumes either yet |
 | A.8.16 | Monitoring activities | Planned | Phase 8 onward |
 | A.8.20 | Networks security | Implemented | Existing App Platform network posture (no public ARI/AMI/DB ports, etc. — see `THREAT_MODEL.md`'s "Node compromise" section) already applies; nothing BotBlocker-specific changes it |
 | A.8.23 | Web filtering | Not applicable | BotBlocker does not filter outbound web traffic for its own users |
@@ -77,7 +77,7 @@ Update this matrix's status column in the same phase that changes it — never m
 | A.8.25 | Secure development lifecycle | Implemented | The phase-gated development process itself (fresh-session scoping, mandatory tests before phase closeout, explicit unavailable responses instead of fabricated behavior) is the SDLC control, effective from Phase 0 |
 | A.8.26 | Application security requirements | Partially implemented | Captured in `THREAT_MODEL.md#botblocker-threat-model`; enforcement is per-phase as each surface is built |
 | A.8.28 | Secure coding | Implemented | Existing repository conventions (input validation via schemas, no secrets in browser bundles, parameterized queries) apply to BotBlocker code from the first line written |
-| A.8.29 | Security testing in development and acceptance | Partially implemented | Phase 1–4 unit suites now exercise contract boundaries, signature forgery/binding, key lifecycle/skew boundaries, concurrent nonce replay, and fail-closed storage errors; deployed end-to-end acceptance and penetration testing remain Phase 31 |
+| A.8.29 | Security testing in development and acceptance | Partially implemented | Phase 1–5 suites exercise contract boundaries, signature/key/replay controls, disabled defaults, timeout boundaries, credential-field exclusion, and cross-tenant configuration isolation; deployed end-to-end acceptance and penetration testing remain Phase 31 |
 | A.8.32 | Change management | Implemented | Same as SOC 2 CC8.1 above |
 
 ## What this matrix intentionally does not claim

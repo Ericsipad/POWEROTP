@@ -2,6 +2,7 @@ import type { AccountClass, VerificationType } from "@powerotp/contracts";
 import type { Db } from "mongodb";
 
 import { ensureBillingIndexes } from "./billing-persistence.js";
+import { ensureBotBlockerSiteIndexes } from "./botblocker-site-persistence.js";
 import { ensureChallengeIndexes } from "./challenge-persistence.js";
 import { ensureModalSessionIndexes } from "./modal-session-persistence.js";
 import { ensureVerificationIndexes } from "./verification-persistence.js";
@@ -193,4 +194,5 @@ export async function ensureIndexes(db: Db) {
   await ensureChallengeIndexes(db);
   await ensureModalSessionIndexes(db);
   await ensureBillingIndexes(db);
+  await ensureBotBlockerSiteIndexes(db);
 }

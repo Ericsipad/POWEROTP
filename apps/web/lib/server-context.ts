@@ -2,6 +2,7 @@ import { createAlertQueue, createAlertWorker, scheduleAlertChecks } from "@power
 import { AuthService } from "@powerotp/api/auth-service.js";
 import { BalanceService } from "@powerotp/api/balance-service.js";
 import { BillingChargeService } from "@powerotp/api/billing-charge-service.js";
+import { BotBlockerSiteService } from "@powerotp/api/botblocker-site-service.js";
 import {
   createBillingDailyChargeQueue,
   createBillingDailyChargeWorker,
@@ -34,6 +35,7 @@ export interface ServerContext {
   dataStores: DataStores;
   auth: AuthService;
   projects: ProjectService;
+  botBlockerSites: BotBlockerSiteService;
   verifications: VerificationService;
   nodes: NodeService;
   challenges: ChallengeService;
@@ -107,6 +109,7 @@ async function buildServerContext(): Promise<ServerContext> {
   await scheduleBillingDailyCharges(billingDailyChargeQueue);
 
   const projects = new ProjectService(dataStores.db, config, verifications);
+  const botBlockerSites = new BotBlockerSiteService(dataStores.db);
   const nodes = new NodeService(dataStores.db, config);
   const modalSessions = new ModalSessionService(dataStores.db);
 
@@ -141,6 +144,7 @@ async function buildServerContext(): Promise<ServerContext> {
     dataStores,
     auth,
     projects,
+    botBlockerSites,
     verifications,
     nodes,
     challenges,

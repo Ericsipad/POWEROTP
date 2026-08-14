@@ -684,3 +684,105 @@ not authorize configuring these values yet because no production BotBlocker cons
   customer session/CSRF/project ownership patterns, stay disabled by default, and must not add
   policy routes, gate-session persistence, wrappers, CleanDataPage implementation, or later
   BotBlocker behavior.
+
+## 2026-08-13 — Phase 5: Project configuration and timeout UI
+
+**Outcome.** Complete. Each customer project now has one durable `botblockerSites`
+configuration with a cryptographically random public site ID, an `enabled` preference that
+defaults to `false`, and an integer decision timeout from 50 through 2,000 ms that defaults to
+the recommended 200 ms. Authenticated customers can read and update only their own project's
+configuration through `GET/PATCH /v1/projects/{projectId}/botblocker`; PATCH requires the
+existing session CSRF token and writes an audit event. Every dashboard Project card now has a
+collapsed BotBlocker panel for these two settings.
+
+This phase does not activate customer traffic. The `enabled` value is stored configuration
+only: no policy service, gate route, middleware, wrapper, sensor, risk engine, or deployment
+consumes it. The UI states this explicitly. No site credential, private signing key, or
+server-only configuration is stored in or returned by the customer-visible contract.
+
+**Exact files added/changed:**
+
+- `libraries/contracts/src/botblocker-site.ts` (new)
+- `libraries/contracts/src/botblocker-site.test.ts` (new)
+- `libraries/contracts/src/index.ts`
+- `apps/api/src/botblocker-site-persistence.ts` (new)
+- `apps/api/src/botblocker-site-service.ts` (new)
+- `apps/api/src/botblocker-site-service.test.ts` (new)
+- `apps/api/src/persistence.ts`
+- `apps/web/app/v1/projects/[projectId]/botblocker/route.ts` (new)
+- `apps/web/lib/server-context.ts`
+- `apps/web/app/dashboard/botblocker-panel.tsx` (new)
+- `apps/web/app/dashboard/project-card.tsx`
+- `apps/web/app/dashboard.css`
+- `docs/POWEROTP_BOTBLOCKER_SOC2_ISO27001_CONTROL_MATRIX.md`
+- `docs/POWEROTP_BOTBLOCKER_AS_BUILT.md`
+
+**Contracts and persistence.**
+
+- `BotBlockerSiteConfigurationSchema` is strict and exposes only `siteId`, `projectId`,
+  `enabled`, `decisionTimeoutMs`, and creation/update timestamps.
+- `UpdateBotBlockerSiteConfigurationSchema` is strict, requires at least one recognized field,
+  and reuses Phase 1's inclusive integer `DecisionTimeoutMsSchema`.
+- `DEFAULT_BOTBLOCKER_SITE_CONFIGURATION` defines the one shared disabled/200 ms default.
+- MongoDB collection `botblockerSites` stores `_id`, `projectId`, `customerId`, `enabled`,
+  `decisionTimeoutMs`, `createdAt`, and `updatedAt`. A unique `projectId` index enforces one
+  site configuration per project; a `customerId`/`updatedAt` index supports customer-scoped
+  management.
+- First authorized read lazily and durably creates the default row, covering projects that
+  predate Phase 5 without a one-off data migration. Both reads and mutations independently
+  verify the session customer's ownership against the `projects` collection before touching
+  `botblockerSites`. Cross-tenant misses return the existing non-enumerating
+  `project_not_found` response.
+- PATCH records `botblocker_site.updated` in the existing `auditEvents` collection with only
+  the changed non-secret settings and optional request IP.
+
+**Configuration names.** None introduced. Phase 4's optional
+`BOTBLOCKER_ED25519_*`/`BOTBLOCKER_CLOCK_SKEW_MS` names and existing platform MongoDB, session,
+CSRF, audit, and Valkey configuration remain unchanged. No `.env` file or DigitalOcean value
+was read, printed, or modified.
+
+**Tests and results.**
+
+- `npm run typecheck -w @powerotp/contracts`: passed.
+- `npm run test -w @powerotp/contracts`: 124 tests / 33 suites, 0 failures. The five new tests
+  cover disabled/200 ms defaults, inclusive 50/2,000 ms boundaries, invalid integer/range and
+  empty/unknown updates, and compile-time/runtime exclusion of credentials and signing keys.
+- `npm run build -w @powerotp/contracts`: passed.
+- `npm run typecheck -w @powerotp/api`: passed.
+- `npm run test -w @powerotp/api`: 167 tests / 48 suites, 0 failures. The five new service
+  tests cover durable default creation, idempotent reads, audited updates, and cross-tenant
+  read/mutation isolation.
+- `npm run build -w @powerotp/api` and `npm run typecheck -w @powerotp/web`: passed.
+- `npm run verify`: exit code 0. The full monorepo build, lint/typecheck, and test sequence
+  passed, including the Next.js production build.
+- `npm audit`: 0 vulnerabilities.
+- `git diff --check`: clean.
+
+**Manual/migration/deployment steps.** No one-off MongoDB migration is needed. On a future
+normal application startup, `ensureIndexes()` creates the two `botblockerSites` indexes and
+existing projects receive their disabled default row on first authorized GET/PATCH. Nothing
+was deployed and no production configuration was changed in this phase. Deployment remains
+insufficient to activate BotBlocker because no customer-traffic consumer exists.
+
+**Findings and unresolved risks.**
+
+- The existing Next.js route layer already centralizes customer-session authentication, CSRF
+  verification, correlation IDs, error mapping, and server context. Phase 5 reused those
+  mechanisms rather than adding a parallel authentication path.
+- A customer's stored `enabled: true` preference is not evidence of runtime readiness and must
+  never be treated as activation by itself. A later activation phase must require real backing
+  services, signed policy, site credential provisioning, and end-to-end readiness checks.
+- Phase 5 intentionally creates no BotBlocker site credential. Future server-to-server
+  authentication must use a new BotBlocker-specific credential lifecycle, never the existing
+  OTP API key, callback secret, interaction-token secret, or Ed25519 private signing key.
+- No browser-facing code receives secret material; however, bundle/response leakage must still
+  be rechecked when credential provisioning and wrappers are implemented.
+- No CleanDataPage contract, row, token, payment, ad, or revenue behavior was added; that work
+  remains exclusively in Phases 24A–24C.
+
+**Phase 6 prerequisites.** Phase 6 may define and index only the planned `gateSessions`,
+`userIntelligence`, `riskEvents`, and `botblockerChallenges` persistence. It must decide and
+encode approved variable TTL retention before collecting real data, model repeated IPs as
+observations rather than unique identities, maintain project/customer scoping, and seed no fake
+development or production records. It must not add the Phase 7 policy HTTP service, Phase 8 API
+surface, scoring, wrappers, OTP orchestration, Passport, PaidTokenPass, or CleanDataPage work.

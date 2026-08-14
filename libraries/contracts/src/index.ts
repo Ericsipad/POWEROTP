@@ -6,6 +6,7 @@ export * from "./botblocker-clearance.js";
 export * from "./botblocker-policy.js";
 export * from "./botblocker-proofs.js";
 export * from "./botblocker-signing.js";
+export * from "./botblocker-site.js";
 export * from "./challenges.js";
 export * from "./modal-sessions.js";
 export * from "./nodes.js";
