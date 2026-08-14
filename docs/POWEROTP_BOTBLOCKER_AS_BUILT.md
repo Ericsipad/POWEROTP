@@ -1217,3 +1217,116 @@ None of those actions is authorized or performed by this phase.
   keep ordinary access fail-open, never cancel a pending decision at the UX timeout, and must
   not start the Phase 10 sensor, Phase 15 ingestion, Phase 17 scoring, Phase 19 OTP binding,
   Passport/PaidTokenPass, deployment, or CleanDataPage work.
+
+## 2026-08-13 — BotBlocker Phase 9: framework-neutral browser gate
+
+**Outcome.** Added the private workspace package `@powerotp/gate-core` as the
+framework-neutral browser state machine shared by future adapters. It implements exactly the
+six documented client states: `checking`, `optimistic_allow`, `observing`, `otp_required`,
+`verified`, and `unavailable`. It adds no sensor, framework wrapper, central decision service,
+score, OTP completion service, Passport/PaidTokenPass behavior, or CleanDataPage behavior.
+
+**Exact files.**
+
+- Package/build: `package.json`, `package-lock.json`, `libraries/gate-core/package.json`,
+  `libraries/gate-core/tsconfig.json`, and `libraries/gate-core/tsconfig.typecheck.json`.
+- Production: `libraries/gate-core/src/index.ts`, `states.ts`, `decision.ts`, `controller.ts`,
+  `polling.ts`, `post-message.ts`, `safe-return.ts`, and `page-lock.ts`.
+- Tests: `libraries/gate-core/src/states.test.ts`, `decision.test.ts`, `controller.test.ts`,
+  `polling.test.ts`, and `browser-boundary.test.ts`.
+- Evidence: this file and
+  `docs/POWEROTP_BOTBLOCKER_SOC2_ISO27001_CONTROL_MATRIX.md`.
+
+All production modules remain below 300 lines. The package depends at runtime only on
+`@powerotp/contracts`; `happy-dom` is test-only.
+
+**State transitions and effects.**
+
+- `checking -> optimistic_allow` occurs when the validated 50–2,000 ms UX timer elapses.
+  The controller retains `decisionPending: true`; it does not create or pass an abort signal,
+  cancel the request, or detach its eventual result. Both timeout and request failure start
+  fail-open observation so Phase 10 can still produce a later revision.
+- A valid `allow` from `checking`, `optimistic_allow`, or `unavailable` enters `observing`.
+  A valid `otp` from those states or `observing` enters `otp_required`, explicitly pauses
+  observation, freezes the page, and starts authoritative polling.
+- A later valid `otp` is accepted only when its sequence is newer for the bound gate session.
+  A stale/equal decision, replayed nonce, malformed envelope, expired or excessively
+  future-issued decision, wrong site, wrong session, wrong audience, or third outcome is
+  rejected.
+- While `otp_required`, a newer `allow`, timeout, network failure, and unavailable poll result
+  cannot reopen the page. Only authoritative status `verified` bound to the exact site, gate
+  session, and active challenge enters `verified`, stops polling, and unfreezes. A separate
+  `verified -> observing` transition starts a fresh observation interval; no pre-OTP interval
+  is resumed.
+- `unavailable` is an open ordinary-access state. It records decision/network unavailability
+  without fabricating an `allow`, score, proof, challenge result, or entitlement.
+
+**Authority and browser boundary.**
+
+- Gate-core receives raw decision material only through an injected verifier. The verifier
+  must return `verified: true` only for an authentic signed server artifact; gate-core then
+  independently applies the strict decision schema and site/session/audience/expiry/
+  sequence/nonce checks. This does not invent the signed-decision wire artifact assigned to
+  later scoring/revision phases.
+- A trusted same-origin adapter may restore the last applied sequence/nonces and
+  `otp_required` state before startup. Restored OTP starts frozen authoritative polling and
+  does not issue a new fail-open decision request. Untrusted browser storage is not an
+  authority source for this state.
+- The public browser API contains no site credential, project API credential, signing key, or
+  environment lookup. Static inspection found no `potp_bb_*`, credential/API-key, private-key,
+  signing-key, or `process.env` reference in gate-core.
+- The page lock mounts a credential-free HTTPS challenge iframe only on an explicitly
+  approved origin. Its modal overlay makes existing and dynamically inserted customer
+  elements inert and hidden from assistive technology, blocks Tab/Escape escape, suppresses
+  body scrolling, focuses the challenge, and restores the exact prior
+  accessibility/overflow/focus state on authoritative unfreeze.
+- The strict iframe message guard binds source window, exact origin, challenge ID, and a
+  three-field UX-only message. It can trigger an immediate server poll but cannot report or
+  apply verification.
+- The poller serializes authoritative checks, isolates stop/restart generations, persists
+  through pending/network-unavailable results, and stops only on server-confirmed
+  verification or explicit teardown.
+- Safe returns accept only an approved relative same-origin path and preserve its query and
+  fragment. Absolute, protocol-relative, credential-bearing, control-character, backslash,
+  encoded slash/backslash, cross-origin, unapproved, and malformed values fall back to an
+  approved path.
+
+**Configuration names.** No environment variable or secret was added. Constructor inputs are
+public/non-secret `siteId`, `gateSessionId`, customer `audience`, bounded
+`decisionTimeoutMs`, bounded clock skew, an opaque decision request, an
+authenticity-verifier port, optional trusted restored security state, and optional
+clock/timer/effect callbacks. The approved challenge origin, poll interval, and
+approved-return predicate are supplied by the future adapter. An active challenge ID must be
+bound before authoritative verification can unlock the page. No production value is
+configured in this phase.
+
+**Tests and results.**
+
+- `@powerotp/gate-core`: build/typecheck passed; 26 tests / 7 suites, 0 failures. Coverage
+  includes all state edges, timeout bounds/non-cancellation, late and revised OTP, strict
+  decision binding/replay/staleness, unsigned rejection, fail-open behavior, active-challenge
+  persistence, site/session/challenge-bound authoritative verification, fresh observation
+  restart, serialized polling,
+  postMessage non-authority, DOM freeze/focus/cleanup, and safe-return redirects.
+- `@powerotp/contracts`: 151 tests / 39 suites, 0 failures.
+- `npm run verify`: passed, including all workspace builds, typecheck-based linting, tests,
+  and the Next.js production build. No OneDrive retry was needed.
+- `npm audit`: 0 vulnerabilities. `git diff --check`: clean.
+
+**Manual/migration/deployment steps.** None. No `.env` or DigitalOcean setting was read or
+changed. No database/index migration, seed, runtime credential, signing key, policy release,
+DNS record, deployment, or customer activation was created.
+
+**Findings, unresolved risks, and Phase 10 prerequisites.**
+
+- Signed decision response/revision contracts and delivery do not exist yet. Gate-core
+  therefore exposes a fail-closed verifier port and cannot treat an unverified envelope as
+  authoritative; later phases must bind that port to the independent BotBlocker trust domain.
+- Browser-facing short-lived runtime-token issuance remains adapter/wrapper work. The gate
+  neither accepts nor exposes the Phase 8 server-only `potp_bb_*` credential.
+- The optimistic-load limitation remains inherent: a late OTP freezes future interaction but
+  cannot retract customer content already delivered before the decision arrived.
+- Phase 10 may consume only the explicit observation start/pause/fresh-resume effects and
+  decision-revision entry point. It must implement the versioned continuous sensor, 5-second
+  initial/30-second recurring/partial intervals, sanitized evidence, report ordering, and
+  prohibited-field proof without changing the six-state authority rules.
