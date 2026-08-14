@@ -215,17 +215,23 @@ behaviour in code. Publishing it is a legal obligation, not documentation hygien
 | --- | --- | --- |
 | ID documents, selfies, liveness video, biometric templates | Deleted on decision, hard cap 30 days | `POST /v3/sessions/:session_id/delete/` on approval; Didit app retention set to the 30-day floor |
 | Verification audit evidence (method, timestamp, result, model version, reviewer ID, hash — **no biometrics**) | 7 years | Supabase, encrypted |
-| Risk signals for verified users (takeover detection) | 30 days | Mongo TTL index |
-| Risk signals for suspected bots | **12 months** | Mongo TTL index |
+| BotBlocker gate sessions, user intelligence, risk events, and challenge records | **18 months** from the category's latest approved activity/event anchor | Mongo `retentionExpiresAt` TTL indexes |
 | Passport identity | Life of account + 90 days | Crypto-shredding — delete the record DEK |
+
+The BotBlocker anchors are exact: `gateSessions` and `userIntelligence` refresh from
+`lastObservedAt`, each `riskEvents` row runs from `occurredAt`, and
+`botblockerChallenges` refreshes from its latest lifecycle `updatedAt`.
 
 Two corrections to the proposed design are load-bearing:
 
-**Suspected-bot data cannot be retained indefinitely.** The argument that bot data is not
-personal data fails for false positives, and a false positive is a real human whose IP and
-fingerprint we would hold forever. GDPR storage limitation applies to the whole dataset
-because we cannot prove the classification was correct. Cap it at 12 months, keep it
-pseudonymous, and purge any record that later resolves to a verified human.
+**BotBlocker data cannot be retained indefinitely or split by an unproven human/bot label.**
+Every visitor receives a project-scoped `userIntelligence` record; a new record is created when
+the approved recent fingerprint/IP lookup does not match one. Gate sessions, intelligence,
+events, and challenges are retained for 18 months under explicit TTL dates. Operational
+fingerprint/IP matching searches only the preceding 30 days, even though the underlying
+security/audit record remains for the full retention period. IP lookup values remain
+pseudonymous, repeatable observations and are never unique identities. The 18-month period and
+30-day lookup window require confirmation in the pre-launch DPIA/LIA and privacy notice.
 
 **Deleting the media is correct, but keep the evidence.** A regulator will ask us to prove a
 highly effective check happened. Destroying the biometrics while retaining a minimal signed
@@ -782,7 +788,7 @@ window and is uninsured for that stretch.
 | 8 | Client fails its OSA duties and blames us | Medium | Contractual allocation mirroring Ofcom; supply the HEAA evidence pack; never guarantee compliance |
 | 9 | Minor's biometrics captured | High | Fail closed, destroy immediately, retain only a hashed denial marker |
 | 10 | One Supabase org holds every tenant's PII | Medium | Per-tenant isolation, RLS plus per-record encryption, clients never receive dashboard access |
-| 11 | False-positive bot data retained indefinitely | Medium | 12-month cap, pseudonymous storage, purge on resolution to a verified human |
+| 11 | False-positive visitor data retained indefinitely or treated as a proven bot | Medium | Uniform 18-month TTL, pseudonymous storage, no unknown/bot identity class, and a 30-day operational matching lookback |
 | 12 | Platform age APIs commoditise app use cases | Medium | Apple Declared Age Range and Google Play Age Signals cover apps, not the web, and include self-declaration. Integrate them as a fast path; the web and cross-site reuse remain defensible |
 
 ---

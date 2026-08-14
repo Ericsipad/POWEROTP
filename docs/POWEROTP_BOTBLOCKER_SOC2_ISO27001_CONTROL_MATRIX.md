@@ -42,7 +42,7 @@ Update this matrix's status column in the same phase that changes it — never m
 | CC6.2 | Access provisioning/de-provisioning | Partially implemented | Phase 5 reuses the existing customer account/session lifecycle for its dashboard panel; no BotBlocker-specific runtime credential lifecycle exists yet |
 | CC6.3 | Role-based access restrictions | Partially implemented | Phase 5 configuration routes require the existing customer role plus project ownership; Phase 8 admin routes remain planned |
 | CC6.6 | Boundary protection against external threats | Partially implemented | Trusted-proxy/IP rules are documented (`THREAT_MODEL.md`) but not implemented; existing App Platform network posture applies today |
-| CC6.7 | Data transmission/removal controls | Planned | Retention/TTL design exists in `PASSPORT_BUSINESS_AND_LEGAL_PLAN.md` and `POWEROTP_BOTBLOCKER_DEVELOPMENT_PHASES.md` Phase 6; not yet built |
+| CC6.7 | Data transmission/removal controls | Partially implemented | Phase 6 adds explicit 18-month `retentionExpiresAt` TTL indexes for all four BotBlocker persistence categories and a separate 30-day matching-lookback constant; no real ingestion is active |
 | CC6.8 | Malicious software prevention | Not applicable | BotBlocker does not execute customer-supplied code; adapters explicitly "never download or execute arbitrary backend code" (`POWEROTP_BOTBLOCKER_PLAN.md`) |
 | CC7.1 | Vulnerability detection | Not applicable yet | No BotBlocker attack surface is deployed; applies from Phase 8 onward |
 | CC7.2 | Security incident monitoring/response | Planned | No BotBlocker-specific incident runbook exists; scheduled for Phase 31 (production hardening) |
@@ -53,8 +53,8 @@ Update this matrix's status column in the same phase that changes it — never m
 | CC9.2 | Business continuity / disaster recovery | Planned | Phase 31 |
 | A1.1 | Availability — capacity/performance monitoring | Not applicable yet | No BotBlocker service is deployed |
 | A1.2 | Availability — backup and recovery | Planned | Phase 31, alongside the existing OTP-platform backup posture |
-| PI1 | Processing integrity — accurate, complete, authorized processing | Planned | Decision-sequencing/monotonic-revision rules are designed (`THREAT_MODEL.md#continuous-decision-revisions`) but not implemented; Phase 20 |
-| C1.1 | Confidentiality — data classified and protected | Partially implemented | Sanitized-telemetry rules are fully specified (`THREAT_MODEL.md#sanitized-telemetry-and-prohibited-data`); enforcement in code is Phase 10 |
+| PI1 | Processing integrity — accurate, complete, authorized processing | Partially implemented | Phase 6 adds a project-scoped atomic `lastAppliedSequence < candidate` persistence guard and a unique report-sequence/event-index idempotency index; actual ingestion and decision processing remain Phase 15/20 |
+| C1.1 | Confidentiality — data classified and protected | Partially implemented | Phase 6 strict durable contracts reuse the sanitized telemetry contract, reject unlisted/prohibited fields, and store only server-derived fingerprint/keyed-IP lookup hashes; sensor-side enforcement remains Phase 10 |
 | P1–P8 | Privacy criteria (if in scope) | Planned | Full DPIA/LIA/consent-copy work is tracked in `PASSPORT_BUSINESS_AND_LEGAL_PLAN.md` §§3, 5, 9 |
 
 ## ISO/IEC 27001:2022 Annex A control status (representative subset)
@@ -62,11 +62,11 @@ Update this matrix's status column in the same phase that changes it — never m
 | Annex A ref | Control | Status | Evidence / target phase |
 | --- | --- | --- | --- |
 | A.5.1 | Policies for information security | Planned | No published BotBlocker-specific security policy yet; company-level policy exists for the OTP platform |
-| A.5.9 | Inventory of information and assets | Partially implemented | Phase 5 adds the documented `botblockerSites` collection and indexes; the remaining planned intelligence/session collections arrive in Phase 6 |
+| A.5.9 | Inventory of information and assets | Partially implemented | Phases 5–6 define `botblockerSites`, `gateSessions`, `userIntelligence`, `riskEvents`, and `botblockerChallenges` plus their indexes; later policy, entitlement, and identity stores remain planned |
 | A.5.15 | Access control | Partially implemented | Phase 5 configuration GET/PATCH reuses customer sessions, CSRF on mutation, non-enumerating ownership checks, and cross-tenant tests; runtime/admin access controls remain Phase 8+ |
 | A.5.23 | Information security for cloud services | Implemented | DigitalOcean App Platform + MongoDB Atlas + Valkey are already the OTP platform's production posture; BotBlocker reuses the same infrastructure, not new cloud services |
 | A.5.31 | Legal, statutory, regulatory, contractual requirements | Partially implemented | `PASSPORT_BUSINESS_AND_LEGAL_PLAN.md` §5/§10 catalogs applicable regimes and open counsel questions; not all are resolved |
-| A.5.34 | Privacy and protection of PII | Partially implemented | Sanitization and retention design exists; real enforcement is Phase 6/10/15 |
+| A.5.34 | Privacy and protection of PII | Partially implemented | Phase 6 enforces strict data-minimized persistence shapes, non-unique keyed IP observations, 18-month TTLs, and a 30-day lookup window; collection/derivation is still inactive until Phase 10/15 and requires DPIA/LIA review |
 | A.8.2 | Privileged access rights | Planned | Admin BotBlocker routes (Phase 8) will require the same IP-allowlisted, short-session admin pattern documented in `THREAT_MODEL.md`'s OTP section |
 | A.8.5 | Secure authentication | Partially implemented | Phase 3 implements strict signed-clearance contracts and canonical Ed25519 sign/verify helpers with audience, site, session, nonce, issuance, and expiry binding; no gate consumes them until later phases |
 | A.8.9 | Configuration management | Partially implemented | Phase 4 adds validated Ed25519/skew service configuration; Phase 5 adds strict, durable, audited project settings with disabled/200 ms defaults, but no BotBlocker runtime consumes either yet |
@@ -77,7 +77,7 @@ Update this matrix's status column in the same phase that changes it — never m
 | A.8.25 | Secure development lifecycle | Implemented | The phase-gated development process itself (fresh-session scoping, mandatory tests before phase closeout, explicit unavailable responses instead of fabricated behavior) is the SDLC control, effective from Phase 0 |
 | A.8.26 | Application security requirements | Partially implemented | Captured in `THREAT_MODEL.md#botblocker-threat-model`; enforcement is per-phase as each surface is built |
 | A.8.28 | Secure coding | Implemented | Existing repository conventions (input validation via schemas, no secrets in browser bundles, parameterized queries) apply to BotBlocker code from the first line written |
-| A.8.29 | Security testing in development and acceptance | Partially implemented | Phase 1–5 suites exercise contract boundaries, signature/key/replay controls, disabled defaults, timeout boundaries, credential-field exclusion, and cross-tenant configuration isolation; deployed end-to-end acceptance and penetration testing remain Phase 31 |
+| A.8.29 | Security testing in development and acceptance | Partially implemented | Phase 1–6 suites exercise contract/retention boundaries, signature/key/replay controls, disabled defaults, timeout boundaries, prohibited-field exclusion, sequence/idempotency indexes, and cross-project persistence isolation; deployed end-to-end acceptance and penetration testing remain Phase 31 |
 | A.8.32 | Change management | Implemented | Same as SOC 2 CC8.1 above |
 
 ## What this matrix intentionally does not claim

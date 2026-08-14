@@ -786,3 +786,143 @@ encode approved variable TTL retention before collecting real data, model repeat
 observations rather than unique identities, maintain project/customer scoping, and seed no fake
 development or production records. It must not add the Phase 7 policy HTTP service, Phase 8 API
 surface, scoring, wrappers, OTP orchestration, Passport, PaidTokenPass, or CleanDataPage work.
+
+## 2026-08-13 — Phase 6: Gate-session and intelligence persistence
+
+**Outcome.** Complete. Added strict contracts and durable MongoDB definitions for
+`gateSessions`, `userIntelligence`, `riskEvents`, and `botblockerChallenges`. A gate session is
+one project-dashboard visit row; many gate sessions can reference one project-scoped
+`userIntelligence` profile. Immutable behavior reports and sanitized risk signals are normalized
+into `riskEvents` and retain both references, allowing a future expanded visit row without an
+unbounded embedded MongoDB array. Challenge rows record lifecycle and optional authoritative OTP
+references/results without implementing OTP orchestration.
+
+BotBlocker remains inactive for customer traffic. This phase adds no route, sensor, matching
+execution, score, threshold, policy service, OTP flow, fake data, or production record.
+
+**Exact files added/changed:**
+
+- `libraries/contracts/src/botblocker-persistence.ts` (new)
+- `libraries/contracts/src/botblocker-persistence.test.ts` (new)
+- `libraries/contracts/src/index.ts`
+- `apps/api/src/botblocker-intelligence-persistence.ts` (new)
+- `apps/api/src/botblocker-intelligence-persistence.test.ts` (new)
+- `apps/api/src/persistence.ts`
+- `docs/PASSPORT_BUSINESS_AND_LEGAL_PLAN.md`
+- `docs/POWEROTP_BOTBLOCKER_SOC2_ISO27001_CONTROL_MATRIX.md`
+- `docs/POWEROTP_BOTBLOCKER_AS_BUILT.md`
+
+**Contracts and durable entities.**
+
+- Every record carries explicit `customerId`, `projectId`, and `siteId`; every relationship is
+  explicit rather than inferred from an IP or fingerprint.
+- `gateSessions` uses a server-generated opaque `bgs_*` ID and stores
+  `userIntelligenceId`, server-derived fingerprint/keyed-IP lookup hashes, lifecycle state,
+  optional latest `allow | otp`, `lastAppliedSequence`, start/last-observed/end timestamps, audit
+  timestamps, and `retentionExpiresAt`.
+- `userIntelligence` uses a server-generated opaque `bui_*` ID and stores a non-unique
+  server-derived fingerprint hash, repeatable keyed-IP observations with first/last/count,
+  latest sanitized evidence, gate-session/report counts, first/last-observed timestamps, audit
+  timestamps, and `retentionExpiresAt`. It deliberately has no risk-score field; scoring is
+  Phase 17.
+- `riskEvents` uses a server-generated opaque `bre_*` ID and is a strict union of
+  `behavior_report` (the existing first/recurring/partial report contract) and `risk_signal`
+  (the existing sanitized risk-event contract). Every row binds
+  `userIntelligenceId`, `gateSessionId`, report sequence, event index, occurrence/audit
+  timestamps, and `retentionExpiresAt`. This is the durable history from which later phases may
+  update intelligence aggregates.
+- `botblockerChallenges` uses a server-generated opaque `bbc_*` ID and stores
+  `userIntelligenceId`, `gateSessionId`, the existing BotBlocker challenge state, optional
+  existing verification type/request linkage and success/failure result, lifecycle timestamps,
+  audit timestamps, and `retentionExpiresAt`. A result is invalid without an authoritative OTP
+  reference. No row is written and no success is fabricated in this phase.
+- Strict schemas reject missing scope, mismatched session/report sequences, invalid retention
+  boundaries, browser-supplied scores, raw page content, and fields prohibited by the sanitized
+  telemetry contract.
+- Raw IP addresses are not durable fields. Matching storage uses a future server-derived keyed
+  hash, and the same value is expressly allowed on multiple intelligence/session records. No
+  unique IP or fingerprint identity constraint exists.
+
+**Indexes.**
+
+- `gateSessions`: dashboard `{ customerId, projectId, siteId, startedAt }`; intelligence
+  relationship `{ customerId, projectId, siteId, userIntelligenceId, lastObservedAt }`; TTL on
+  `retentionExpiresAt`.
+- `userIntelligence`: 30-day-match-supporting project/site/fingerprint/keyed-IP/
+  `lastObservedAt` index; separate project/site/keyed-IP/`lastObservedAt` index; TTL on
+  `retentionExpiresAt`. Both lookup indexes are intentionally non-unique.
+- `riskEvents`: unique compound
+  `{ customerId, projectId, siteId, gateSessionId, reportSequence, eventIndex }` for sequence
+  idempotency; intelligence-history index
+  `{ customerId, projectId, siteId, userIntelligenceId, occurredAt }`; TTL on
+  `retentionExpiresAt`.
+- `botblockerChallenges`: scoped gate-session/issuance index and TTL on
+  `retentionExpiresAt`.
+- MongoDB's built-in unique `_id` index protects each server-generated entity ID.
+- `BotBlockerIntelligencePersistence` includes scope on every read and event-list query. Its
+  sequence advancement is one atomic `findOneAndUpdate` requiring
+  `lastAppliedSequence < candidate`, so equal/older or cross-project updates return no row.
+
+**Approved retention and lookup periods.**
+
+- All four categories retain records for 18 months, encoded consistently with the existing
+  platform convention as 548 days.
+- Gate-session retention refreshes from `lastObservedAt`.
+- User-intelligence retention refreshes from `lastObservedAt`.
+- Each risk-event row retains from `occurredAt`.
+- Challenge retention refreshes from its latest lifecycle `updatedAt`; its operational
+  `expiresAt` remains a separate challenge-validity boundary.
+- Fingerprint/IP matching may search only the preceding 30 days. Phase 6 exports the exact
+  30-day cutoff and creates supporting indexes, but does not implement matching.
+- `PASSPORT_BUSINESS_AND_LEGAL_PLAN.md` was reconciled from its prior contradictory
+  verified/suspected split to this approved uniform schedule and records pre-launch DPIA/LIA
+  confirmation as required.
+
+**Configuration names.** None introduced. No `.env` or DigitalOcean value was read, printed, or
+changed. A later real-ingestion phase must define and validate the independent server-side keyed
+derivation configuration before producing fingerprint/IP lookup hashes; Phase 6 does not invent
+a secret name or permit unkeyed/raw-IP persistence.
+
+**Tests and results.**
+
+- `npm run build/typecheck/test -w @powerotp/contracts`: passed; 134 tests / 34 suites,
+  0 failures. New tests cover strict scope, repeated-IP non-identity, prohibited fields,
+  no caller-supplied score, report/session sequence binding, retention boundaries, sanitized
+  event persistence, and authoritative challenge linkage.
+- `npm run build/typecheck/test -w @powerotp/api`: passed; 174 tests / 49 suites,
+  0 failures. New tests cover opaque IDs, exact 18-month retention, exact 30-day lookback,
+  required TTL/lookup/relationship/idempotency indexes, absence of a unique IP constraint,
+  atomic stale-sequence rejection, and cross-project isolation for all four entities.
+- `npm run verify`: passed after removing only the generated `apps/web/.next` directory and
+  retrying the documented OneDrive `EPERM` failure. Full build/lint/test passed, including the
+  Next.js production build.
+- `npm audit`: 0 vulnerabilities.
+- `git diff --check`: clean.
+
+**Manual/migration/deployment steps.** No manual or remote MongoDB migration is required.
+`ensureIndexes()` now invokes `ensureBotBlockerIntelligenceIndexes()` during normal API startup.
+No collection is seeded. No production environment, key, database, or deployment was changed.
+
+**Findings and unresolved risks.**
+
+- A normalized `riskEvents` history is required to preserve every five-second/30-second/partial
+  report without letting a long-running gate-session or intelligence document approach MongoDB's
+  document-size limit.
+- The persistence boundary is ready, but no writer exists. Phase 15 must derive keyed lookup
+  hashes from trusted inputs, perform the 30-day match, create a new intelligence row on no
+  match, atomically persist reports/events, and update aggregates. It must never accept a
+  browser-supplied fingerprint hash or score.
+- The 18-month retention policy and 30-day operational lookback are implemented decisions, but
+  legal confirmation remains a Phase 31 launch prerequisite through the DPIA/LIA and privacy
+  notice.
+- Challenge verification references/results are storage fields only. Phase 19 must bind them to
+  the existing authoritative verification state machine; a browser submission or `postMessage`
+  can never populate success.
+- No CleanDataPage contract, persistence, route, token, UI, payment, advertising, or revenue
+  behavior was added.
+
+**Phase 7 prerequisites.** No Phase 6 blocker remains for the signed policy service. Phase 7
+must add immutable `policyReleases` and signed `GET /v1/botblocker/policy/{siteId}` behavior,
+including ETag, compatibility, active/expiry windows, key set, last-known-good handling, and
+rollback protection. It must not activate customer traffic, add RapidAuth/browser ingestion,
+perform intelligence matching/scoring, orchestrate OTP, or begin CleanDataPage work.
