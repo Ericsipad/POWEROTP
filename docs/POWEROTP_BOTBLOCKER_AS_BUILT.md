@@ -17,7 +17,7 @@ never here.
 
 ## Current status
 
-BotBlocker is **not active for any real customer**. Phases 1–8 now provide strict protocol and
+BotBlocker is **not active for any real customer**. Phases 1–8 provide strict protocol and
 API contracts, an independent Ed25519 trust domain, disabled project/site configuration,
 durable scoped persistence boundaries, immutable signed policy publication/delivery, and the
 complete authenticated central HTTP surface. Runtime site credentials use an independent
@@ -25,9 +25,13 @@ hashed credential domain and every later-phase runtime capability returns a type
 response rather than a fabricated decision, score, challenge result, Passport result, paid
 entitlement, or visitor.
 
-There is still no customer middleware, browser gate/sensor, real intelligence ingestion,
-matching, scoring, OTP orchestration, Passport/PaidTokenPass implementation, billing/metering,
-production BotBlocker key, policy release, credential, deployment, or traffic activation.
+Phases 9–11 add the framework-neutral browser gate and continuous sanitized sensor plus a
+dependency-free raw Node HTTP wrapper. The wrapper verifies signed clearances locally, keeps
+site credentials server-only, exposes bounded same-origin bridge routes, and defaults every
+unbacked central capability to typed unavailable. There is still no Express/Next.js wrapper,
+real intelligence ingestion, matching, scoring, OTP orchestration, Passport/PaidTokenPass
+implementation, billing/metering, production BotBlocker key, policy release, credential,
+deployment, or traffic activation.
 `enabled: true` remains only stored preference and is insufficient for readiness. The existing
 hosted-widget bot-signal honeypot and `/v1/projects/{projectId}/visitors` OTP dashboard route
 remain separate from BotBlocker.
@@ -1441,3 +1445,132 @@ activation.
   revision delivery Phase 20, and production runtime-token/activation work remains in its
   assigned later phases. Phase 11 must keep unbacked routes typed unavailable and must not
   fabricate any result.
+
+## 2026-08-14 — BotBlocker Phase 11: raw Node HTTP wrapper
+
+**Outcome.** Added the private `@powerotp/gate-node` workspace for Node 22 raw
+`http.createServer` integrations. It continues protected application responses immediately,
+verifies signed clearances locally, starts but never cancels pending decisions, exposes a
+credential-free same-origin browser bridge, and composes the Phase 9 gate with the Phase 10
+sensor. Unbacked central operations remain typed unavailable. No Express/Next.js wrapper,
+ingestion, scoring, OTP orchestration, Passport/PaidTokenPass behavior, customer-hosted
+CleanDataPage route, production activation, or remote change was added.
+
+**Exact files.**
+
+- Workspace/build: `package.json`, `package-lock.json`,
+  `libraries/gate-node/package.json`, `tsconfig.json`, and
+  `tsconfig.typecheck.json`.
+- Server production:
+  `libraries/gate-node/src/index.ts`, `types.ts`, `server.ts`, `http.ts`,
+  `cookies.ts`, `session.ts`, `runtime.ts`, `bridge.ts`, and `discovery.ts`.
+- Browser production: `libraries/gate-node/src/browser.ts`.
+- Fixture/tests: `libraries/gate-node/src/fixture.ts`, `server.test.ts`, and
+  `browser.test.ts`.
+- Evidence: this file, `docs/THREAT_MODEL.md`, and
+  `docs/POWEROTP_BOTBLOCKER_SOC2_ISO27001_CONTROL_MATRIX.md`.
+
+All production modules remain below 300 lines. Runtime dependencies are only the existing
+`@powerotp/contracts`, `@powerotp/gate-core`, and
+`@powerotp/botblocker-signing` workspaces. `happy-dom` is test-only.
+
+**HTTP, proxy, limit, and exclusion behavior.**
+
+- `createPowerOtpRequestListener()` wraps a raw Node request listener, while
+  `createPowerOtpServer()` creates a Node server with `requireHostHeader` and the configured
+  header-size bound. The customer handler runs immediately with `access: "optimistic"` when
+  no valid clearance exists; the 50–2,000 ms timeout is passed to the already-open browser
+  gate and never aborts or delays the pending server decision.
+- Non-overridable exclusions cover `/_powerotp/*`, agent discovery, `OPTIONS`, standard
+  health/readiness/liveness paths, and static framework/asset paths. A separate customer
+  `protect(RequestContext)` predicate selects other routes. Paths, header bytes/count, cookie
+  bytes, and JSON bodies have validated limits; encoded separators, backslashes, malformed
+  paths, unsupported methods/content types, and oversized input are rejected with
+  content-free stable errors.
+- The direct socket address is authoritative by default. Forwarded IP use requires an explicit
+  header, explicit first/last position, and an explicit list of trusted proxy IPs. Wildcard,
+  empty, malformed, untrusted-hop, malformed-chain, and overlong forwarded values cannot
+  become the client IP.
+- Operational callbacks expose only fixed event categories and unavailable reasons. Errors
+  never include request bodies, headers, authorization, cookies, tokens, query values, or
+  customer content.
+
+**Clearance, session, and browser authority.**
+
+- Signed `powerotp_access` values are canonical base64url JSON and are accepted only after the
+  existing Ed25519 verifier validates active/previous key trust, site, audience, exact gate
+  session, issuance, and expiry. A returned clearance is issued only when its paired candidate
+  independently verifies as `allow` and no challenge is active. Cookies default to
+  `Secure; HttpOnly; SameSite=Lax; Path=/` with clearance expiry; insecure cookies require an
+  explicit fixture/development choice.
+- The default bounded single-process session store uses opaque 192-bit IDs and never evicts an
+  active OTP challenge. Capacity exhaustion leaves new ordinary page access optimistic but
+  cannot replace a retained active challenge. Deployments needing cross-process durability may
+  inject the `GateSessionStore` interface.
+- `/_powerotp/session`, `decision`, `decision/verify`, `browser-assessment`,
+  `challenge/status`, and `challenge/ack` are same-origin bridge routes. Every route requires
+  the non-simple `X-PowerOTP-Bridge: 1` marker; cross-site Fetch Metadata or a mismatched
+  `Origin` is rejected before session creation. Mutating routes are POST with bounded strict
+  JSON. Site credentials are validated server-side but never included in bootstrap, browser
+  imports, cookies, discovery, event payloads, or bridge responses.
+- `createGateBrowserCoordinator()` derives the sensor starting sequence and restored OTP/
+  ordering state only from the HttpOnly server session bridge. Initial and report candidates
+  pass through `GateController.applyDecisionRevision()` and its injected server verification
+  bridge. OTP composes the page lock, authoritative status poller, and strict UX-only
+  `postMessage` guard; only a site/session/challenge-bound polled `verified` result unfreezes
+  the page and starts a fresh sensor interval. Server state retains active OTP until the
+  browser acknowledges that applied authoritative result, so a lost poll response cannot
+  downgrade a reload.
+
+**Discovery and fixture.**
+
+- `GET|HEAD /.well-known/powerotp-agent` returns a strict protocol-v1 POWEROTP discovery
+  document. Optional CleanDataPage links must be credential-free HTTPS on `powerotp.com` or a
+  subdomain. The wrapper creates no customer `/powerotp/aisummary` or CleanDataPage content
+  route.
+- `createGateNodeFixture()` is a minimal raw Node server that demonstrates exclusions,
+  protected-route state, and typed unavailable behavior without inventing a decision or
+  production service.
+
+**Configuration names.** The wrapper accepts server-side constructor values corresponding to
+`POWEROTP_SITE_ID` and `POWEROTP_SITE_CREDENTIAL`, an audience/origin, public verification
+keys, timeout, route predicate, trusted-proxy settings, limits, and injected service/session
+ports. It does not read `process.env`, create a value, add an `.env` entry, or expose the
+`potp_bb_*` credential. Existing central `BOTBLOCKER_*` configuration remains unchanged.
+
+**Tests and results.**
+
+- Node 22.18.0 confirmed. `@powerotp/gate-node`: build/typecheck passed; 15 tests, 0 failures.
+  Coverage includes immediate optimistic delivery with a still-pending or synchronously
+  failing decision service, local clearance verification/issuance, OTP-clearance conflict,
+  trusted ordering restoration, same-origin/CSRF rejection, request/body bounds, protected
+  exclusions, trusted-proxy rejection, active-challenge non-eviction, strict discovery,
+  typed unavailable behavior, the minimal fixture, browser report sequence derivation and
+  revision application, page freeze, authoritative polling, and loss-safe OTP acknowledgement.
+- Focused existing suites passed unchanged:
+  `@powerotp/gate-core` 36 tests / 10 suites,
+  `@powerotp/botblocker-signing` 18 tests / 6 suites, and
+  `@powerotp/contracts` 153 tests / 39 suites.
+- `npm run verify`: passed, including every workspace build/typecheck/test and the Next.js
+  production build. No OneDrive retry was needed.
+- `npm audit`: 0 vulnerabilities. `git diff --check`: clean.
+
+**Manual/migration/deployment steps.** None. No migration, seed, key, credential, policy
+release, environment setting, DNS/configuration change, deployment, customer activation,
+commit, push, or remote mutation was performed.
+
+**Findings, limitations, and Phase 12 prerequisites.**
+
+- Signed decision/revision production delivery still does not exist. `GateNodeServices`
+  therefore defaults decision, assessment, polling, and verification to typed unavailable or
+  unverified; a real service must be injected later and every candidate still crosses both
+  server and gate-core validation.
+- The bounded default session store is process-local. Multi-instance customers must inject a
+  durable, concurrency-safe implementation before production; active OTP state must never be
+  evicted or downgraded during outages.
+- The optimistic-load limitation remains: immediate rendering means a late OTP cannot retract
+  content already delivered before the page lock.
+- Phase 12 may add only the Express middleware/router and React fixture over these shared
+  contracts. It must preserve middleware ordering, proxy/stream/upload/error exclusions,
+  WebSocket non-interference, credential separation, and all gate-node conformance invariants
+  without starting Next.js, ingestion, scoring, OTP orchestration, or CleanDataPage work.

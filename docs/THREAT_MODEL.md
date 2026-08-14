@@ -193,6 +193,9 @@ impact — they cannot eliminate it:
   explicitly; there is no implicit "trust everything" default.
 - Misconfigured trusted-proxy settings are a known false-negative/false-positive risk and must
   be covered by wrapper conformance tests before a wrapper ships.
+- The Phase 11 raw Node wrapper uses the direct socket IP by default. A forwarded address is
+  considered only when the deployment names the exact header, first/last chain position, and
+  explicit trusted proxy IPs; wildcard trust and an omitted chain position are rejected.
 
 ### Replay and session fixation
 
@@ -205,6 +208,10 @@ impact — they cannot eliminate it:
   privilege change (e.g. anonymous visitor to Passport holder) without a fresh signed
   assertion; this prevents an attacker from fixating a pre-verification session ID and
   inheriting a later-verified visitor's clearance.
+- The raw Node wrapper stores an opaque 192-bit session ID in an HttpOnly/SameSite cookie,
+  keeps ordering and challenge state server-side, and never evicts an active OTP challenge
+  from its bounded default store. Authoritative verification remains active server-side until
+  the browser acknowledges applying the bound polling result.
 
 ### Forged clearance and signed policy
 
@@ -231,6 +238,9 @@ impact — they cannot eliminate it:
   page's own script is treated as untrusted for this purpose since anything else running in
   that browser tab can also post messages.
 - Response-specific CSP `frame-ancestors` restricts which origins may embed the hosted iframe.
+- The raw Node bridge requires a non-simple same-origin marker plus Fetch Metadata/Origin
+  checks before session creation. Iframe messages can only trigger its authoritative poll;
+  the server retains OTP state if the poll response or browser acknowledgement is lost.
 
 ### Continuous decision revisions
 
@@ -257,6 +267,10 @@ impact — they cannot eliminate it:
 - Customers who need fail-closed behavior for a specific sensitive action must opt that action
   into decision-blocking mode explicitly; this is a per-route customer choice, not a global
   BotBlocker default.
+- The raw Node wrapper invokes the protected application handler immediately, including when
+  the decision service throws synchronously, and leaves the decision Promise pending. Its
+  bounded session store may fail open for a new ordinary visitor at capacity but pins every
+  active OTP challenge, so capacity pressure cannot convert active OTP into optimistic access.
 
 ### Direct-origin bypass
 
