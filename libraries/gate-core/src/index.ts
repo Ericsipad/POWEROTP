@@ -35,6 +35,17 @@ export {
   type SafeReturnOptions,
 } from "./safe-return.js";
 export {
+  createContinuousBrowserSensor,
+  type ContinuousBrowserSensor,
+  type ContinuousBrowserSensorOptions,
+} from "./sensor.js";
+export {
+  createSensorEvidenceAccumulator,
+  sanitizeRoutePath,
+  type SensorEvidenceAccumulator,
+  type SensorEvidenceOptions,
+} from "./sensor-evidence.js";
+export {
   gateStates,
   isGateObservationPaused,
   isGatePageOpen,

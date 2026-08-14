@@ -37,7 +37,7 @@ export const BotBlockerProtocolVersionSchema = z.literal(BOTBLOCKER_PROTOCOL_VER
  * (e.g. telling apart "older contracts build, still wire-compatible" from
  * a genuine protocol break); it never gates acceptance by itself.
  */
-export const BOTBLOCKER_CONTRACT_VERSION = "2026-08-12";
+export const BOTBLOCKER_CONTRACT_VERSION = "2026-08-14";
 export const BotBlockerContractVersionSchema = z.literal(BOTBLOCKER_CONTRACT_VERSION);
 
 // ---------------------------------------------------------------------------
@@ -189,6 +189,30 @@ export const HoneypotActivationSchema = z
   })
   .strict();
 
+export const BROWSER_ENVIRONMENT_EVIDENCE_VERSION = 1;
+export const browserAutomationIndicators = [
+  "webdriver",
+  "untrusted_pointer",
+  "untrusted_click",
+  "untrusted_scroll",
+] as const;
+export const BrowserAutomationIndicatorSchema = z.enum(browserAutomationIndicators);
+
+/**
+ * Versioned, deliberately narrow environment metadata. The fixed indicator
+ * enum prevents the sensor from reporting arbitrary browser properties,
+ * user-agent strings, plugin/font inventories, or raw event details.
+ */
+export const BrowserEnvironmentEvidenceSchema = z
+  .object({
+    evidenceVersion: z.literal(BROWSER_ENVIRONMENT_EVIDENCE_VERSION),
+    sensorVersion: z.string().min(1).max(100).regex(/^[A-Za-z0-9._-]+$/),
+    automationIndicators: z.array(BrowserAutomationIndicatorSchema).max(
+      browserAutomationIndicators.length,
+    ),
+  })
+  .strict();
+
 /**
  * The complete sanitized evidence shape the runtime sensor is permitted to
  * report. Every field is checked against the "Allowed" column of
@@ -205,6 +229,8 @@ export const BrowserEvidenceSchema = z
     mouseDirectness: MouseDirectnessSchema,
     scroll: ScrollBehaviorSchema,
     honeypotActivations: z.array(HoneypotActivationSchema).max(50),
+    // Optional for protocol-v1 compatibility; the Phase 10 sensor always emits it.
+    environment: BrowserEnvironmentEvidenceSchema.optional(),
   })
   .strict();
 
@@ -411,6 +437,8 @@ export type ClickObservation = z.infer<typeof ClickObservationSchema>;
 export type MouseDirectness = z.infer<typeof MouseDirectnessSchema>;
 export type ScrollBehavior = z.infer<typeof ScrollBehaviorSchema>;
 export type HoneypotActivation = z.infer<typeof HoneypotActivationSchema>;
+export type BrowserAutomationIndicator = z.infer<typeof BrowserAutomationIndicatorSchema>;
+export type BrowserEnvironmentEvidence = z.infer<typeof BrowserEnvironmentEvidenceSchema>;
 export type BrowserEvidence = z.infer<typeof BrowserEvidenceSchema>;
 export type ReportSequence = z.infer<typeof ReportSequenceSchema>;
 export type InitialBehaviorReport = z.infer<typeof InitialBehaviorReportSchema>;

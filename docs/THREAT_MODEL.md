@@ -323,6 +323,7 @@ visitor's browser:
 | Mouse directness/straight-line metrics between clicks | Raw mouse coordinate trails |
 | Scroll smoothness / high-speed aggregate metrics | Raw scroll trails |
 | Honeypot/decoy activations | — |
+| Versioned sensor metadata and fixed-enum `webdriver`/untrusted-event indicators | Raw user-agent strings, plugin/font inventories, arbitrary browser-property scans, raw event details |
 | Timing (5s initial, 30s recurring, partial-report triggers) | Raw keystrokes, passwords, emails, DOM snapshots, page content |
 
 Any new telemetry field proposed in a later phase must be checked against this table before

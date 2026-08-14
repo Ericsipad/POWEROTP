@@ -1330,3 +1330,114 @@ DNS record, deployment, or customer activation was created.
   decision-revision entry point. It must implement the versioned continuous sensor, 5-second
   initial/30-second recurring/partial intervals, sanitized evidence, report ordering, and
   prohibited-field proof without changing the six-state authority rules.
+
+## 2026-08-14 — BotBlocker Phase 10: continuous browser sensor
+
+**Outcome.** Added a framework-neutral continuous browser sensor to
+`@powerotp/gate-core`. It emits the existing strict first/recurring/partial behavior-report
+contracts, integrates directly with Phase 9's observation effects and verifier-backed decision
+entry point, and adds a narrowly versioned environment-evidence contract. No wrapper, HTTP
+transport, runtime token, ingestion, matching, score, OTP orchestration, Passport,
+PaidTokenPass, billing, deployment, or CleanDataPage behavior was added.
+
+**Exact files.**
+
+- Contracts: `libraries/contracts/src/botblocker.ts` and
+  `libraries/contracts/src/botblocker.test.ts`.
+- Sensor production: `libraries/gate-core/src/sensor.ts`,
+  `libraries/gate-core/src/sensor-evidence.ts`, and
+  `libraries/gate-core/src/index.ts`.
+- Sensor tests: `libraries/gate-core/src/sensor.test.ts` and
+  `libraries/gate-core/src/sensor-evidence.test.ts`.
+- Evidence: this file, `docs/THREAT_MODEL.md`, and
+  `docs/POWEROTP_BOTBLOCKER_SOC2_ISO27001_CONTROL_MATRIX.md`.
+
+All new production modules remain within the 200–300-line guideline. No dependency or package
+manifest changed.
+
+**Contracts and evidence minimization.**
+
+- `BOTBLOCKER_CONTRACT_VERSION` is now `2026-08-14`; wire protocol remains version 1.
+  `BrowserEnvironmentEvidenceSchema` is optional only so existing protocol-v1 report producers
+  remain compatible, while this Phase 10 sensor always emits it.
+- Environment evidence contains exactly `evidenceVersion: 1`, a validated immutable sensor
+  version, and a bounded fixed-enum list of `webdriver`, `untrusted_pointer`,
+  `untrusted_click`, and `untrusted_scroll`. Arbitrary indicators, raw user-agent strings,
+  plugin/font inventories, browser-property scans, and raw event details are rejected.
+- Routes are reduced to `location.pathname` and defensively strip query/fragment before the
+  report is constructed. Clicks contain only a fixed element category and an explicit safe
+  `data-powerotp-id`; honeypots use only an explicit safe
+  `data-powerotp-honeypot-id`. Text, values, and selectors are never read into report state.
+- Mouse processing retains only the current segment start/last point and running path length,
+  then emits an average directness ratio and sample count. It never stores or emits a coordinate
+  trail. Scroll processing retains only the previous aggregate sample and emits a normalized
+  smoothness score plus high-speed count, never a scroll trail.
+- Every sensor snapshot is parsed through `BrowserEvidenceSchema`, and every report is parsed
+  through `BehaviorReportSchema` before the injected transport receives it. Compile-time and
+  runtime contract tests reject raw fingerprint fields; sensor tests prove clicked text, form
+  values, URL secrets, coordinate trails, scroll trails, and unsafe explicit IDs are absent.
+
+**Cadence, ordering, and gate integration.**
+
+- The first scheduled report fires after exactly 5,000 ms. After it is emitted, recurring
+  reports schedule at exactly 30,000 ms. Partial reports close intervals on History API,
+  `popstate`/`hashchange`, page hide, and page exit events. Hidden pages start a clean interval
+  when visible again.
+- The trusted adapter must supply the next non-negative safe report sequence; the sensor
+  increments it monotonically across complete and partial intervals and never resets it after
+  OTP.
+- `handleGateEffect()` consumes only `start_observation` and `pause_observation`.
+  `pause_observation` clears the timer and all accumulated evidence without emitting the
+  pre-OTP interval. `start_observation` with `fresh: true` creates a new generation and empty
+  accumulator after authoritative verification.
+- Every in-flight report response is bound to its observation generation. A response from an
+  interval paused for OTP is discarded and cannot be applied after fresh resume. Same-generation
+  opaque decision candidates go only to gate-core's existing authenticity verifier and
+  monotonic decision validator; out-of-order older decisions are rejected there.
+- Report-send rejection is fail-open and does not stop later cadence. The sensor never creates
+  an `allow`, `otp`, score, challenge success, Passport approval, or entitlement. Active OTP
+  remains controlled exclusively by the Phase 9 gate state machine.
+
+**Configuration and environment variables.** None. Inputs are browser-safe references,
+the public gate-session binding, a policy-selected non-secret sensor version, a trusted
+next-sequence value, injected timers/clock for deterministic testing, an injected report
+transport, and the verifier-backed decision-revision callback. No environment lookup, API/site
+credential, signing key, secret, or production value was added or read.
+
+**Tests and results.**
+
+- `@powerotp/gate-core`: build/typecheck passed; 36 tests / 10 suites, 0 failures. New tests
+  cover exact 5-second/30-second timers, navigation/hide/exit reports, route/click/ID
+  sanitization, directness and scroll aggregates, fixed automation indicators, invalid
+  versions/sequences, monotonic ordering, out-of-order stale decisions, OTP pause,
+  pre-OTP-response discard, and fresh empty resume.
+- `@powerotp/contracts`: typecheck passed; 153 tests / 39 suites, 0 failures. New tests cover
+  versioned environment evidence, approved indicator enums, and compile-time/runtime rejection
+  of raw browser fingerprint fields.
+- `npm run verify`: passed, including all workspace builds, lint/typechecking, tests, and the
+  Next.js production build. No OneDrive retry was needed.
+- `npm audit`: 0 vulnerabilities. `git diff --check`: clean.
+
+**Manual/migration/deployment steps.** None. There is no migration, seed, production sensor
+asset, policy release, runtime token, credential/configuration change, remote mutation, or
+deployment. The package remains library code with injected transport and no customer
+activation.
+
+**Findings, control evidence, and Phase 11 prerequisites.**
+
+- The sanitized-telemetry table now explicitly approves only versioned sensor metadata and the
+  fixed automation enum while prohibiting raw fingerprint inventories/property scans. The
+  control matrix now records source-side data minimization, browser ordering/staleness, and
+  deterministic sensor tests; no certification claim or "Implemented" status was added.
+- A Phase 11 wrapper must instantiate one sensor per page, derive `startingSequence` from trusted
+  gate/session state, provide the same-origin authenticated report bridge without exposing the
+  server-only `potp_bb_*` credential, and route returned material through
+  `applyDecisionRevision()`. It must not treat the report callback's opaque return value as
+  authority itself.
+- History instrumentation is installed only for the sensor lifetime and restored on disposal.
+  Framework wrappers should also call `recordNavigation()` when their router has a more precise
+  navigation signal.
+- Real browser assessment ingestion remains Phase 15, scoring Phase 17, authoritative decision
+  revision delivery Phase 20, and production runtime-token/activation work remains in its
+  assigned later phases. Phase 11 must keep unbacked routes typed unavailable and must not
+  fabricate any result.

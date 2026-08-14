@@ -4,7 +4,9 @@ import { describe, it } from "node:test";
 import {
   BOTBLOCKER_TIMEOUT_MAX_MS,
   BOTBLOCKER_TIMEOUT_MIN_MS,
+  BROWSER_ENVIRONMENT_EVIDENCE_VERSION,
   BehaviorReportSchema,
+  type BrowserEnvironmentEvidence,
   type BrowserEvidence,
   BrowserEvidenceSchema,
   type ClickObservation,
@@ -78,6 +80,31 @@ describe("BrowserEvidenceSchema", () => {
     assert.equal(result.success, false);
   });
 
+  it("accepts only versioned, approved automation indicators", () => {
+    assert.equal(
+      BrowserEvidenceSchema.safeParse({
+        ...validEvidence(),
+        environment: {
+          evidenceVersion: BROWSER_ENVIRONMENT_EVIDENCE_VERSION,
+          sensorVersion: "sensor-1.0.0",
+          automationIndicators: ["webdriver", "untrusted_click"],
+        },
+      }).success,
+      true,
+    );
+    assert.equal(
+      BrowserEvidenceSchema.safeParse({
+        ...validEvidence(),
+        environment: {
+          evidenceVersion: 2,
+          sensorVersion: "sensor-1.0.0",
+          automationIndicators: ["headless_guess"],
+        },
+      }).success,
+      false,
+    );
+  });
+
   describe("prohibited-field exclusion", () => {
     it("rejects raw keystrokes at runtime (and cannot be assigned at compile time)", () => {
       const valid = validEvidence();
@@ -115,6 +142,21 @@ describe("BrowserEvidenceSchema", () => {
 
       assert.equal(
         BrowserEvidenceSchema.safeParse({ ...valid, clicks: [withClickedText] }).success,
+        false,
+      );
+    });
+
+    it("rejects raw browser fingerprint fields in environment evidence", () => {
+      const environment: BrowserEnvironmentEvidence = {
+        evidenceVersion: BROWSER_ENVIRONMENT_EVIDENCE_VERSION,
+        sensorVersion: "sensor-1.0.0",
+        automationIndicators: [],
+        // @ts-expect-error -- environment evidence cannot carry a raw user-agent string.
+        userAgent: "raw browser fingerprint",
+      };
+
+      assert.equal(
+        BrowserEvidenceSchema.safeParse({ ...validEvidence(), environment }).success,
         false,
       );
     });
