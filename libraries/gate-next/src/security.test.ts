@@ -147,6 +147,11 @@ test("late OTP persists across polling failure until authoritative acknowledgeme
     bridgeRequest("/_powerotp/decision/verify", gateCookie, { candidate }),
   );
   assert.equal((await verified.json()).verified, true);
+  const opened = await adapter.route(emptyPostBridgeRequest(
+    "/_powerotp/challenge/open",
+    gateCookie,
+  ));
+  assert.equal(opened.status, 200);
 
   const failed = await adapter.route(bridgeRequest("/_powerotp/challenge/status", gateCookie));
   assert.equal(failed.status, 503);
@@ -205,6 +210,16 @@ function bridgeRequest(path: string, gateCookie: string, body?: unknown): NextRe
       ...(body === undefined ? {} : { "content-type": "application/json" }),
     },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  });
+}
+
+function emptyPostBridgeRequest(path: string, gateCookie: string): NextRequest {
+  return request(path, {
+    method: "POST",
+    headers: {
+      cookie: gateCookie,
+      "x-powerotp-bridge": "1",
+    },
   });
 }
 

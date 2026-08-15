@@ -22,10 +22,10 @@ export function isGateTransitionAllowed(from: GateState, to: GateState): boolean
   return from === to || allowedTransitions[from].includes(to);
 }
 
-export function isGatePageOpen(state: GateState): boolean {
-  return state !== "otp_required";
+export function isGatePageOpen(_state: GateState, otpOpen = false): boolean {
+  return !otpOpen;
 }
 
-export function isGateObservationPaused(state: GateState): boolean {
-  return state === "otp_required";
+export function isGateObservationPaused(_state: GateState, otpOpen = false): boolean {
+  return otpOpen;
 }

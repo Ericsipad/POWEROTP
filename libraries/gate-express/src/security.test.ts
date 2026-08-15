@@ -216,6 +216,11 @@ test("late OTP remains authoritative through polling failure and acknowledgement
   const delivered = await decisionRequest(origin, gateCookie);
   const candidate = (await delivered.json()).candidate;
   await verifyRequest(origin, gateCookie, candidate);
+  const opened = await fetch(`${origin}/_powerotp/challenge/open`, {
+    method: "POST",
+    headers: bridgeHeaders(gateCookie),
+  });
+  assert.equal(opened.status, 200);
 
   const failedPoll = await fetch(`${origin}/_powerotp/challenge/status`, {
     headers: bridgeHeaders(gateCookie),

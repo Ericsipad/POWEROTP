@@ -51,6 +51,7 @@ export function beginDecision(options: {
         if (challenge) {
           options.session.activeChallenge = challenge;
           options.session.challengeVerified = false;
+          options.session.challengeOpened = false;
         }
       }
       return options.save().then(() => result);
@@ -93,7 +94,6 @@ export function safeDecisionResult(result: DecisionServiceResult): object {
   return {
     status: "decision",
     candidate: result.candidate,
-    ...(result.challenge ? { challenge: normalizeChallenge(result.challenge) } : {}),
   };
 }
 

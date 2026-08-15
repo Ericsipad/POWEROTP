@@ -35,10 +35,12 @@ describe("gate state transitions", () => {
     assert.equal(isGateTransitionAllowed("observing", "unavailable"), false);
   });
 
-  it("models page and observation behavior explicitly", () => {
+  it("keeps OTP advisory until explicit presentation", () => {
     for (const state of gateStates) {
-      assert.equal(isGatePageOpen(state), state !== "otp_required");
-      assert.equal(isGateObservationPaused(state), state === "otp_required");
+      assert.equal(isGatePageOpen(state), true);
+      assert.equal(isGateObservationPaused(state), false);
     }
+    assert.equal(isGatePageOpen("otp_required", true), false);
+    assert.equal(isGateObservationPaused("otp_required", true), true);
   });
 });

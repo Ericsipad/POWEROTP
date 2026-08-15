@@ -1,4 +1,8 @@
-import type { BehaviorReport } from "@powerotp/contracts";
+import {
+  OtpLaunchMetadataSchema,
+  type BehaviorReport,
+  type GateRecommendationSnapshot,
+} from "@powerotp/contracts";
 import {
   createAuthoritativePoller,
   createChallengeMessageHandler,
@@ -29,13 +33,15 @@ export interface GateBrowserOptions {
 export interface GateBrowserCoordinator {
   controller: GateController;
   start(): void;
+  getSnapshot(): GateRecommendationSnapshot;
+  subscribe(listener: () => void): () => void;
+  openOtp(): Promise<boolean>;
   dispose(): void;
 }
 
 interface DecisionResponse {
   status: "decision";
   candidate: unknown;
-  challenge?: ChallengeMetadata;
 }
 
 export async function createGateBrowserCoordinator(
@@ -48,7 +54,7 @@ export async function createGateBrowserCoordinator(
       throw new Error("POWEROTP gate bootstrap unavailable");
     },
   );
-  let challenge = bootstrap.challenge;
+  let challenge: ChallengeMetadata | undefined;
   let lock: PageLock | undefined;
   let messageHandler: ((event: MessageEvent<unknown>) => boolean) | undefined;
   let disposed = false;
@@ -72,15 +78,9 @@ export async function createGateBrowserCoordinator(
     onStatus() {},
   });
 
-  const setChallenge = (value: ChallengeMetadata | undefined) => {
-    if (!value) return;
-    challenge = value;
-  };
-
   const requestDecision = async (): Promise<unknown> => {
     const response = await postJson<unknown>(fetcher, "/_powerotp/decision", {});
     if (!isDecisionResponse(response)) throw new Error("Decision unavailable");
-    setChallenge(response.challenge);
     return response.candidate;
   };
 
@@ -106,7 +106,6 @@ export async function createGateBrowserCoordinator(
         report,
       );
       if (!isDecisionResponse(response)) return undefined;
-      setChallenge(response.challenge);
       return response.candidate;
     },
     applyDecisionRevision: (candidate) => controller.applyDecisionRevision(candidate),
@@ -132,10 +131,21 @@ export async function createGateBrowserCoordinator(
     restoredSecurityState: bootstrap.restoredSecurityState,
     requestDecision,
     verifyDecision,
-    onStateChange(snapshot) {
-      if (snapshot.state === "otp_required" && challenge) {
-        controller.bindActiveChallenge(challenge.challengeId);
-      }
+    launchOtp: async () => {
+      const launch = OtpLaunchMetadataSchema.safeParse(
+        await postEmpty(fetcher, "/_powerotp/challenge/open"),
+      );
+      if (!launch.success) throw new Error("OTP launch unavailable");
+      if (!options.document.body) throw new Error("OTP launch requires document.body");
+      removeMessageHandler();
+      lock?.unfreeze();
+      challenge = launch.data;
+      lock = createPageLock({
+        document: options.document,
+        challengeUrl: launch.data.challengeUrl,
+        allowedChallengeOrigin: launch.data.challengeOrigin,
+      });
+      return launch.data;
     },
     onEffect: handleEffect,
   });
@@ -145,11 +155,10 @@ export async function createGateBrowserCoordinator(
       options.onError?.("bridge");
       return;
     }
-    lock ??= createPageLock({
-      document: options.document,
-      challengeUrl: challenge.challengeUrl,
-      allowedChallengeOrigin: challenge.challengeOrigin,
-    });
+    if (!lock) {
+      options.onError?.("bridge");
+      return;
+    }
     lock.freeze();
     removeMessageHandler();
     messageHandler = createChallengeMessageHandler({
@@ -169,6 +178,9 @@ export async function createGateBrowserCoordinator(
   return {
     controller,
     start: () => controller.start(),
+    getSnapshot: () => controller.getSnapshot(),
+    subscribe: (listener) => controller.subscribe(listener),
+    openOtp: () => controller.openOtp(),
     dispose() {
       if (disposed) return;
       disposed = true;
@@ -212,21 +224,25 @@ async function postJson<T>(
   return response.json() as Promise<T>;
 }
 
+async function postEmpty<T>(fetcher: typeof fetch, path: string): Promise<T> {
+  const response = await fetcher(path, {
+    method: "POST",
+    credentials: "same-origin",
+    headers: {
+      accept: "application/json",
+      "x-powerotp-bridge": "1",
+    },
+  });
+  if (!response.ok) throw new Error("Bridge request failed");
+  return response.json() as Promise<T>;
+}
+
 function isDecisionResponse(value: unknown): value is DecisionResponse {
   return (
     isRecord(value) &&
     value.status === "decision" &&
     "candidate" in value &&
-    (!("challenge" in value) || isChallenge(value.challenge))
-  );
-}
-
-function isChallenge(value: unknown): value is ChallengeMetadata {
-  return (
-    isRecord(value) &&
-    typeof value.challengeId === "string" &&
-    typeof value.challengeUrl === "string" &&
-    typeof value.challengeOrigin === "string"
+    Object.keys(value).length === 2
   );
 }
 

@@ -4,6 +4,7 @@ import type {
   BehaviorReport,
   BotBlockerUnavailableResponse,
   DecisionRevisionEnvelope,
+  OtpLaunchMetadata,
   ReportSequence,
   RequestContext,
   SignedSiteClearance,
@@ -24,17 +25,15 @@ export interface GateSession {
   lastApplied?: ReportSequence;
   acceptedNonces: string[];
   activeChallenge?: ChallengeMetadata;
+  challengeOpened?: boolean;
+  latestDecisionOutcome?: "allow" | "otp";
   challengeVerified?: boolean;
   pendingDecision?: Promise<DecisionServiceResult>;
   latestDecision?: unknown;
   latestClearance?: unknown;
 }
 
-export interface ChallengeMetadata {
-  challengeId: string;
-  challengeUrl: string;
-  challengeOrigin: string;
-}
+export type ChallengeMetadata = OtpLaunchMetadata;
 
 export interface GateSessionStore {
   get(id: string): Promise<GateSession | undefined> | GateSession | undefined;
@@ -135,7 +134,6 @@ export interface BrowserBootstrap {
   startingSequence: number;
   decisionTimeoutMs: number;
   restoredSecurityState?: RestoredGateSecurityState;
-  challenge?: ChallengeMetadata;
 }
 
 export interface ClearanceVerification {

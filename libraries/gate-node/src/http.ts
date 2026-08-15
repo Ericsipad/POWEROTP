@@ -176,6 +176,19 @@ export async function readJsonBody(
   }
 }
 
+/** Reads a bounded POST body that must contain no caller-supplied data. */
+export async function readEmptyBody(
+  request: IncomingMessage,
+  maxBytes: number,
+): Promise<void> {
+  let bytes = 0;
+  for await (const chunk of request) {
+    bytes += Buffer.byteLength(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    if (bytes > maxBytes) throw new HttpInputError(413);
+  }
+  if (bytes !== 0) throw new HttpInputError(400);
+}
+
 export function sendJson(
   response: ServerResponse,
   status: number,

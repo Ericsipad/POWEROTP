@@ -171,8 +171,10 @@ customer DOM. This is a trust boundary, not merely a packaging choice:
   responsiveness/availability rule, not a signed backend `allow`; pending work continues.
 - A verified late `otp` updates advisory state. Customer code chooses whether to close access
   and call the single argument-free `gate.openOtp()` API.
-- Current Phase 9–13 code still applies an automatic page lock; Phase 13B must remove that
-  behavior before any customer integration or Phase 14 MCP manifest is released.
+- Phase 13B removes the former automatic page lock. A verified `otp` changes advisory state
+  only; page-lock/iframe effects, sensor pause, and polling begin only after explicit
+  `gate.openOtp()` invocation. Phases 13C–13D must complete adapter/provider integration before
+  any customer integration or Phase 14 MCP manifest is released.
 
 ### API-key separation
 

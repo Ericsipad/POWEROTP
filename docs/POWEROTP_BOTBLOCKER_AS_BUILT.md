@@ -39,9 +39,10 @@ Phase 13A corrected the intended product boundary after the user identified that
 canonized the wrong interpretation. POWEROTP must be additive, plugin-directed, and
 customer-enforced: middleware uses the site credential for first session contact and narrow
 server-held visitor tokens thereafter, publishes recommended state, and customer plugin code
-enforces it and explicitly calls the one argument-free OTP opener. Existing Phase 9–13 code
-still automatically applies a page lock and does not yet expose the corrected state API;
-Phases 13B–13D must fix that before Phase 14 can publish integrations.
+enforces it and explicitly calls the one argument-free OTP opener. Phase 13B now provides the
+strict advisory browser snapshot/state API and removes automatic page-lock/iframe effects.
+Phases 13C–13D must still correct shared request-adapter state and framework providers before
+Phase 14 can publish integrations.
 `enabled: true` remains only stored preference and is insufficient for readiness. The existing
 hosted-widget bot-signal honeypot and `/v1/projects/{projectId}/visitors` OTP dashboard route
 remain separate from BotBlocker.
@@ -1914,3 +1915,63 @@ activation, commit, push, or remote service was changed.
 - Phase 13B must not redesign server adapters, implement MCP, ingest real intelligence, derive
   fingerprints, score visitors, orchestrate production OTP, activate customers, or start
   Phase 13C or later work.
+
+## 2026-08-15 — BotBlocker Phase 13B: advisory browser contracts and state API
+
+**Outcome.** Replaced the automatic browser page-lock boundary with a strict advisory state
+API. `@powerotp/gate-core` now publishes immutable recommendation snapshots through
+`getSnapshot()` and ordered `subscribe()` notifications. Snapshots structurally separate
+restricted/full-access/OTP-required recommendations from lifecycle and the only two verified
+backend decisions, `allow | otp`; timeout and network failure publish fail-open lifecycle
+without fabricating `allow`, and pending work continues so a late verified `otp` still wins.
+
+Customer code now has one zero-argument `openOtp()` action. Receiving `otp` changes only the
+published recommendation: it does not alter customer DOM, pause sensing, open an iframe, or
+start polling. Explicit invocation sends a bodyless same-origin request using the HttpOnly gate
+session. The bridge requires an already verifier-backed server session with an active `otp`,
+rejects caller options/IDs, and returns only the existing server-selected credential-free HTTPS
+challenge metadata. Only then does the browser reuse the existing page-lock, UX-only
+`postMessage`, authoritative poller, and loss-safe acknowledgement primitives.
+
+**Contracts and security boundaries.**
+
+- Added strict initial browser proof/evidence contracts reusing bounded sanitized evidence,
+  signed clearance, Passport assertion, and PaidTokenPass assertion shapes. Unknown fields,
+  raw browser fingerprint hashes, unsigned clearance, and self-declared approval remain
+  rejected.
+- Added a closed recommendation-snapshot union whose valid lifecycle/recommendation/decision
+  combinations are enforced by schema rather than convention. Fail-open and unavailable carry
+  no backend decision.
+- Added strict empty opener and server-selected launch metadata contracts. Launch metadata
+  contains only challenge ID, credential-free HTTPS URL, and matching approved origin; no OTP
+  method, policy, content selector, site credential, API key, or authorization token is
+  browser-visible.
+- Existing site/session/audience/expiry/sequence/nonce validation remains verifier-backed.
+  Restored OTP remains advisory on reload and requires a fresh explicit `openOtp()` call before
+  the page lock and polling resume.
+- Polling failure retains OTP state; `postMessage` can only prompt a poll; only a correctly
+  bound authoritative status publishes verified full access. Server challenge state remains
+  retained until acknowledgement.
+
+**Sensor behavior.** The existing first report at five seconds, recurring reports every
+30 seconds, navigation/hide/exit partial reports, evidence sanitization, and stale response
+rejection remain unchanged. An early OTP never starts observation. A late OTP leaves existing
+observation running. Observation pauses only after successful explicit OTP opening and resumes
+as a fresh interval only after authoritative success.
+
+**Files and compatibility.** Added `libraries/contracts/src/botblocker-browser.ts` and its
+tests plus `libraries/gate-core/src/recommendation.ts`. Updated the shared controller, state
+helpers, raw Node browser coordinator and bounded bridge, and focused tests. Express and Next
+request/middleware behavior was not redesigned; their security and React tests were updated
+only to prove compatibility with explicit opening and zero automatic DOM effects.
+
+**Verification.** Focused contracts, gate-core, gate-node, Express, and Next suites pass,
+including production Next bundle credential scanning. Full `npm run verify` passed after
+building every workspace and running repository-wide lint/typechecking and tests. `npm audit`
+reported zero vulnerabilities. Final `git diff --check` passed.
+
+**Exclusions and operations.** No real RapidAuth/intelligence ingestion, fingerprint/IP
+derivation, scoring, production signed-decision delivery, OTP orchestration, Passport,
+PaidTokenPass, billing, deployment, DNS, secret, activation, policy publication,
+customer-hosted CleanDataPage, Phase 13C, Phase 13D, or Phase 14 work was added. No migration,
+seed, environment/configuration change, remote mutation, commit, or push was performed.

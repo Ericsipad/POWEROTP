@@ -37,7 +37,7 @@ export const BotBlockerProtocolVersionSchema = z.literal(BOTBLOCKER_PROTOCOL_VER
  * (e.g. telling apart "older contracts build, still wire-compatible" from
  * a genuine protocol break); it never gates acceptance by itself.
  */
-export const BOTBLOCKER_CONTRACT_VERSION = "2026-08-14";
+export const BOTBLOCKER_CONTRACT_VERSION = "2026-08-15";
 export const BotBlockerContractVersionSchema = z.literal(BOTBLOCKER_CONTRACT_VERSION);
 
 // ---------------------------------------------------------------------------

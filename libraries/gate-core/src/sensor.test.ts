@@ -278,7 +278,7 @@ describe("continuous sensor gate integration", () => {
     firstResponse.resolve(decision(10));
     await flushPromises();
 
-    assert.deepEqual(applicationResults, [false, false]);
+    assert.deepEqual(applicationResults, [true, false]);
     assert.deepEqual(rejectionReasons, ["stale"]);
     assert.equal(controller.getSnapshot().lastApplied?.sequence, 11);
     sensor.dispose();

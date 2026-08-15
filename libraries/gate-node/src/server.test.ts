@@ -198,11 +198,28 @@ test("authoritative verification retains OTP state until browser acknowledgement
     headers: bridgeHeaders(cookie, true),
     body: "{}",
   });
-  const candidate = (await delivered.json()).candidate;
+  const deliveredBody = await delivered.json();
+  const candidate = deliveredBody.candidate;
+  assert.equal(deliveredBody.challenge, undefined);
   await fetch(`${origin}/_powerotp/decision/verify`, {
     method: "POST",
     headers: bridgeHeaders(cookie, true),
     body: JSON.stringify({ candidate }),
+  });
+  const rejectedOptions = await fetch(`${origin}/_powerotp/challenge/open`, {
+    method: "POST",
+    headers: bridgeHeaders(cookie, true),
+    body: JSON.stringify({ method: "sms" }),
+  });
+  assert.equal(rejectedOptions.status, 400);
+  const opened = await fetch(`${origin}/_powerotp/challenge/open`, {
+    method: "POST",
+    headers: bridgeHeaders(cookie),
+  });
+  assert.deepEqual(await opened.json(), {
+    challengeId: "challenge_123456789",
+    challengeUrl: "https://verify.powerotp.com/challenge/challenge_123456789",
+    challengeOrigin: "https://verify.powerotp.com",
   });
   const status = await fetch(`${origin}/_powerotp/challenge/status`, {
     headers: bridgeHeaders(cookie),

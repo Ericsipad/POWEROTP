@@ -1,6 +1,8 @@
 import {
   DecisionTimeoutMsSchema,
+  OtpLaunchMetadataSchema,
   type DecisionRevisionEnvelope,
+  type GateRecommendationSnapshot,
   type ReportSequence,
 } from "@powerotp/contracts";
 import {
@@ -8,6 +10,7 @@ import {
   type DecisionRejectionReason,
   type DecisionVerification,
 } from "./decision.js";
+import { createGateSnapshot } from "./recommendation.js";
 import { isGateTransitionAllowed, type GateState } from "./states.js";
 
 type GateTimer = number | ReturnType<typeof setTimeout>;
@@ -21,19 +24,29 @@ export type GateEffect =
   | { type: "stop_authoritative_polling" }
   | { type: "decision_rejected"; reason: DecisionRejectionReason };
 
-export interface GateSnapshot {
-  state: GateState;
-  decisionPending: boolean;
-  lastApplied?: ReportSequence;
-  activeChallengeId?: string;
+export type GateSnapshot = GateRecommendationSnapshot;
+
+interface RestoredGateSecurityBase {
+  acceptedNonces?: readonly string[];
 }
 
-export interface RestoredGateSecurityState {
-  state: "checking" | "otp_required";
-  lastApplied: ReportSequence;
-  acceptedNonces?: readonly string[];
-  activeChallengeId?: string;
-}
+export type RestoredGateSecurityState = RestoredGateSecurityBase & (
+  | {
+      state: "checking";
+      lastApplied: ReportSequence;
+    }
+  | {
+      state: "observing";
+      decision: "allow";
+      lastApplied?: ReportSequence;
+    }
+  | {
+      state: "otp_required";
+      decision?: "otp";
+      lastApplied: ReportSequence;
+      activeChallengeId: string;
+    }
+);
 
 export interface AuthoritativeGateStatus {
   status: "pending" | "verified" | "unavailable";
@@ -55,6 +68,7 @@ export interface GateControllerOptions {
   restoredSecurityState?: RestoredGateSecurityState;
   requestDecision(): Promise<unknown>;
   verifyDecision(candidate: unknown): Promise<DecisionVerification>;
+  launchOtp?(): Promise<unknown>;
   now?: () => number;
   setTimer?: (callback: () => void, delayMs: number) => GateTimer;
   clearTimer?: (timer: GateTimer) => void;
@@ -65,10 +79,11 @@ export interface GateControllerOptions {
 export interface GateController {
   start(): void;
   applyDecisionRevision(candidate: unknown): Promise<boolean>;
-  bindActiveChallenge(challengeId: string): boolean;
+  openOtp(): Promise<boolean>;
   applyAuthoritativeStatus(status: AuthoritativeGateStatus): boolean;
   resumeObservation(): boolean;
   getSnapshot(): GateSnapshot;
+  subscribe(listener: () => void): () => void;
   dispose(): void;
 }
 
@@ -82,7 +97,7 @@ export function createGateController(options: GateControllerOptions): GateContro
     throw new Error("Decision clock skew must be an integer from 0 through 300000ms");
   }
   const restored = options.restoredSecurityState;
-  if (restored && restored.lastApplied.gateSessionId !== options.gateSessionId) {
+  if (restored?.lastApplied && restored.lastApplied.gateSessionId !== options.gateSessionId) {
     throw new Error("Restored decision state belongs to a different gate session");
   }
   if (restored?.state === "otp_required" && !isValidChallengeId(restored.activeChallengeId)) {
@@ -93,17 +108,33 @@ export function createGateController(options: GateControllerOptions): GateContro
   let state: GateState = restored?.state ?? "checking";
   let decisionPending = false;
   let lastApplied: ReportSequence | undefined = restored?.lastApplied;
-  let activeChallengeId = restored?.activeChallengeId;
+  let activeChallengeId =
+    restored?.state === "otp_required" ? restored.activeChallengeId : undefined;
+  let decision: DecisionRevisionEnvelope["outcome"] | undefined =
+    restored?.state === "observing" ? "allow" :
+    restored?.state === "otp_required" ? "otp" :
+    undefined;
+  let otpOpen = false;
+  let openingOtp = false;
+  let observationResumed = false;
   let timeout: GateTimer | undefined;
   let started = false;
   let disposed = false;
 
-  const snapshot = (): GateSnapshot => ({
+  const listeners = new Set<() => void>();
+  const buildSnapshot = (): GateSnapshot => createGateSnapshot({
     state,
+    ...(decision ? { decision } : {}),
     decisionPending,
+    otpOpen,
     ...(lastApplied ? { lastApplied } : {}),
-    ...(activeChallengeId ? { activeChallengeId } : {}),
   });
+  let currentSnapshot = buildSnapshot();
+  const publish = (previous: GateState) => {
+    currentSnapshot = buildSnapshot();
+    options.onStateChange?.(currentSnapshot, previous);
+    for (const listener of listeners) listener();
+  };
 
   const effect = (value: GateEffect) => options.onEffect?.(value);
 
@@ -112,7 +143,7 @@ export function createGateController(options: GateControllerOptions): GateContro
     if (!isGateTransitionAllowed(state, next)) return false;
     const previous = state;
     state = next;
-    options.onStateChange?.(snapshot(), previous);
+    publish(previous);
     return true;
   };
 
@@ -121,29 +152,36 @@ export function createGateController(options: GateControllerOptions): GateContro
     return false;
   };
 
-  const markUnavailable = (): void => {
-    if (state !== "checking" && state !== "optimistic_allow") return;
-    if (transition("unavailable")) effect({ type: "start_observation", fresh: false });
+  const markUnavailable = (): boolean => {
+    if (state !== "checking" && state !== "optimistic_allow") return false;
+    if (!transition("unavailable")) return false;
+    effect({ type: "start_observation", fresh: false });
+    return true;
   };
 
-  const applyVerified = (decision: DecisionRevisionEnvelope): boolean => {
-    if (state === "otp_required" && decision.outcome === "allow") {
+  const applyVerified = (verifiedDecision: DecisionRevisionEnvelope): boolean => {
+    if (state === "otp_required" && verifiedDecision.outcome === "allow") {
       return reject("challenge_active");
     }
 
-    acceptedNonces.add(decision.nonce);
-    lastApplied = decision.sequence;
+    acceptedNonces.add(verifiedDecision.nonce);
+    lastApplied = verifiedDecision.sequence;
+    decision = verifiedDecision.outcome;
 
-    if (decision.outcome === "otp") {
-      if (state === "otp_required") return true;
+    if (verifiedDecision.outcome === "otp") {
+      if (state === "otp_required") {
+        publish(state);
+        return true;
+      }
       if (!transition("otp_required")) return false;
-      effect({ type: "pause_observation" });
-      effect({ type: "freeze_page" });
-      effect({ type: "start_authoritative_polling" });
       return true;
     }
 
     const fresh = state === "verified";
+    if (state === "observing") {
+      publish(state);
+      return true;
+    }
     if (!transition("observing")) return false;
     effect({ type: "start_observation", fresh });
     return true;
@@ -176,12 +214,14 @@ export function createGateController(options: GateControllerOptions): GateContro
       if (started || disposed) return;
       started = true;
       if (state === "otp_required") {
-        effect({ type: "pause_observation" });
-        effect({ type: "freeze_page" });
-        effect({ type: "start_authoritative_polling" });
+        return;
+      }
+      if (state === "observing") {
+        effect({ type: "start_observation", fresh: false });
         return;
       }
       decisionPending = true;
+      publish(state);
       timeout = setTimer(() => {
         timeout = undefined;
         if (state === "checking" && transition("optimistic_allow")) {
@@ -192,11 +232,11 @@ export function createGateController(options: GateControllerOptions): GateContro
       void options.requestDecision().then(
         async (candidate) => {
           decisionPending = false;
-          await verifyAndApply(candidate);
+          if (!(await verifyAndApply(candidate))) publish(state);
         },
         () => {
           decisionPending = false;
-          markUnavailable();
+          if (!markUnavailable()) publish(state);
         },
       );
     },
@@ -205,21 +245,40 @@ export function createGateController(options: GateControllerOptions): GateContro
       return verifyAndApply(candidate);
     },
 
-    bindActiveChallenge(challengeId) {
+    async openOtp() {
       if (
+        disposed ||
+        openingOtp ||
+        otpOpen ||
         state !== "otp_required" ||
-        !isValidChallengeId(challengeId) ||
-        (activeChallengeId !== undefined && activeChallengeId !== challengeId)
+        decision !== "otp" ||
+        !options.launchOtp
       ) {
         return false;
       }
-      activeChallengeId = challengeId;
-      return true;
+      openingOtp = true;
+      try {
+        const launch = OtpLaunchMetadataSchema.safeParse(await options.launchOtp());
+        if (!launch.success || !isValidChallengeId(launch.data.challengeId)) return false;
+        activeChallengeId = launch.data.challengeId;
+        otpOpen = true;
+        observationResumed = false;
+        publish(state);
+        effect({ type: "pause_observation" });
+        effect({ type: "freeze_page" });
+        effect({ type: "start_authoritative_polling" });
+        return true;
+      } catch {
+        return false;
+      } finally {
+        openingOtp = false;
+      }
     },
 
     applyAuthoritativeStatus(status) {
       if (
         state !== "otp_required" ||
+        !otpOpen ||
         status.status !== "verified" ||
         !activeChallengeId ||
         status.siteId !== options.siteId ||
@@ -228,6 +287,8 @@ export function createGateController(options: GateControllerOptions): GateContro
       ) {
         return false;
       }
+      otpOpen = false;
+      activeChallengeId = undefined;
       if (!transition("verified")) return false;
       effect({ type: "stop_authoritative_polling" });
       effect({ type: "unfreeze_page" });
@@ -235,15 +296,22 @@ export function createGateController(options: GateControllerOptions): GateContro
     },
 
     resumeObservation() {
-      if (state !== "verified" || !transition("observing")) return false;
+      if (state !== "verified" || observationResumed) return false;
+      observationResumed = true;
       effect({ type: "start_observation", fresh: true });
       return true;
     },
 
-    getSnapshot: snapshot,
+    getSnapshot: () => currentSnapshot,
+
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
 
     dispose() {
       disposed = true;
+      listeners.clear();
       if (timeout !== undefined) clearTimer(timeout);
       timeout = undefined;
     },

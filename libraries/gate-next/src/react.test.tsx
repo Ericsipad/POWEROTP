@@ -90,24 +90,18 @@ test("root gate persists through App Router-style history navigation and sequenc
   }
 });
 
-test("verified OTP creates only the hosted iframe and postMessage cannot unlock it", async () => {
+test("verified OTP does not change customer DOM or open an iframe automatically", async () => {
   const window = new HappyWindow({ url: `${audience}/private` });
   const restoreGlobals = installBrowserGlobals(window);
-  const challenge = {
-    challengeId: "challenge_123456789",
-    challengeUrl: "https://verify.powerotp.com/challenge/challenge_123456789",
-    challengeOrigin: "https://verify.powerotp.com",
-  };
+  const calls: string[] = [];
   const fetcher = createFetch(async (path, init) => {
+    calls.push(path);
     if (path === "/_powerotp/session") return json(bootstrap(0));
     if (path === "/_powerotp/decision") {
-      return json({ status: "decision", candidate: decision("otp", 0), challenge });
+      return json({ status: "decision", candidate: decision("otp", 0) });
     }
     if (path === "/_powerotp/decision/verify") {
       return json({ verified: true, decision: JSON.parse(String(init?.body)).candidate });
-    }
-    if (path === "/_powerotp/challenge/status") {
-      return json({ status: "pending", siteId, gateSessionId: gateSessionId(), challengeId: challenge.challengeId });
     }
     throw new Error(`Unexpected bridge path ${path}`);
   });
@@ -128,14 +122,10 @@ test("verified OTP creates only the hosted iframe and postMessage cannot unlock 
         />,
       );
     });
-    await waitFor(() => window.document.querySelector("iframe") !== null);
-    const iframe = window.document.querySelector("iframe");
-    assert.equal(iframe?.src, challenge.challengeUrl);
-    window.dispatchEvent(new window.MessageEvent("message", {
-      origin: challenge.challengeOrigin,
-      data: { type: "powerotp:verified", challengeId: challenge.challengeId },
-    }));
-    assert.ok(window.document.querySelector("iframe"));
+    await waitFor(() => calls.includes("/_powerotp/decision/verify"));
+    assert.equal(window.document.querySelector("iframe"), null);
+    assert.equal(calls.includes("/_powerotp/challenge/open"), false);
+    assert.equal(calls.includes("/_powerotp/challenge/status"), false);
     assert.ok(!window.document.documentElement.textContent?.includes(siteCredential));
   } finally {
     await act(async () => root?.unmount());
