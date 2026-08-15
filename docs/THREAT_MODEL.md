@@ -200,6 +200,10 @@ impact — they cannot eliminate it:
   It may additionally require an exact 1–32-value forwarded chain with
   `expectedProxyCount`; count mismatch, an untrusted direct peer, or trust-all Express
   configuration cannot authorize a forwarded value.
+- Next.js 16 does not expose a socket address on `NextRequest`. The Phase 13 wrapper therefore
+  omits `clientIp` and ignores forwarding headers by default. A deployment may inject only an
+  authenticated direct-peer address; forwarded values then remain subject to the same exact
+  header, first/last position, explicit trusted-peer IP, and optional exact-count checks.
 
 ### Replay and session fixation
 
@@ -219,6 +223,9 @@ impact — they cannot eliminate it:
 - Express composes that same server-side store and bridge. Its default remains process-local;
   clustered or multi-instance deployments require an injected concurrency-safe shared store
   and cannot claim active-OTP durability from the default.
+- Next.js composes the same store and bridge in Node-runtime Proxy and App Router handlers.
+  Its default is also process-local; serverless/multi-instance deployment requires an injected
+  bounded concurrency-safe store before it can claim active-OTP durability.
 
 ### Forged clearance and signed policy
 
@@ -283,6 +290,11 @@ impact — they cannot eliminate it:
 - The Express wrapper preserves the same behavior without reading application JSON/multipart
   bodies or buffering streams/compressed HTML. Its React root helper applies late revisions
   through the verifier-backed controller; pending work is not tied to the UX timeout.
+- The Next.js 16 wrapper returns `NextResponse.next()` without reading protected page/API/
+  Server Action or upload bodies, and retains the pending decision with
+  `NextFetchEvent.waitUntil()`. Owned App Router bridge handlers alone read bounded JSON;
+  WebSocket upgrades, framework/static assets, health/infrastructure paths, and `OPTIONS` do
+  not create gate sessions.
 
 ### Direct-origin bypass
 

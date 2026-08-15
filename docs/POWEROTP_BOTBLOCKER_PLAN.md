@@ -376,7 +376,13 @@ capability:
   `http.createServer` request listeners, for customers not using Express or Next.js.
 - **Express** (`libraries/gate-express`): the fullest-featured reference implementation,
   followed by Fastify only if the shared abstraction remains simple.
-- **Next.js** (`libraries/gate-next`): a native `proxy.ts`/App Router wrapper.
+- **Next.js** (`libraries/gate-next`): a native Node-runtime `proxy.ts`/App Router wrapper.
+  Next.js reserves literal underscore-prefixed App Router folders, so the on-disk bridge path
+  is `app/%5Fpowerotp/[...path]/route.ts`, which emits the required public
+  `/_powerotp/*` URL. `NextRequest` exposes no socket address; this wrapper therefore trusts no
+  forwarding header and omits `clientIp` unless the deployment supplies an authenticated
+  direct-peer resolver, after which the same explicit header/position/trusted-IP/count rules
+  apply.
 
 All three must handle trusted proxy IPs, CORS, health routes, callbacks, streaming, uploads,
 WebSockets, SSR, static files, and protected APIs explicitly, and all three apply the same

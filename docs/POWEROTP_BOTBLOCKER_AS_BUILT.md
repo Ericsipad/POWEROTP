@@ -25,14 +25,15 @@ hashed credential domain and every later-phase runtime capability returns a type
 response rather than a fabricated decision, score, challenge result, Passport result, paid
 entitlement, or visitor.
 
-Phases 9–12 add the framework-neutral browser gate and continuous sanitized sensor plus raw
-Node HTTP and Express 5 wrappers. The wrappers verify signed clearances locally, keep site
-credentials server-only, expose bounded same-origin bridge routes, and default every unbacked
-central capability to typed unavailable. The Express package adds early middleware/router
-APIs and a credential-free React root helper without rewriting application streams or uploads.
-There is still no Next.js wrapper, real intelligence ingestion, matching, scoring, OTP
-orchestration, Passport/PaidTokenPass implementation, billing/metering, production BotBlocker
-key, policy release, credential, deployment, or traffic activation.
+Phases 9–13 add the framework-neutral browser gate and continuous sanitized sensor plus raw
+Node HTTP, Express 5, and Next.js 16 App Router wrappers. The wrappers verify signed clearances
+locally, keep site credentials server-only, expose bounded same-origin bridge routes, and
+default every unbacked central capability to typed unavailable. The framework packages add
+credential-free React root helpers without rewriting application streams or uploads; the
+Next.js wrapper also provides native Node-runtime Proxy handling and App Router/discovery
+handlers. There is still no real intelligence ingestion, matching, scoring, OTP orchestration,
+Passport/PaidTokenPass implementation, billing/metering, production BotBlocker key, policy
+release, credential, deployment, or traffic activation.
 `enabled: true` remains only stored preference and is insufficient for readiness. The existing
 hosted-widget bot-signal honeypot and `/v1/projects/{projectId}/visitors` OTP dashboard route
 remain separate from BotBlocker.
@@ -1693,3 +1694,112 @@ push, or remote mutation was performed.
   App Router navigation, server/client and runtime boundaries, assets, CSP/iframe behavior,
   streaming, and bundle credential absence without starting MCP generation, ingestion,
   scoring, OTP orchestration, or CleanDataPage work.
+
+## 2026-08-14 — BotBlocker Phase 13: Next.js wrapper
+
+**Outcome.** Added the private `@powerotp/gate-next` workspace for the installed Next.js 16.3
+App Router and React 19. The adapter is a thin native Web Request/Response bridge over
+`@powerotp/gate-node`, so the shared implementation remains authoritative for sessions,
+signed clearances, decision verification, limits, exclusions, same-origin bridge behavior,
+discovery, active OTP persistence, and typed unavailable defaults. No MCP generator,
+ingestion, scoring, OTP orchestration, customer-hosted CleanDataPage, production activation,
+or remote change was added.
+
+**Exact files and package surface.**
+
+- Workspace/build: `package.json`, `package-lock.json`, `libraries/gate-next/package.json`,
+  `tsconfig.json`, `tsconfig.typecheck.json`, and `README.md`.
+- Production: `libraries/gate-next/src/index.ts`, `adapter.ts`, `react.tsx`, and `csp.ts`.
+- Conformance: `adapter.test.ts`, `security.test.ts`, `react.test.tsx`, plus the minimal real
+  Next fixture under `libraries/gate-next/fixture/`.
+- Evidence: this file, `POWEROTP_BOTBLOCKER_PLAN.md`, `THREAT_MODEL.md`, and
+  `POWEROTP_BOTBLOCKER_SOC2_ISO27001_CONTROL_MATRIX.md`.
+
+All production modules remain below 300 lines. `@powerotp/gate-node` is the only runtime
+dependency; Next.js/React/React DOM are peers. `createPowerOtpNext(options)` exposes
+`proxy(request, event)` and `route(request)`, while `PowerOtpNextGate` is the credential-free
+root Client Component and `withPowerOtpFrameSource()` safely merges only a validated
+POWEROTP-hosted HTTPS iframe origin into an existing CSP.
+
+**Next.js integration and runtime boundaries.**
+
+- Native `proxy.ts` returns `NextResponse.next()` immediately for protected pages, APIs, and
+  Server Action requests. It uses Next.js 16's Node-only Proxy runtime and
+  `NextFetchEvent.waitUntil()` to keep the shared pending decision alive without tying it to
+  the 50–2,000 ms UX timeout. Proxy has no `runtime` export because Next.js 16 rejects one.
+- The static matcher excludes `/_powerotp/*`, discovery, framework/static/assets, common
+  public-file extensions, and health/infrastructure paths before filesystem/App Router
+  resolution. The adapter independently excludes `OPTIONS`, so direct invocation cannot
+  create a session or start a decision.
+- Next reserves literal underscore-prefixed App Router folders as private. The required source
+  path is therefore `app/%5Fpowerotp/[...path]/route.ts`; the emitted public URL is the required
+  `/_powerotp/*`. Route handlers and discovery explicitly declare `runtime = "nodejs"` and
+  delegate to the singleton server-only adapter.
+- The Proxy adapter never reads protected request bodies or customer response streams and
+  performs no HTML injection. The root Client Component is the explicit integration for
+  streamed/compressed App Router rendering and remains mounted across client navigation.
+- The production fixture builds routes for `/_powerotp/[...path]`,
+  `/.well-known/powerotp-agent`, a protected API, a health route, and the root gate. The
+  generated client chunks are scanned for the fixture credential, credential prefix, and
+  environment-variable name.
+
+**Security behavior.**
+
+- Next.js does not expose a socket address on `NextRequest`; the default therefore omits
+  `clientIp` and trusts no forwarding header. `resolveDirectAddress` accepts only a
+  deployment-authenticated direct peer value supplied by the integrator. Forwarding still
+  requires the shared exact header, explicit first/last selection, explicit trusted peer IPs,
+  and optional exact 1–32 proxy count. Wildcard trust and forwarding spoof attempts fail.
+- Site credentials and environment access exist only in the server configuration module.
+  Browser bootstrap, discovery, bridge responses, cookies, fixture HTML, and production client
+  chunks contain no site credential. The public site ID authorizes nothing.
+- Every decision candidate still crosses the injected authenticity verifier and gate-core's
+  site/session/audience/time/sequence/nonce checks. A signed clearance is accepted only for its
+  bound session and cannot override an active OTP. Returned clearance is issued only after both
+  decision and clearance verification, with Secure/HttpOnly/SameSite=Lax attributes.
+- The shared non-simple bridge marker, Fetch Metadata/Origin checks, bounded JSON parser,
+  authoritative challenge polling, and loss-safe acknowledgement apply unchanged. Dependency
+  failure remains optimistic only for ordinary traffic and cannot clear an active OTP.
+- The page lock accepts only credential-free HTTPS challenge metadata. `postMessage` remains a
+  UX polling trigger and never unlocks. CSP merging rejects wildcard/non-POWEROTP origins and
+  preserves the customer's other directives. Hosted `frame-ancestors` remains a POWEROTP-side
+  response responsibility.
+- Discovery remains protocol-v1 and may contain only validated POWEROTP-hosted HTTPS
+  CleanDataPage metadata. No `/powerotp/aisummary` or customer CleanDataPage route exists.
+
+**Tests and results.**
+
+- `@powerotp/gate-next`: production/typecheck passed; 18 tests, 0 failures. Coverage includes
+  native matcher/App Router ordering, protected pages/APIs, framework/static/health/OPTIONS
+  exclusions, immediate pending/rejecting/throwing behavior, `waitUntil`, direct/forwarded IP
+  trust and spoof rejection, upload non-consumption, same-origin CSRF, malformed/oversized
+  bridge input, strict discovery, signed clearance/active-OTP conflict, verified late
+  clearance issuance, late OTP persistence/polling/acknowledgement, App Router-style
+  navigation and sensor sequence, CSP/iframe/postMessage behavior, source and client-bundle
+  credential absence, and invalid trust-all startup rejection.
+- The real Next.js 16.3 Turbopack production fixture build passed and emitted both native Proxy
+  and the required public App Router routes. Focused Express, raw Node, gate-core, signing, and
+  contracts suites passed unchanged.
+- `npm run verify`: passed, including both Next.js production builds and every workspace
+  build/typecheck/test. `npm audit`: 0 vulnerabilities. Final `git diff --check`: clean.
+
+**Manual/migration/deployment steps.** None. No migration, seed, key, credential, environment
+setting, policy release, DNS/configuration change, deployment, customer activation, commit,
+push, or remote mutation was performed.
+
+**Findings, limitations, and Phase 14 prerequisites.**
+
+- Signed production decision/revision delivery still does not exist. Injected Next services
+  remain verifier-backed boundaries; defaults return typed unavailable and fabricate nothing.
+- The default store remains process-local. Multi-instance/serverless customers require an
+  injected bounded concurrency-safe store that preserves active OTP; this phase makes no
+  durability claim for the default.
+- Immediate optimistic rendering cannot retract content already delivered before a late page
+  lock. Application-layer adapters cannot protect direct-origin traffic that bypasses Next.
+- NextRequest's lack of a socket address is an explicit platform limitation, not a reason to
+  trust arbitrary forwarding headers. Deployments without an authenticated direct-peer
+  resolver operate without `clientIp`.
+- Phase 14 may add only the public anonymous read-only MCP generator and versioned/checksummed
+  manifests for the completed raw Node, Express, and Next wrappers. It must not begin real
+  ingestion, matching, scoring, OTP orchestration, production activation, or CleanDataPage
+  implementation.
