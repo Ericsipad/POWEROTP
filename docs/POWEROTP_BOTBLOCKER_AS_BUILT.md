@@ -41,8 +41,9 @@ customer-enforced: middleware uses the site credential for first session contact
 server-held visitor tokens thereafter, publishes recommended state, and customer plugin code
 enforces it and explicitly calls the one argument-free OTP opener. Phase 13B now provides the
 strict advisory browser snapshot/state API and removes automatic page-lock/iframe effects.
-Phases 13C–13D must still correct shared request-adapter state and framework providers before
-Phase 14 can publish integrations.
+Phase 13C makes gate-node the shared raw Node/Express authority, and Phase 13D completes
+authenticated Next.js request state plus the additive App Router provider/hook. The three
+supported wrappers now pass cross-wrapper conformance, so Phase 14 may publish integrations.
 `enabled: true` remains only stored preference and is insufficient for readiness. The existing
 hosted-widget bot-signal honeypot and `/v1/projects/{projectId}/visitors` OTP dashboard route
 remain separate from BotBlocker.
@@ -2029,3 +2030,58 @@ derivation, scoring, production OTP orchestration, Passport/PaidTokenPass behavi
 deployment, DNS, secret, activation, policy publication, customer-hosted CleanDataPage,
 Phase 13D provider integration, or Phase 14 MCP work was added. No migration, seed, environment
 or server configuration, remote mutation, commit, push, or deployment was performed.
+
+## 2026-08-15 — BotBlocker Phase 13D: Next.js advisory adapter and cross-wrapper conformance
+
+**Outcome.** Completed the native Node-runtime Next.js 16 Proxy integration over the shared
+`@powerotp/gate-node` authority. Customer App Router requests now receive a bounded
+framework-native recommendation/session state through a Next request-header override. Proxy
+replaces caller-supplied state before forwarding a server-authenticated value, never adds it to
+the browser response, and `getRequestState()` reduces missing, malformed, forged, or modified
+values to a typed `unavailable`/`full_access` snapshot. Proxy still returns
+`NextResponse.next()` without rewriting, redirecting, consuming a protected body, buffering a
+response, or controlling customer SSR, routes, APIs, Server Actions, uploads, streams, errors,
+or rendering.
+
+**Provider and customer control.** Added the credential-free `PowerOtpNextProvider` and
+`usePowerOtp()` hook over the Phase 13B `getSnapshot`/`subscribe` external-store contract.
+Snapshots retain checking/restricted, fail-open/full-access, verified allow/full-access, and
+OTP-required semantics in subscription order across App Router navigation. The fixture applies
+BotBlocker to the whole customer application at its root: it renders normal customer website
+content for full access, returns `null` while access is withheld, and explicitly calls the single
+argument-free `openOtp()` method when OTP is recommended. It adds no checking, access, OTP,
+button, or other customer/POWEROTP placeholder screen; the hosted iframe is the only visible
+POWEROTP challenge content. The prior no-children `PowerOtpNextGate` mount remains compatible.
+
+**Shared authority and secrets.** Next first contact uses bounded initial evidence, the retained
+trusted request context, and the server-only site credential. The returned scoped visitor token
+remains solely in the injected server session and only that token reaches later assessment,
+challenge-launch, and polling service calls. Browser responses, React props, hydration state,
+and production client chunks contain neither credential nor token. Local clearance, checking,
+timeout fail-open with surviving pending work, late allow, late OTP, active-OTP precedence,
+sequence/nonce/site/audience/session/expiry verification, sensor cadence, polling,
+acknowledgement, trusted-proxy rules, and same-origin bridge controls continue to come from the
+shared Node implementation.
+
+**Tests and compatibility.** Added native Proxy state replacement/default tests, App Router
+provider/hook ordered snapshot tests, root-level customer rendering control, an explicit
+bodyless `openOtp()` test, local-clearance and active-OTP state propagation, first-contact
+credential/later-token separation, timeout/pending/late allow and late OTP coverage, and
+production bundle credential/token scanning. Customer-owned page, API, Server Action, upload,
+stream, and error behavior is exercised without rewrites or response mutation. A behavioral
+conformance suite now compares raw Node, Express, and Next state from the same shared authority;
+infrastructure/static/health/`OPTIONS`/WebSocket exclusions and trusted proxy/same-origin tests
+remain green.
+
+**Verification.** Focused contracts (159 tests), gate-core (39), gate-node (21), gate-express
+(22), and gate-next (27) suites passed. The production Next fixture built successfully and the
+fresh client bundle scan found no site credential, credential environment name, scoped-token
+literal, or `visitorToken` identifier. Full `npm run verify` passed, including workspace builds,
+lint/typechecking, repository tests, and the production fixture build. `npm audit` reported zero
+vulnerabilities. Final `git diff --check` passed.
+
+**Exclusions and operations.** No Phase 14 MCP, real RapidAuth/intelligence ingestion,
+fingerprint/IP hash derivation, scoring, production OTP orchestration, Passport/PaidTokenPass
+behavior, billing, deployment, secrets, DNS, activation, policy publication, or customer-hosted
+CleanDataPage route was added. No migration, seed, environment/server configuration, remote
+mutation, commit, push, or deployment was performed.

@@ -62,6 +62,62 @@ test("protected pages and APIs continue immediately while pending work is retain
   }
 });
 
+test("Proxy replaces untrusted input with framework-native recommendation state", async () => {
+  const adapter = createPowerOtpNext(baseOptions({ protect: () => true }));
+  const response = await adapter.proxy(
+    request("/account", {
+      headers: {
+        "x-powerotp-request-state": Buffer.from(JSON.stringify({
+          protected: true,
+          access: "allow",
+          recommendation: {
+            lifecycle: "observing",
+            recommendation: "full_access",
+            decision: "allow",
+            decisionPending: false,
+            otpOpen: false,
+          },
+        })).toString("base64url"),
+      },
+    }),
+    event([]),
+  );
+
+  const state = adapter.getRequestState(forwardedHeaders(response));
+  assert.equal(state.protected, true);
+  assert.equal(state.access, "checking");
+  if (state.protected) {
+    assert.equal(state.recommendation.lifecycle, "checking");
+    assert.ok(state.sessionId);
+  }
+  assert.equal(response.headers.get("x-powerotp-request-state"), null);
+  const forwarded = forwardedHeaders(response).get("x-powerotp-request-state");
+  assert.ok(forwarded);
+  const tampered = `${forwarded.slice(0, -1)}${forwarded.endsWith("A") ? "B" : "A"}`;
+  assert.equal(adapter.getRequestState({ get: () => tampered }).access, "unavailable");
+});
+
+test("missing or malformed framework state has a typed unavailable default", () => {
+  const adapter = createPowerOtpNext(baseOptions({}));
+  for (const value of [
+    null,
+    "not-base64-json",
+    Buffer.from(JSON.stringify({ protected: false, access: "excluded" })).toString("base64url"),
+  ]) {
+    const state = adapter.getRequestState({ get: () => value });
+    assert.deepEqual(state, {
+      protected: true,
+      access: "unavailable",
+      recommendation: {
+        lifecycle: "unavailable",
+        recommendation: "full_access",
+        decisionPending: false,
+        otpOpen: false,
+      },
+    });
+  }
+});
+
 test("dependency rejection and synchronous throws remain optimistic", async () => {
   for (const requestDecision of [
     () => Promise.reject(new Error("unavailable")),
@@ -114,6 +170,32 @@ test("protected uploads and streams are never consumed by Proxy", async () => {
   const response = await adapter.proxy(upload, event([]));
   assert.equal(response.headers.get("x-middleware-next"), "1");
   assert.equal(await upload.text(), "customer upload stream");
+});
+
+test("pages, APIs, Server Actions, streams, and errors remain customer-owned", async () => {
+  const adapter = createPowerOtpNext(baseOptions({ protect: () => true }));
+  const cases: Array<[string, RequestInit | undefined, string | undefined]> = [
+    ["/account", undefined, undefined],
+    ["/api/private", { method: "POST", body: "{\"customer\":true}" }, "{\"customer\":true}"],
+    ["/account/action", {
+      method: "POST",
+      headers: { "next-action": "customer-action-id" },
+      body: "customer server action",
+    }, "customer server action"],
+    ["/api/upload", { method: "POST", body: "customer upload" }, "customer upload"],
+    ["/api/stream", undefined, undefined],
+    ["/customer-error", undefined, undefined],
+  ];
+
+  for (const [path, init, expectedBody] of cases) {
+    const incoming = request(path, init);
+    const response = await adapter.proxy(incoming, event([]));
+    assert.equal(response.headers.get("x-middleware-next"), "1", path);
+    assert.equal(response.headers.get("location"), null, path);
+    assert.equal(response.headers.get("x-middleware-rewrite"), null, path);
+    assert.equal(response.headers.get("content-encoding"), null, path);
+    if (expectedBody !== undefined) assert.equal(await incoming.text(), expectedBody, path);
+  }
 });
 
 test("direct address is authoritative and spoofed forwarded headers are ignored", async () => {
@@ -232,6 +314,14 @@ function event(waits: Promise<unknown>[]) {
       waits.push(value);
     },
   } as never;
+}
+
+function forwardedHeaders(response: Response) {
+  return {
+    get(name: string) {
+      return response.headers.get(`x-middleware-request-${name}`);
+    },
+  };
 }
 
 function unavailable() {

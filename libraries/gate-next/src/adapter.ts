@@ -1,3 +1,4 @@
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { Readable } from "node:stream";
 
 import {
@@ -21,7 +22,14 @@ export type GateNextOptions = Omit<GateNodeOptions, "handle" | "sessionStore"> &
 export interface PowerOtpNextAdapter {
   proxy(request: NextRequest, event: NextFetchEvent): Promise<Response>;
   route(request: NextRequest): Promise<Response>;
+  getRequestState(headers: PowerOtpRequestHeaders): ProtectedRequestState;
 }
+
+export interface PowerOtpRequestHeaders {
+  get(name: string): string | null;
+}
+
+const REQUEST_STATE_HEADER = "x-powerotp-request-state";
 
 export function createPowerOtpNext(options: GateNextOptions): PowerOtpNextAdapter {
   const store = options.sessionStore ?? createMemoryGateSessionStore();
@@ -66,12 +74,97 @@ export function createPowerOtpNext(options: GateNextOptions): PowerOtpNextAdapte
             .then(() => undefined),
         );
       }
-      const response = NextResponse.next();
+      const requestHeaders = new Headers(request.headers);
+      requestHeaders.set(
+        REQUEST_STATE_HEADER,
+        encodeRequestState(result.state, options.siteCredential),
+      );
+      const response = NextResponse.next({ request: { headers: requestHeaders } });
       result.response.copyHeadersTo(response.headers);
       return response;
     },
     async route(request) {
       return (await run(request, true)).response.toResponse(request.method);
+    },
+    getRequestState(headers) {
+      return decodeRequestState(
+        headers.get(REQUEST_STATE_HEADER),
+        options.siteCredential,
+      );
+    },
+  };
+}
+
+function encodeRequestState(state: ProtectedRequestState, credential: string): string {
+  const payload = Buffer.from(JSON.stringify(state), "utf8").toString("base64url");
+  const signature = signRequestState(payload, credential);
+  return `${payload}.${signature}`;
+}
+
+function decodeRequestState(
+  value: string | null,
+  credential: string,
+): ProtectedRequestState {
+  if (!value || value.length > 8_192) return unavailableRequestState();
+  try {
+    const parts = value.split(".");
+    if (parts.length !== 2 || !parts[0] || !parts[1]) return unavailableRequestState();
+    const expected = Buffer.from(signRequestState(parts[0], credential), "base64url");
+    const supplied = Buffer.from(parts[1], "base64url");
+    if (expected.length !== supplied.length || !timingSafeEqual(expected, supplied)) {
+      return unavailableRequestState();
+    }
+    const parsed: unknown = JSON.parse(Buffer.from(parts[0], "base64url").toString("utf8"));
+    return isProtectedRequestState(parsed) ? parsed : unavailableRequestState();
+  } catch {
+    return unavailableRequestState();
+  }
+}
+
+function signRequestState(payload: string, credential: string): string {
+  return createHmac("sha256", credential).update(payload).digest("base64url");
+}
+
+function isProtectedRequestState(value: unknown): value is ProtectedRequestState {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const state = value as Record<string, unknown>;
+  if (state.protected === false) {
+    return state.access === "excluded" && Object.keys(state).length === 2;
+  }
+  if (
+    state.protected !== true ||
+    !["checking", "clearance", "fail_open", "allow", "otp", "unavailable"].includes(
+      String(state.access),
+    ) ||
+    !isRecommendation(state.recommendation)
+  ) {
+    return false;
+  }
+  return state.sessionId === undefined || typeof state.sessionId === "string";
+}
+
+function isRecommendation(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const snapshot = value as Record<string, unknown>;
+  return (
+    ["checking", "fail_open", "unavailable", "observing", "otp_required", "verified"].includes(
+      String(snapshot.lifecycle),
+    ) &&
+    ["restricted", "full_access", "otp_required"].includes(String(snapshot.recommendation)) &&
+    typeof snapshot.decisionPending === "boolean" &&
+    typeof snapshot.otpOpen === "boolean"
+  );
+}
+
+function unavailableRequestState(): ProtectedRequestState {
+  return {
+    protected: true,
+    access: "unavailable",
+    recommendation: {
+      lifecycle: "unavailable",
+      recommendation: "full_access",
+      decisionPending: false,
+      otpOpen: false,
     },
   };
 }

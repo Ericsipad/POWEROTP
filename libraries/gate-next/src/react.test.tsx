@@ -7,11 +7,16 @@ import {
   type DecisionRevisionEnvelope,
 } from "@powerotp/contracts";
 import { Window as HappyWindow } from "happy-dom";
-import React, { act } from "react";
+import React, { act, useEffect } from "react";
 import { createRoot, type Root } from "react-dom/client";
 
 import { withPowerOtpFrameSource } from "./csp.js";
-import { PowerOtpNextGate } from "./react.js";
+import {
+  PowerOtpNextGate,
+  PowerOtpNextProvider,
+  type PowerOtpNextValue,
+  usePowerOtp,
+} from "./react.js";
 
 const siteId = "site_1234567890123456";
 const audience = "https://customer.example";
@@ -26,6 +31,23 @@ test("client entry contains no credential or environment boundary", async () => 
   assert.match(source, /@powerotp\/gate-node\/browser/);
 });
 
+test("fixture protects the whole site without adding customer-visible gate screens", async () => {
+  const [root, server, page] = await Promise.all([
+    readFile(new URL("../fixture/app/powerotp-root.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../fixture/powerotp.server.ts", import.meta.url), "utf8"),
+    readFile(new URL("../fixture/app/page.tsx", import.meta.url), "utf8"),
+  ]);
+  assert.match(server, /protect:\s*\(\)\s*=>\s*true/);
+  assert.match(root, /snapshot\.recommendation === "otp_required"/);
+  assert.match(root, /void openOtp\(\)/);
+  assert.match(root, /snapshot\.recommendation === "full_access" \? children : null/);
+  assert.ok(!root.includes("<main"));
+  assert.ok(!root.includes("<button"));
+  assert.ok(!root.includes("checking view"));
+  assert.ok(!root.includes("OTP-required view"));
+  assert.match(page, /data-customer-website="true"/);
+});
+
 test("Next production client bundles contain no server credential", async () => {
   const staticRoot = new URL("../fixture/.next/static/", import.meta.url);
   const files = await javascriptFiles(staticRoot);
@@ -34,6 +56,8 @@ test("Next production client bundles contain no server credential", async () => 
   assert.ok(!bundle.includes(siteCredential));
   assert.ok(!bundle.includes("potp_bb_fixture_server_only"));
   assert.ok(!bundle.includes("POWEROTP_SITE_CREDENTIAL"));
+  assert.ok(!bundle.includes("visitor_token_server_only"));
+  assert.ok(!bundle.includes("visitorToken"));
 });
 
 test("root gate persists through App Router-style history navigation and sequences reports", async () => {
@@ -136,6 +160,115 @@ test("verified OTP does not change customer DOM or open an iframe automatically"
   }
 });
 
+test("App Router provider publishes ordered snapshots to customer root logic", async () => {
+  const window = new HappyWindow({ url: `${audience}/private` });
+  const restoreGlobals = installBrowserGlobals(window);
+  const lifecycles: string[] = [];
+  const recommendations: string[] = [];
+  const fetcher = createFetch(async (path, init) => {
+    if (path === "/_powerotp/initial-evidence") return json({ status: "accepted" });
+    if (path === "/_powerotp/session") return json(bootstrap(0));
+    if (path === "/_powerotp/decision") {
+      return json({ status: "decision", candidate: decision("allow", 0) });
+    }
+    if (path === "/_powerotp/decision/verify") {
+      return json({ verified: true, decision: JSON.parse(String(init?.body)).candidate });
+    }
+    throw new Error(`Unexpected bridge path ${path}`);
+  });
+  let root: Root | undefined;
+
+  try {
+    const container = window.document.createElement("div");
+    window.document.body.append(container);
+    root = createRoot(container as unknown as Element);
+    await act(async () => {
+      root?.render(
+        <PowerOtpNextProvider
+          sensorVersion="next-provider-v1"
+          window={window as unknown as Window}
+          document={window.document as unknown as Document}
+          fetch={fetcher}
+        >
+          <RecommendationFixture onSnapshot={(value) => {
+            lifecycles.push(value.snapshot.lifecycle);
+            recommendations.push(value.snapshot.recommendation);
+          }} />
+        </PowerOtpNextProvider>,
+      );
+    });
+    await waitFor(() => lifecycles.includes("observing"));
+    assert.ok(lifecycles.indexOf("checking") < lifecycles.indexOf("observing"));
+    assert.ok(recommendations.includes("restricted"));
+    assert.ok(recommendations.includes("full_access"));
+    assert.equal(container.querySelector("[data-powerotp-view]")?.textContent, "full_access");
+  } finally {
+    await act(async () => root?.unmount());
+    await window.happyDOM.close();
+    restoreGlobals();
+  }
+});
+
+test("customer explicitly invokes argument-free openOtp after OTP recommendation", async () => {
+  const window = new HappyWindow({ url: `${audience}/private` });
+  const restoreGlobals = installBrowserGlobals(window);
+  let current: PowerOtpNextValue | undefined;
+  let openBody: BodyInit | null | undefined = "not-called";
+  const fetcher = createFetch(async (path, init) => {
+    if (path === "/_powerotp/initial-evidence") return json({ status: "accepted" });
+    if (path === "/_powerotp/session") return json(bootstrap(0));
+    if (path === "/_powerotp/decision") {
+      return json({ status: "decision", candidate: decision("otp", 0) });
+    }
+    if (path === "/_powerotp/decision/verify") {
+      return json({ verified: true, decision: JSON.parse(String(init?.body)).candidate });
+    }
+    if (path === "/_powerotp/challenge/open") {
+      openBody = init?.body;
+      return json({
+        challengeId: "challenge_123456789",
+        challengeUrl: "https://verify.powerotp.com/challenge/challenge_123456789",
+        challengeOrigin: "https://verify.powerotp.com",
+      });
+    }
+    throw new Error(`Unexpected bridge path ${path}`);
+  });
+  let root: Root | undefined;
+
+  try {
+    const container = window.document.createElement("div");
+    window.document.body.append(container);
+    root = createRoot(container as unknown as Element);
+    await act(async () => {
+      root?.render(
+        <PowerOtpNextProvider
+          sensorVersion="next-explicit-otp-v1"
+          pollIntervalMs={60_000}
+          window={window as unknown as Window}
+          document={window.document as unknown as Document}
+          fetch={fetcher}
+        >
+          <RecommendationFixture onSnapshot={(value) => {
+            current = value;
+          }} />
+        </PowerOtpNextProvider>,
+      );
+    });
+    await waitFor(() => current?.snapshot.lifecycle === "otp_required");
+    assert.equal(container.querySelector("[data-powerotp-view]")?.textContent, "otp_required");
+    assert.equal(window.document.querySelector("iframe"), null);
+    await act(async () => {
+      assert.equal(await current?.openOtp(), true);
+    });
+    assert.equal(openBody, undefined);
+    assert.ok(window.document.querySelector("iframe"));
+  } finally {
+    await act(async () => root?.unmount());
+    await window.happyDOM.close();
+    restoreGlobals();
+  }
+});
+
 test("CSP helper preserves policy and adds only a trusted iframe origin", () => {
   assert.equal(
     withPowerOtpFrameSource("default-src 'self'; frame-src 'none';", "https://verify.powerotp.com"),
@@ -146,6 +279,16 @@ test("CSP helper preserves policy and adds only a trusted iframe origin", () => 
     /POWEROTP-hosted/,
   );
 });
+
+function RecommendationFixture({
+  onSnapshot,
+}: {
+  onSnapshot(value: PowerOtpNextValue): void;
+}) {
+  const value = usePowerOtp();
+  useEffect(() => onSnapshot(value), [onSnapshot, value]);
+  return <div data-powerotp-view>{value.snapshot.recommendation}</div>;
+}
 
 function bootstrap(startingSequence: number) {
   return {

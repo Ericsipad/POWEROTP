@@ -57,23 +57,32 @@ test("signed clearance is local, bound, and cannot override active OTP", async (
     { keyId: verificationKeys.active.keyId, privateKey: keyPair.privateKey },
   );
 
-  await adapter.proxy(
+  const cleared = await adapter.proxy(
     request("/private", { headers: { cookie: `${gateCookie}; powerotp_access=${encode(clearance)}` } }),
     event([]),
   );
   assert.equal(decisionCalls, 0);
+  assert.equal(adapter.getRequestState(forwardedHeaders(cleared)).access, "clearance");
 
   const session = await store.get(gateSessionId);
   assert.ok(session);
   session.activeChallenge = challenge();
+  session.recommendation = {
+    lifecycle: "otp_required",
+    recommendation: "otp_required",
+    decision: "otp",
+    decisionPending: false,
+    otpOpen: true,
+  };
   await store.set(session);
   const conflictWaits: Promise<unknown>[] = [];
-  await adapter.proxy(
+  const conflicted = await adapter.proxy(
     request("/private", { headers: { cookie: `${gateCookie}; powerotp_access=${encode(clearance)}` } }),
     event(conflictWaits),
   );
   await Promise.all(conflictWaits);
   assert.equal(decisionCalls, 0);
+  assert.equal(adapter.getRequestState(forwardedHeaders(conflicted)).access, "otp");
 });
 
 test("late allow issues clearance only after decision and clearance verification", async () => {
@@ -119,17 +128,146 @@ test("late allow issues clearance only after decision and clearance verification
   assert.ok(!(await delivered.text()).includes(siteCredential));
 });
 
-test("late OTP persists across polling failure until authoritative acknowledgement", async () => {
-  let pollFails = true;
+test("timeout publishes fail-open while pending work can publish a late allow", async () => {
+  let resolveDecision!: (value: {
+    status: "decision";
+    visitorToken: string;
+    candidate: DecisionRevisionEnvelope;
+  }) => void;
+  let decisionSession: Readonly<GateSession> | undefined;
+  const pending = new Promise<Parameters<typeof resolveDecision>[0]>((resolve) => {
+    resolveDecision = resolve;
+  });
+  const adapter = createPowerOtpNext(baseOptions({
+    decisionTimeoutMs: 50,
+    protect: () => true,
+    services: {
+      requestDecision(_request, session) {
+        decisionSession = session;
+        return pending;
+      },
+      verifyDecision: async (candidate) => ({ verified: true, decision: candidate }),
+    },
+  }));
+  const initial = await adapter.proxy(request("/private"), event([]));
+  const gateCookie = cookie(initial, "powerotp_gate");
+  await adapter.route(bridgeRequest("/_powerotp/initial-evidence", gateCookie, initialEvidence()));
+  const deliveredPromise = adapter.route(bridgeRequest("/_powerotp/decision", gateCookie, {}));
+  await waitFor(() => decisionSession !== undefined);
+  await new Promise((resolve) => setTimeout(resolve, 75));
+
+  const timedOut = await adapter.proxy(
+    request("/private", { headers: { cookie: gateCookie } }),
+    event([]),
+  );
+  const failOpen = adapter.getRequestState(forwardedHeaders(timedOut));
+  assert.equal(failOpen.access, "fail_open");
+  if (failOpen.protected) assert.equal(failOpen.recommendation.decisionPending, true);
+
+  resolveDecision({
+    status: "decision",
+    visitorToken,
+    candidate: decision("allow", decisionSession!),
+  });
+  const delivered = await deliveredPromise;
+  const candidate = (await delivered.json()).candidate;
+  await adapter.route(bridgeRequest("/_powerotp/decision/verify", gateCookie, { candidate }));
+  const late = await adapter.proxy(
+    request("/private", { headers: { cookie: gateCookie } }),
+    event([]),
+  );
+  const allowed = adapter.getRequestState(forwardedHeaders(late));
+  assert.equal(allowed.access, "allow");
+  if (allowed.protected) {
+    assert.equal(allowed.recommendation.lifecycle, "observing");
+    assert.equal(allowed.recommendation.decisionPending, false);
+  }
+});
+
+test("first contact uses the credential and later calls use only the server-held token", async () => {
+  let requestCalls = 0;
+  let firstCredential: string | undefined;
+  let firstPath: string | undefined;
+  let laterToken: string | undefined;
   const adapter = createPowerOtpNext(baseOptions({
     protect: () => true,
     services: {
-      requestDecision: async (_context, session) => ({
-        status: "decision",
-        visitorToken,
-        candidate: decision("otp", session),
-        challenge: challenge(),
-      }),
+      requestDecision(request, session) {
+        requestCalls += 1;
+        firstCredential = request.siteCredential;
+        firstPath = request.context.path;
+        return Promise.resolve({
+          status: "decision",
+          visitorToken,
+          candidate: decision("allow", session),
+        });
+      },
+      verifyDecision: async (candidate) => ({ verified: true, decision: candidate }),
+      assessBrowser: async (_report, authorization) => {
+        laterToken = authorization.visitorToken;
+        return {
+          ...unavailable(),
+          leakedToken: authorization.visitorToken,
+        };
+      },
+    },
+  }));
+  const initial = await adapter.proxy(request("/private?secret=discarded"), event([]));
+  const gateCookie = cookie(initial, "powerotp_gate");
+  await adapter.route(bridgeRequest("/_powerotp/initial-evidence", gateCookie, initialEvidence()));
+  const delivered = await adapter.route(bridgeRequest("/_powerotp/decision", gateCookie, {}));
+  const deliveredBody = await delivered.json() as Record<string, unknown>;
+
+  assert.equal(requestCalls, 1);
+  assert.equal(firstCredential, siteCredential);
+  assert.equal(firstPath, "/private");
+  assert.ok(!JSON.stringify(deliveredBody).includes(visitorToken));
+  assert.ok(!JSON.stringify(deliveredBody).includes(siteCredential));
+
+  await adapter.route(bridgeRequest("/_powerotp/decision/verify", gateCookie, {
+    candidate: deliveredBody.candidate,
+  }));
+  const assessment = await adapter.route(
+    bridgeRequest("/_powerotp/browser-assessment", gateCookie, {
+      protocolVersion: BOTBLOCKER_PROTOCOL_VERSION,
+      trigger: "initial",
+      sequence: {
+        gateSessionId: value(gateCookie),
+        sequence: 0,
+        issuedAt: Date.now(),
+      },
+      evidence: initialEvidence().evidence,
+    }),
+  );
+  assert.equal(assessment.status, 503);
+  assert.equal(laterToken, visitorToken);
+  assert.ok(!(await assessment.text()).includes(visitorToken));
+
+  const repeated = await adapter.route(bridgeRequest("/_powerotp/decision", gateCookie, {}));
+  assert.equal(repeated.status, 503);
+  assert.equal(requestCalls, 1);
+  assert.ok(!(await repeated.text()).includes(visitorToken));
+});
+
+test("late OTP persists across polling failure until authoritative acknowledgement", async () => {
+  let pollFails = true;
+  let resolveDecision!: (value: {
+    status: "decision";
+    visitorToken: string;
+    candidate: DecisionRevisionEnvelope;
+    challenge: ReturnType<typeof challenge>;
+  }) => void;
+  let decisionSession: Readonly<GateSession> | undefined;
+  const pending = new Promise<Parameters<typeof resolveDecision>[0]>((resolve) => {
+    resolveDecision = resolve;
+  });
+  const adapter = createPowerOtpNext(baseOptions({
+    protect: () => true,
+    services: {
+      requestDecision(_context, session) {
+        decisionSession = session;
+        return pending;
+      },
       verifyDecision: async (candidate) => ({ verified: true, decision: candidate }),
       launchChallenge: async () => challenge(),
       pollChallenge: async (_challenge, _authorization, session) => {
@@ -151,12 +289,32 @@ test("late OTP persists across polling failure until authoritative acknowledgeme
     bridgeRequest("/_powerotp/initial-evidence", gateCookie, initialEvidence()),
   );
 
-  const delivered = await adapter.route(bridgeRequest("/_powerotp/decision", gateCookie, {}));
+  const deliveredPromise = adapter.route(bridgeRequest("/_powerotp/decision", gateCookie, {}));
+  await waitFor(() => decisionSession !== undefined);
+  await new Promise((resolve) => setTimeout(resolve, 75));
+  const failOpen = adapter.getRequestState(forwardedHeaders(await adapter.proxy(
+    request("/private", { headers: { cookie: gateCookie } }),
+    event([]),
+  )));
+  assert.equal(failOpen.access, "fail_open");
+  resolveDecision({
+    status: "decision",
+    visitorToken,
+    candidate: decision("otp", decisionSession!),
+    challenge: challenge(),
+  });
+  const delivered = await deliveredPromise;
   const candidate = (await delivered.json()).candidate;
   const verified = await adapter.route(
     bridgeRequest("/_powerotp/decision/verify", gateCookie, { candidate }),
   );
   assert.equal((await verified.json()).verified, true);
+  const otpState = adapter.getRequestState(forwardedHeaders(await adapter.proxy(
+    request("/private", { headers: { cookie: gateCookie } }),
+    event([]),
+  )));
+  assert.equal(otpState.access, "otp");
+  if (otpState.protected) assert.equal(otpState.recommendation.lifecycle, "otp_required");
   const opened = await adapter.route(emptyPostBridgeRequest(
     "/_powerotp/challenge/open",
     gateCookie,
@@ -241,6 +399,14 @@ function event(waits: Promise<unknown>[]) {
   } as never;
 }
 
+function forwardedHeaders(response: Response) {
+  return {
+    get(name: string) {
+      return response.headers.get(`x-middleware-request-${name}`);
+    },
+  };
+}
+
 function cookie(response: Response, name: string): string {
   const item = response.headers.getSetCookie().find((entry) => entry.startsWith(`${name}=`));
   assert.ok(item);
@@ -304,4 +470,12 @@ async function bootstrap(
 ): Promise<Record<string, any>> {
   const response = await adapter.route(bridgeRequest("/_powerotp/session", gateCookie));
   return response.json() as Promise<Record<string, any>>;
+}
+
+async function waitFor(condition: () => boolean): Promise<void> {
+  const deadline = Date.now() + 1_000;
+  while (!condition()) {
+    if (Date.now() >= deadline) throw new Error("Timed out waiting for condition");
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
 }

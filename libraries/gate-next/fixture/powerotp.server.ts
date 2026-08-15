@@ -16,5 +16,5 @@ export const powerOtp = createPowerOtpNext({
       publicKey: keys.publicKey,
     },
   },
-  protect: ({ path }) => path === "/" || path.startsWith("/api/private"),
+  protect: () => true,
 });

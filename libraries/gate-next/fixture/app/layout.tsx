@@ -1,12 +1,25 @@
-import { PowerOtpNextGate } from "@powerotp/gate-next/react";
+import { PowerOtpNextProvider } from "@powerotp/gate-next/react";
+import { headers } from "next/headers";
 import type { ReactNode } from "react";
 
-export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
+import { powerOtp } from "../powerotp.server";
+import { PowerOtpCustomerRoot } from "./powerotp-root";
+
+export default async function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
+  const requestState = powerOtp.getRequestState(await headers());
+  const initialSnapshot = requestState.protected
+    ? requestState.recommendation
+    : undefined;
+
   return (
     <html lang="en">
       <body>
-        {children}
-        <PowerOtpNextGate sensorVersion="next-fixture-v1" />
+        <PowerOtpNextProvider
+          sensorVersion="next-fixture-v1"
+          initialSnapshot={initialSnapshot}
+        >
+          <PowerOtpCustomerRoot>{children}</PowerOtpCustomerRoot>
+        </PowerOtpNextProvider>
       </body>
     </html>
   );

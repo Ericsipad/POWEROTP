@@ -19,9 +19,14 @@ export const powerOtp = createPowerOtpNext({
   audience: "https://customer.example",
   verificationKeys,
   decisionTimeoutMs: 200,
-  protect: ({ path }) => path.startsWith("/account") || path.startsWith("/api/private"),
+  protect: () => true,
 });
 ```
+
+`protect: () => true` applies BotBlocker state to the whole customer application. The adapter
+still excludes its owned bridge/discovery endpoints, framework/static assets, health checks,
+`OPTIONS`, and WebSocket upgrades. It reports state only; the customer root remains responsible
+for withholding or rendering the website.
 
 Next.js does not expose a socket address on `NextRequest`. By default no forwarding header is
 trusted and `clientIp` is omitted. If a deployment exposes an authenticated direct peer address,
@@ -58,6 +63,21 @@ matcher keeps framework assets, health/infrastructure paths, and owned bridge/di
 out of Proxy. The adapter independently excludes `OPTIONS` and never reads protected page,
 API, Server Action, upload, or streaming bodies.
 
+For server-owned App Router decisions, read the framework request state after Proxy:
+
+```tsx
+import { headers } from "next/headers";
+import { powerOtp } from "../powerotp.server";
+
+const state = powerOtp.getRequestState(await headers());
+```
+
+Proxy replaces any inbound POWEROTP state header before forwarding an authenticated, bounded
+recommendation and gate-session identifier through Next.js request-header overrides. The
+server-only adapter authenticates that internal value and does not add it to the browser response.
+Missing, malformed, forged, or modified state produces a typed `unavailable`/`full_access`
+snapshot; the customer still owns all SSR, route, API, and response behavior.
+
 ## App Router handlers
 
 Create `app/%5Fpowerotp/[...path]/route.ts`. Next treats a literal `_powerotp` folder as a
@@ -80,18 +100,43 @@ customer-hosted CleanDataPage. Optional discovery URLs must be POWEROTP-hosted H
 
 ## Root client gate and CSP
 
-Render the credential-free component once in the root layout:
+Wrap the root layout with the credential-free provider:
 
 ```tsx
-import { PowerOtpNextGate } from "@powerotp/gate-next/react";
+import { PowerOtpNextProvider } from "@powerotp/gate-next/react";
 
-// Inside <body>, after application content:
-<PowerOtpNextGate sensorVersion="powerotp-browser-v1" />;
+<PowerOtpNextProvider sensorVersion="powerotp-browser-v1">
+  {children}
+</PowerOtpNextProvider>;
 ```
 
-It persists across App Router client navigations. The shared coordinator derives session ID,
-sensor sequence, and restored OTP state only from `/_powerotp/session`; every decision is
-verified by the same-origin server bridge. `postMessage` only triggers authoritative polling.
+The customer root can withhold the whole website without displaying any POWEROTP placeholder
+screen. When OTP is recommended, that root explicitly calls `openOtp()` and the only visible
+POWEROTP content is the server-selected hosted iframe:
+
+```tsx
+import { useEffect } from "react";
+
+const { snapshot, openOtp } = usePowerOtp();
+
+useEffect(() => {
+  if (snapshot.recommendation === "otp_required" && !snapshot.otpOpen) {
+    void openOtp();
+  }
+}, [openOtp, snapshot.otpOpen, snapshot.recommendation]);
+
+return snapshot.recommendation === "full_access" ? children : null;
+```
+
+The provider persists across App Router client navigations and publishes the shared
+`getSnapshot`/`subscribe` state through React's external-store contract. `openOtp()` is
+argument-free and does nothing until customer root code invokes it for a verified OTP
+recommendation. The provider and hook render no checking, access, OTP, button, or other product
+screen themselves.
+The shared coordinator derives session ID, sensor sequence, and restored OTP state only from
+`/_powerotp/session`; every decision is verified by the same-origin server bridge. `postMessage`
+only triggers authoritative polling. `PowerOtpNextGate` remains as a no-children compatibility
+mount for applications that do not consume the hook.
 
 The page lock creates a POWEROTP-hosted iframe. Add that exact trusted origin to your existing
 CSP `frame-src` directive (the exported `withPowerOtpFrameSource` helper can merge it). Preserve

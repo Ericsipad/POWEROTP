@@ -2,6 +2,7 @@ export {
   createPowerOtpNext,
   type GateNextOptions,
   type PowerOtpNextAdapter,
+  type PowerOtpRequestHeaders,
 } from "./adapter.js";
 export { withPowerOtpFrameSource } from "./csp.js";
 export type {

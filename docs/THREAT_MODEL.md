@@ -174,9 +174,10 @@ customer DOM. This is a trust boundary, not merely a packaging choice:
 - Phase 13B removes the former automatic page lock. A verified `otp` changes advisory state
   only; page-lock/iframe effects, sensor pause, and polling begin only after explicit
   `gate.openOtp()` invocation. Phase 13C attaches the same closed recommendation snapshots to
-  raw Node and Express request state without controlling customer handlers or responses.
-  Phase 13D must still complete the Next.js request/provider integration before any customer
-  integration or Phase 14 MCP manifest is released.
+  raw Node and Express request state without controlling customer handlers or responses. Phase
+  13D carries that state through a replaced Next.js request-header override and exposes browser
+  snapshots through an additive provider/hook. Customer code still decides whether and what to
+  render, and only its explicit argument-free `openOtp()` call starts OTP DOM effects.
 
 ### API-key separation
 
@@ -331,7 +332,16 @@ customer DOM. This is a trust boundary, not merely a packaging choice:
   Server Action or upload bodies, and retains the pending decision with
   `NextFetchEvent.waitUntil()`. Owned App Router bridge handlers alone read bounded JSON;
   WebSocket upgrades, framework/static assets, health/infrastructure paths, and `OPTIONS` do
-  not create gate sessions.
+  not create gate sessions. Proxy replaces any inbound POWEROTP request-state header with the
+  shared Node authority's server-authenticated bounded recommendation/session state for
+  downstream App Router code; missing, malformed, or modified state is typed unavailable rather
+  than fabricated allow.
+- The root Next.js provider uses the Phase 13B `getSnapshot`/`subscribe` contract and survives
+  App Router navigation. It does not rewrite, redirect, buffer, inject, suppress rendering, or
+  open an iframe. The whole-site fixture's customer root renders ordinary customer content only
+  for full access, otherwise returns `null`, and explicitly invokes argument-free `openOtp()` for
+  an OTP recommendation. It creates no placeholder screen or customer-authored OTP content; the
+  server-selected hosted iframe is the only visible POWEROTP challenge UI.
 
 ### Direct-origin bypass
 
