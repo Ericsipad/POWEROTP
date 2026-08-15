@@ -1,7 +1,10 @@
 import {
+  BOTBLOCKER_PROTOCOL_VERSION,
+  InitialBrowserProofEvidenceSchema,
   OtpLaunchMetadataSchema,
   type BehaviorReport,
   type GateRecommendationSnapshot,
+  type InitialBrowserProofEvidence,
 } from "@powerotp/contracts";
 import {
   createAuthoritativePoller,
@@ -9,6 +12,7 @@ import {
   createContinuousBrowserSensor,
   createGateController,
   createPageLock,
+  createSensorEvidenceAccumulator,
   type ChallengeUxMessage,
   type GateController,
   type GateEffect,
@@ -27,6 +31,7 @@ export interface GateBrowserOptions {
   sensorVersion: string;
   pollIntervalMs?: number;
   fetch?: typeof fetch;
+  initialProofs?: InitialBrowserProofEvidence["proofs"];
   onError?: (code: "bootstrap" | "bridge") => void;
 }
 
@@ -48,6 +53,18 @@ export async function createGateBrowserCoordinator(
   options: GateBrowserOptions,
 ): Promise<GateBrowserCoordinator> {
   const fetcher = options.fetch ?? options.window.fetch.bind(options.window);
+  const initialBrowser = InitialBrowserProofEvidenceSchema.parse({
+    protocolVersion: BOTBLOCKER_PROTOCOL_VERSION,
+    evidence: createSensorEvidenceAccumulator({
+      sensorVersion: options.sensorVersion,
+      webdriver: options.window.navigator.webdriver === true,
+    }).snapshot(options.window.location.pathname),
+    proofs: options.initialProofs ?? {},
+  });
+  await postJson(fetcher, "/_powerotp/initial-evidence", initialBrowser).catch(() => {
+    options.onError?.("bootstrap");
+    throw new Error("POWEROTP initial evidence bridge unavailable");
+  });
   const bootstrap = await getJson<BrowserBootstrap>(fetcher, "/_powerotp/session").catch(
     () => {
       options.onError?.("bootstrap");

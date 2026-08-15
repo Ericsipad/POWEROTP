@@ -25,6 +25,7 @@ test("browser bridge derives sensor sequence from trusted bootstrap and applies 
       path,
       marker: new Headers(init?.headers).get("x-powerotp-bridge"),
     });
+    if (path === "/_powerotp/initial-evidence") return json({ status: "accepted" });
     if (path === "/_powerotp/session") return json(bootstrap(5));
     if (path === "/_powerotp/decision") return json(decisionResponse(decision(4, "allow")));
     if (path === "/_powerotp/decision/verify") {
@@ -91,6 +92,7 @@ test("verified OTP remains advisory until explicitly opened", async (context) =>
   const otp = decision(0, "otp");
   let openerCalls = 0;
   const fetcher = createFetch(async (path, init) => {
+    if (path === "/_powerotp/initial-evidence") return json({ status: "accepted" });
     if (path === "/_powerotp/session") return json(bootstrap(0));
     if (path === "/_powerotp/decision") return json(decisionResponse(otp));
     if (path === "/_powerotp/decision/verify") {
@@ -132,6 +134,7 @@ test("explicit openOtp uses an empty request and polling alone verifies", async 
   let statusCalls = 0;
   let acknowledgements = 0;
   const fetcher = createFetch(async (path, init) => {
+    if (path === "/_powerotp/initial-evidence") return json({ status: "accepted" });
     if (path === "/_powerotp/session") return json(bootstrap(0));
     if (path === "/_powerotp/decision") return json(decisionResponse(decision(0, "otp")));
     if (path === "/_powerotp/decision/verify") {

@@ -6,6 +6,16 @@ what is deployed. See [`AS_BUILT.md`](AS_BUILT.md) for ground truth and
 [`POWEROTP_BOTBLOCKER_PLAN.md`](POWEROTP_BOTBLOCKER_PLAN.md) for the bot-gate implementation
 it builds on.
 
+**Product nomenclature.** POWEROTP Passport is one install-once product family with two
+cryptographically separate holder classes. A **Human Passport** is installed only after a person
+completes a challenge and explicitly opts into persistent browser access. An **Agent Passport**
+is purchased by a bot or automated client and installed as a proof-of-possession browser/runtime
+token backed by the PaidTokenPass entitlement ledger. Both work across participating POWEROTP
+sites and produce site-bound assertions, but an Agent Passport can never claim human verification.
+This document focuses the Human Passport identity, consent, biometric, and age-assurance rules;
+the Agent Passport purchase, quota, and automated-access rules are canonical in
+[`POWEROTP_BOTBLOCKER_PLAN.md`](POWEROTP_BOTBLOCKER_PLAN.md#passport-install-once-allow-across-participating-sites).
+
 > ## ⭐ THE DIFFERENTIATOR — LEAD WITH THIS
 >
 > **One verification works across every site in the network — and no site can tell which other
@@ -46,13 +56,14 @@ Findings that constrain the design, called out in place:
 
 ## 1. What we sell
 
-Three products, one gate, one credential.
+Four products, one gate, one Passport family.
 
 | # | Product | What the client integrates | What the visitor experiences |
 | --- | --- | --- | --- |
 | 1 | **Bot gate** | Middleware at the edge of the client site | Nothing, if they already hold a valid passport |
 | 2 | **Human passport** | Nothing extra — same middleware | One OTP, once, then instant entry across the network |
-| 3 | **Age assurance** (optional) | Surfaces our hosted flow in an iframe or modal | One document + selfie check, once, then instant entry |
+| 3 | **Agent passport** | Nothing extra — same middleware | Purchase and install one proof-of-possession token, then identified automated access across the network subject to entitlement and abuse controls |
+| 4 | **Age assurance** (optional) | Surfaces our hosted flow in an iframe or modal | One document + selfie check, once, then instant entry |
 
 The commercial proposition is not verification. It is that the client site never collects,
 stores, or becomes liable for personal data, and never has to answer an age-assurance

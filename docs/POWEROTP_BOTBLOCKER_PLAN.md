@@ -22,9 +22,11 @@ expected to honor those instructions. POWEROTP never rewrites the customer's app
 
 The recommended customer integration mounts the credential-free browser state provider before
 its protected UI. While the provider reports `checking`, customer code may choose to defer its
-own protected render/data fetch. The SDK checks available local clearance/Passport/access
-proofs, gathers approved initial browser evidence, and combines it server-side with trusted IP
-and request context for RapidAuth. POWEROTP returns exactly one of two decisions:
+own protected render/data fetch. The access fast path is ordered: first verify a site-specific
+return clearance locally; otherwise discover and validate an installed POWEROTP Passport with
+POWEROTP and mint a pairwise assertion for this site; only when neither proof is valid does the
+adapter combine approved initial browser evidence with trusted IP/request context for RapidAuth.
+POWEROTP returns exactly one of two decisions:
 
 - `allow`: recommend normal access and continuously observe.
 - `otp`: recommend that customer code close access and call the single argument-free
@@ -270,11 +272,66 @@ Valkey handles short windows, rate limits, deduplication, challenge state, and e
 - `powerotp_access`: 2–5 minute site clearance verified locally.
 - `powerotp_site_return`: longer site credential used to request fresh clearance; it cannot override server revocation.
 - Gate token: seconds-long, one-time, original-route-bound challenge state.
-- Passport root: optional device-key-bound registration, valid for up to one year and revocable.
-- Passport site assertion: one-time and pairwise so sites cannot correlate a global Passport identifier.
-- Agent entitlement: separate proof-of-possession machine credential.
+- Human Passport root: optional device-key-bound registration installed after a person completes
+  a challenge and explicitly chooses persistent Passport access; valid for up to one year and
+  revocable.
+- Agent Passport root: a purchased proof-of-possession token installed in an automated browser,
+  with paid scope/quota/expiry/revocation recorded by the PaidTokenPass entitlement ledger.
+- Passport site assertion: one-time and site-bound for either Passport class. POWEROTP can
+  recognize the Passport across all participating sites, but customer sites do not receive a
+  network-global identifier.
 
 Immediate remote revocation and zero lookups cannot both be guaranteed. Short access lifetime, fast edge refresh, and compact signed revocation filters provide the practical balance.
+
+### Passport: install once, allow across participating sites
+
+POWEROTP Passport is a persistent browser/device credential for returning access across every
+participating POWEROTP-protected site. It has two holder classes under one product:
+
+- **Human Passport.** A person completes a POWEROTP challenge, is verified, and explicitly
+  chooses to install persistent Passport access in the browser. The Passport is bound to a
+  device credential such as a passkey.
+- **Agent Passport.** A bot or other automated client purchases an eligible Passport, installs
+  its proof-of-possession token in its browser/runtime, and uses that credential to identify
+  itself to POWEROTP across protected sites. PaidTokenPass is the internal entitlement,
+  quota, and consumption ledger behind this Agent Passport; it is not presented to customers as
+  an unrelated product identity.
+
+Both classes validate through POWEROTP and produce the same customer-facing `allow` fast path.
+Their internal proof types, issuance requirements, lifecycle controls, and abuse limits remain
+separate so a purchased agent credential can never impersonate a verified human. Neither class
+adds a third BotBlocker decision.
+
+1. If the current site already has a valid signed return clearance, the adapter verifies it
+   locally and immediately publishes full access.
+2. Otherwise, the browser starts the POWEROTP Passport assertion flow. The customer site cannot
+   read a POWEROTP cookie or credential from another origin, so POWEROTP validates the Passport
+   server-side for credential class, device/proof-of-possession proof, status, paid entitlement
+   where applicable, revocation, expiry, freshness, and replay.
+3. POWEROTP returns a one-time assertion bound to the requesting site, audience, gate session,
+   nonce, and expiry, using a pairwise site subject rather than a network-global customer-visible
+   identifier. The adapter verifies the assertion, publishes `allow`/full access, and stores the
+   resulting site clearance and scoped session authorization.
+4. If no Passport exists or validation fails, the adapter continues to RapidAuth. Passport
+   absence never fabricates `allow`, and Passport validation failure never exposes identity data
+   to the customer site.
+
+This delivers “install once, works everywhere” without an unreliable or privacy-invasive shared
+cross-site cookie. New participating domains use a first-party POWEROTP assertion flow (including
+an imperceptible top-level authorization round trip where browser policy requires it) to mint
+their own pairwise first-party assertion. Customer sites can recognize only their own pairwise
+visitor; POWEROTP alone may associate that Passport with its private cross-site security record.
+The detailed passkey, top-level redirect, unlinkability, consent, and wallet-credential design is
+canonical in
+[`PASSPORT_BUSINESS_AND_LEGAL_PLAN.md`](PASSPORT_BUSINESS_AND_LEGAL_PLAN.md#4-passport-delivery-and-the-cookie-constraint).
+
+Whichever path grants access—local site clearance, validated Passport, or RapidAuth `allow`—the
+same continuous observation starts. The first behavior report is sent at five seconds, complete
+intervals are sent every 30 seconds, and navigation/hide/close/exit sends a partial interval.
+The browser sends no Passport root, global identity, site credential, or scoped visitor token.
+The adapter resolves the HttpOnly local gate session and uses its server-held scoped token so
+POWEROTP attaches each report to the correct site session, private human-or-agent
+Passport/user-intelligence record when present, and project-scoped customer visit trail.
 
 ### Browser State SDK, OTP Opener, and Runtime Sensor
 

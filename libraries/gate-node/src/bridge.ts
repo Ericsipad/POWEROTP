@@ -1,7 +1,18 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 
-import { BehaviorReportSchema, OtpLaunchMetadataSchema } from "@powerotp/contracts";
+import {
+  BehaviorReportSchema,
+  BotBlockerUnavailableResponseSchema,
+  InitialBrowserProofEvidenceSchema,
+  OtpLaunchMetadataSchema,
+} from "@powerotp/contracts";
 
+import {
+  allowSnapshot,
+  otpSnapshot,
+  retainsActiveOtp,
+  verifiedSnapshot,
+} from "./advisory.js";
 import { appendPrivateCookie, encodeClearance, verifyClearanceCookie } from "./cookies.js";
 import { HttpInputError, readEmptyBody, readJsonBody, sendJson } from "./http.js";
 import {
@@ -9,6 +20,7 @@ import {
   bootstrapProtocolVersion,
   normalizeChallenge,
   safeDecisionResult,
+  scopedVisitorAuthorization,
   UNAVAILABLE,
   verifyDecisionForSession,
 } from "./runtime.js";
@@ -23,6 +35,7 @@ import type {
 
 export interface BridgeOptions {
   siteId: string;
+  siteCredential: string;
   audience: string;
   decisionTimeoutMs: number;
   clearanceCookieName: string;
@@ -43,6 +56,31 @@ export async function handleBridge(
 ): Promise<boolean> {
   if (!path.startsWith("/_powerotp/")) return false;
   try {
+    if (path === "/_powerotp/initial-evidence" && request.method === "POST") {
+      const parsed = InitialBrowserProofEvidenceSchema.safeParse(
+        await readJsonBody(request, options.limits.maxBodyBytes),
+      );
+      if (!parsed.success) throw new HttpInputError(400);
+      options.session.initialBrowser = parsed.data;
+      const clearance = parsed.data.proofs.clearance;
+      if (clearance && !retainsActiveOtp(options.session)) {
+        const verified = verifyClearanceCookie({
+          value: encodeClearance(clearance),
+          verificationKeys: options.verificationKeys,
+          audience: options.audience,
+          siteId: options.siteId,
+          gateSessionId: options.session.id,
+          now: options.now(),
+        });
+        if (verified.valid) {
+          options.session.clearanceVerified = true;
+          options.session.recommendation = allowSnapshot(options.session.lastApplied);
+        }
+      }
+      await options.store.set(options.session);
+      sendJson(response, 200, { status: "accepted" });
+      return true;
+    }
     if (path === "/_powerotp/session" && request.method === "GET") {
       sendJson(response, 200, bootstrap(options));
       return true;
@@ -88,6 +126,11 @@ export async function handleBridge(
           ...options.session.acceptedNonces.slice(-127),
           applicable.nonce,
         ];
+        options.session.clearanceVerified = false;
+        options.session.recommendation =
+          applicable.outcome === "otp"
+            ? otpSnapshot(applicable.sequence)
+            : allowSnapshot(applicable.sequence);
         await options.store.set(options.session);
       }
       sendJson(
@@ -102,20 +145,36 @@ export async function handleBridge(
     if (path === "/_powerotp/challenge/open" && request.method === "POST") {
       await readEmptyBody(request, options.limits.maxBodyBytes);
       const challenge = options.session.activeChallenge;
+      const authorization = scopedVisitorAuthorization(options.session);
       if (
         !challenge ||
+        !authorization ||
         options.session.latestDecisionOutcome !== "otp" ||
         !options.session.lastApplied
       ) {
         sendJson(response, 503, UNAVAILABLE);
         return true;
       }
-      const launch = OtpLaunchMetadataSchema.safeParse(challenge);
+      const launched = await Promise.resolve()
+        .then(() => options.services.launchChallenge(authorization, options.session))
+        .catch(() => UNAVAILABLE);
+      const launchUnavailable = BotBlockerUnavailableResponseSchema.safeParse(launched);
+      if (launchUnavailable.success) {
+        sendJson(response, 503, launchUnavailable.data);
+        return true;
+      }
+      const launch = OtpLaunchMetadataSchema.safeParse(launched);
       if (!launch.success) {
         sendJson(response, 503, UNAVAILABLE);
         return true;
       }
+      if (launch.data.challengeId !== challenge.challengeId) {
+        sendJson(response, 503, UNAVAILABLE);
+        return true;
+      }
+      options.session.activeChallenge = normalizeChallenge(launch.data);
       options.session.challengeOpened = true;
+      options.session.recommendation = otpSnapshot(options.session.lastApplied, true);
       await options.store.set(options.session);
       sendJson(response, 200, launch.data);
       return true;
@@ -133,8 +192,13 @@ export async function handleBridge(
       }
       options.session.nextSequence += 1;
       await options.store.set(options.session);
-      const result = await options.services
-        .assessBrowser(parsed.data, options.session)
+      const authorization = scopedVisitorAuthorization(options.session);
+      if (!authorization) {
+        sendJson(response, 503, UNAVAILABLE);
+        return true;
+      }
+      const result = await Promise.resolve()
+        .then(() => options.services.assessBrowser(parsed.data, authorization, options.session))
         .catch(() => UNAVAILABLE);
       if (result.status === "decision") {
         options.session.latestDecision = result.candidate;
@@ -151,18 +215,24 @@ export async function handleBridge(
     }
     if (path === "/_powerotp/challenge/status" && request.method === "GET") {
       const challenge = options.session.activeChallenge;
-      if (!challenge || options.session.challengeOpened !== true) {
+      const authorization = scopedVisitorAuthorization(options.session);
+      if (!challenge || !authorization || options.session.challengeOpened !== true) {
         sendJson(response, 503, UNAVAILABLE);
         return true;
       }
-      const result = await options.services
-        .pollChallenge(challenge, options.session)
+      const result = await Promise.resolve()
+        .then(() => options.services.pollChallenge(challenge, authorization, options.session))
         .catch(() => UNAVAILABLE);
+      if (result.status === "unavailable") {
+        const unavailable = BotBlockerUnavailableResponseSchema.safeParse(result);
+        sendJson(response, 503, unavailable.success ? unavailable.data : UNAVAILABLE);
+        return true;
+      }
       if (
-        result.status !== "unavailable" &&
-        (result.siteId !== options.siteId ||
-          result.gateSessionId !== options.session.id ||
-          result.challengeId !== challenge.challengeId)
+        (result.status !== "pending" && result.status !== "verified") ||
+        result.siteId !== options.siteId ||
+        result.gateSessionId !== options.session.id ||
+        result.challengeId !== challenge.challengeId
       ) {
         sendJson(response, 503, UNAVAILABLE);
         return true;
@@ -171,7 +241,12 @@ export async function handleBridge(
         options.session.challengeVerified = true;
         await options.store.set(options.session);
       }
-      sendJson(response, result.status === "unavailable" ? 503 : 200, result);
+      sendJson(response, 200, {
+        status: result.status,
+        siteId: result.siteId,
+        gateSessionId: result.gateSessionId,
+        challengeId: result.challengeId,
+      });
       return true;
     }
     if (path === "/_powerotp/challenge/ack" && request.method === "POST") {
@@ -189,6 +264,8 @@ export async function handleBridge(
       options.session.challengeVerified = false;
       options.session.challengeOpened = false;
       options.session.latestDecisionOutcome = undefined;
+      options.session.clearanceVerified = false;
+      options.session.recommendation = verifiedSnapshot(options.session.lastApplied);
       await options.store.set(options.session);
       sendJson(response, 200, { status: "acknowledged" });
       return true;
@@ -213,7 +290,9 @@ export async function handleBridge(
 function bootstrap(options: BridgeOptions): BrowserBootstrap {
   const { session } = options;
   const restoredSecurityState =
-    session.lastApplied && session.activeChallenge
+    session.lastApplied &&
+    session.activeChallenge &&
+    session.recommendation?.lifecycle === "otp_required"
       ? {
           state: "otp_required" as const,
           decision: "otp" as const,
@@ -221,6 +300,13 @@ function bootstrap(options: BridgeOptions): BrowserBootstrap {
           acceptedNonces: session.acceptedNonces,
           activeChallengeId: session.activeChallenge.challengeId,
         }
+      : session.recommendation?.lifecycle === "observing"
+        ? {
+            state: "observing" as const,
+            decision: "allow" as const,
+            ...(session.lastApplied ? { lastApplied: session.lastApplied } : {}),
+            acceptedNonces: session.acceptedNonces,
+          }
       : session.lastApplied
         ? {
             state: "checking" as const,
@@ -252,9 +338,18 @@ async function decision(options: BridgeOptions): Promise<DecisionServiceResult> 
         : {}),
     };
   }
-  if (!options.session.requestContext) return UNAVAILABLE;
+  if (
+    options.session.visitorToken ||
+    !options.session.requestContext ||
+    !options.session.initialBrowser
+  ) {
+    return UNAVAILABLE;
+  }
   return beginDecision({
     context: options.session.requestContext,
+    initialBrowser: options.session.initialBrowser,
+    siteCredential: options.siteCredential,
+    decisionTimeoutMs: options.decisionTimeoutMs,
     session: options.session,
     services: options.services,
     save: () => Promise.resolve(options.store.set(options.session)),

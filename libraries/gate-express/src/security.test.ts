@@ -26,6 +26,7 @@ import {
 const siteId = "site_1234567890123456";
 const audience = "https://customer.example";
 const siteCredential = "potp_bb_secret_that_stays_server_side_123456";
+const visitorToken = "visitor_token_server_only_12345678901234567890";
 const keyPair = generateKeyPairSync("ed25519");
 const verificationKeys = {
   active: { keyId: "key_1234567890123456", publicKey: keyPair.publicKey },
@@ -55,12 +56,12 @@ test("signed clearance verifies locally and rejects expiry or binding mismatches
     },
     {
       name: "expired",
-      access: "optimistic",
+      access: "checking",
       claims: { siteId, gateSessionId, audience, issuedAt: now - 60_000, expiresAt: now - 1 },
     },
     {
       name: "wrong site",
-      access: "optimistic",
+      access: "checking",
       claims: {
         siteId: "site_6543210987654321",
         gateSessionId,
@@ -71,7 +72,7 @@ test("signed clearance verifies locally and rejects expiry or binding mismatches
     },
     {
       name: "wrong session",
-      access: "optimistic",
+      access: "checking",
       claims: {
         siteId,
         gateSessionId: "wrong_gate_session_123456",
@@ -82,7 +83,7 @@ test("signed clearance verifies locally and rejects expiry or binding mismatches
     },
     {
       name: "wrong audience",
-      access: "optimistic",
+      access: "checking",
       claims: {
         siteId,
         gateSessionId,
@@ -147,7 +148,7 @@ test("an active OTP challenge overrides a previously valid clearance", async () 
   const response = await fetch(`${origin}/private`, {
     headers: { cookie: `${gateCookie}; powerotp_access=${encode(clearance)}` },
   });
-  assert.equal((await response.json()).access, "optimistic");
+  assert.equal((await response.json()).access, "checking");
 });
 
 test("late allow is delivered and issues clearance only after both verifications", async () => {
@@ -167,16 +168,14 @@ test("late allow is delivered and issues clearance only after both verifications
     },
   });
   const initial = await fetch(`${origin}/private`);
-  assert.equal((await initial.json()).access, "optimistic");
+  assert.equal((await initial.json()).access, "checking");
   const gateCookie = sessionCookie(initial);
+  await submitInitialEvidence(origin, gateCookie);
+  const deliveredPromise = decisionRequest(origin, gateCookie);
   await waitFor(() => currentSession !== undefined);
   resolveDecision(allowResult(currentSession!));
 
-  const delivered = await fetch(`${origin}/_powerotp/decision`, {
-    method: "POST",
-    headers: bridgeHeaders(gateCookie, true),
-    body: "{}",
-  });
+  const delivered = await deliveredPromise;
   assert.equal((await delivered.json()).candidate.outcome, "allow");
   const clearanceCookie = delivered.headers
     .getSetCookie()
@@ -196,11 +195,13 @@ test("late OTP remains authoritative through polling failure and acknowledgement
     services: {
       requestDecision: async (_context, session) => ({
         status: "decision",
+        visitorToken,
         candidate: decision("otp", session),
         challenge: challenge(),
       }),
       verifyDecision: async (candidate) => ({ verified: true, decision: candidate }),
-      pollChallenge: async (_challenge, session) => {
+      launchChallenge: async () => challenge(),
+      pollChallenge: async (_challenge, _authorization, session) => {
         if (pollFails) throw new Error("dependency unavailable");
         return {
           status: "verified",
@@ -213,6 +214,7 @@ test("late OTP remains authoritative through polling failure and acknowledgement
   });
   const initial = await fetch(`${origin}/private`);
   const gateCookie = sessionCookie(initial);
+  await submitInitialEvidence(origin, gateCookie);
   const delivered = await decisionRequest(origin, gateCookie);
   const candidate = (await delivered.json()).candidate;
   await verifyRequest(origin, gateCookie, candidate);
@@ -411,6 +413,7 @@ function allowResult(session: Readonly<GateSession>) {
   const now = Date.now();
   return {
     status: "decision" as const,
+    visitorToken,
     candidate: decision("allow", session),
     clearance: signSiteClearance(
       {
@@ -487,6 +490,25 @@ async function decisionRequest(origin: string, cookie: string): Promise<Response
     headers: bridgeHeaders(cookie, true),
     body: "{}",
   });
+}
+
+async function submitInitialEvidence(origin: string, cookie: string): Promise<void> {
+  const response = await fetch(`${origin}/_powerotp/initial-evidence`, {
+    method: "POST",
+    headers: bridgeHeaders(cookie, true),
+    body: JSON.stringify({
+      protocolVersion: BOTBLOCKER_PROTOCOL_VERSION,
+      proofs: {},
+      evidence: {
+        routePath: "/",
+        clicks: [],
+        mouseDirectness: { averageDirectnessRatio: 0, sampleCount: 0 },
+        scroll: { smoothnessScore: 0, highSpeedEventCount: 0 },
+        honeypotActivations: [],
+      },
+    }),
+  });
+  assert.equal(response.status, 200);
 }
 
 async function verifyRequest(

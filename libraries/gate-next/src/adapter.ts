@@ -59,7 +59,7 @@ export function createPowerOtpNext(options: GateNextOptions): PowerOtpNextAdapte
       const result = await run(request, false);
       if (!result.state) return result.response.toResponse(request.method);
 
-      if (result.state.sessionId) {
+      if (result.state.protected && result.state.sessionId) {
         event.waitUntil(
           Promise.resolve(store.get(result.state.sessionId))
             .then((session) => session?.pendingDecision)

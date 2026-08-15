@@ -80,6 +80,9 @@ test("React root starts the trusted bridge sensor and applies decision revisions
       path,
       marker: new Headers(init?.headers).get("x-powerotp-bridge"),
     });
+    if (path === "/_powerotp/initial-evidence") {
+      return json({ status: "accepted" });
+    }
     if (path === "/_powerotp/session") {
       return json({
         protocolVersion: BOTBLOCKER_PROTOCOL_VERSION,

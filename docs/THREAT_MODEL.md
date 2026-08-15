@@ -173,8 +173,10 @@ customer DOM. This is a trust boundary, not merely a packaging choice:
   and call the single argument-free `gate.openOtp()` API.
 - Phase 13B removes the former automatic page lock. A verified `otp` changes advisory state
   only; page-lock/iframe effects, sensor pause, and polling begin only after explicit
-  `gate.openOtp()` invocation. Phases 13C–13D must complete adapter/provider integration before
-  any customer integration or Phase 14 MCP manifest is released.
+  `gate.openOtp()` invocation. Phase 13C attaches the same closed recommendation snapshots to
+  raw Node and Express request state without controlling customer handlers or responses.
+  Phase 13D must still complete the Next.js request/provider integration before any customer
+  integration or Phase 14 MCP manifest is released.
 
 ### API-key separation
 
@@ -191,6 +193,11 @@ customer DOM. This is a trust boundary, not merely a packaging choice:
 - The gate-session token is short-lived, revocable, audience/site/session-bound, and held by the
   adapter. Browser requests use only the HttpOnly local session cookie; the adapter forwards
   the scoped token server-to-server.
+- Phase 13C makes this separation explicit in the shared Node service boundary: bounded initial
+  proof/evidence plus trusted request context use the site credential once, the returned opaque
+  token is stored only in the server session, and later assessment, iframe-launch, and polling
+  calls receive only that token. Browser bridge responses and framework request state expose
+  neither value.
 - `gate.openOtp()` accepts no method, policy, or content selection and never accepts a site
   credential. The server derives the iframe launch from the authenticated site/session's
   authoritative `otp` decision.
@@ -239,9 +246,10 @@ customer DOM. This is a trust boundary, not merely a packaging choice:
   validation, and the server-side session lookup plus scoped token claims must agree on
   site/session/audience before POWEROTP reads the related user-intelligence record.
 - The raw Node wrapper stores an opaque 192-bit session ID in an HttpOnly/SameSite cookie,
-  keeps ordering and challenge state server-side, and never evicts an active OTP challenge
-  from its bounded default store. Authoritative verification remains active server-side until
-  the browser acknowledges applying the bound polling result.
+  keeps initial evidence, scoped visitor authorization, recommendation ordering, and challenge
+  state server-side, and never evicts an active OTP challenge from its bounded default store.
+  Authoritative verification remains active server-side until the browser acknowledges
+  applying the bound polling result.
 - Express composes that same server-side store and bridge. Its default remains process-local;
   clustered or multi-instance deployments require an injected concurrency-safe shared store
   and cannot claim active-OTP durability from the default.
@@ -310,13 +318,15 @@ customer DOM. This is a trust boundary, not merely a packaging choice:
   challenge; those recommendations/states persist across outages.
 - Customers requiring fail-closed behavior implement it in their own server/client access
   logic. POWEROTP reports state but does not enforce it.
-- The raw Node wrapper invokes the protected application handler immediately, including when
-  the decision service throws synchronously, and leaves the decision Promise pending. Its
-  bounded session store may fail open for a new ordinary visitor at capacity but pins every
-  active OTP challenge, so capacity pressure cannot convert active OTP into optimistic access.
-- The Express wrapper preserves the same behavior without reading application JSON/multipart
-  bodies or buffering streams/compressed HTML. Its React root helper applies late revisions
-  through the verifier-backed controller; pending work is not tied to the UX timeout.
+- The Phase 13C raw Node wrapper invokes the protected application handler immediately with
+  framework-native advisory state. Only its owned bounded bridge starts first contact after
+  initial evidence is present. Timeout publishes fail-open while the same Promise remains
+  pending, and a late verified `allow` or `otp` replaces that state. Its bounded session store
+  may fail open for a new ordinary visitor at capacity but pins every active OTP challenge.
+- The Express wrapper delegates to that same Node authority without reading application
+  JSON/multipart bodies, rewriting routes, or buffering/mutating streams and compressed HTML.
+  Its React helper remains advisory: it changes no DOM until customer code explicitly calls
+  `openOtp()`.
 - The Next.js 16 wrapper returns `NextResponse.next()` without reading protected page/API/
   Server Action or upload bodies, and retains the pending decision with
   `NextFetchEvent.waitUntil()`. Owned App Router bridge handlers alone read bounded JSON;

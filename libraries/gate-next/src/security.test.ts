@@ -18,6 +18,7 @@ import { createPowerOtpNext, type GateNextOptions } from "./index.js";
 const siteId = "site_1234567890123456";
 const audience = "https://customer.example";
 const siteCredential = "potp_bb_secret_that_stays_server_side_123456";
+const visitorToken = "visitor_token_server_only_12345678901234567890";
 const keyPair = generateKeyPairSync("ed25519");
 const verificationKeys = {
   active: { keyId: "key_1234567890123456", publicKey: keyPair.publicKey },
@@ -39,7 +40,7 @@ test("signed clearance is local, bound, and cannot override active OTP", async (
   const waits: Promise<unknown>[] = [];
   const initial = await adapter.proxy(request("/private"), event(waits));
   await Promise.all(waits);
-  assert.equal(decisionCalls, 1);
+  assert.equal(decisionCalls, 0);
   const gateCookie = cookie(initial, "powerotp_gate");
   const gateSessionId = value(gateCookie);
   const now = Date.now();
@@ -60,7 +61,7 @@ test("signed clearance is local, bound, and cannot override active OTP", async (
     request("/private", { headers: { cookie: `${gateCookie}; powerotp_access=${encode(clearance)}` } }),
     event([]),
   );
-  assert.equal(decisionCalls, 1);
+  assert.equal(decisionCalls, 0);
 
   const session = await store.get(gateSessionId);
   assert.ok(session);
@@ -72,7 +73,7 @@ test("signed clearance is local, bound, and cannot override active OTP", async (
     event(conflictWaits),
   );
   await Promise.all(conflictWaits);
-  assert.equal(decisionCalls, 2);
+  assert.equal(decisionCalls, 0);
 });
 
 test("late allow issues clearance only after decision and clearance verification", async () => {
@@ -83,6 +84,7 @@ test("late allow issues clearance only after decision and clearance verification
         const now = Date.now();
         return {
           status: "decision",
+          visitorToken,
           candidate: decision("allow", session),
           clearance: signSiteClearance(
             {
@@ -105,6 +107,9 @@ test("late allow issues clearance only after decision and clearance verification
   const initial = await adapter.proxy(request("/private"), event(waits));
   const gateCookie = cookie(initial, "powerotp_gate");
   await Promise.all(waits);
+  await adapter.route(
+    bridgeRequest("/_powerotp/initial-evidence", gateCookie, initialEvidence()),
+  );
 
   const delivered = await adapter.route(bridgeRequest("/_powerotp/decision", gateCookie, {}));
   const clearanceCookie = delivered.headers
@@ -121,11 +126,13 @@ test("late OTP persists across polling failure until authoritative acknowledgeme
     services: {
       requestDecision: async (_context, session) => ({
         status: "decision",
+        visitorToken,
         candidate: decision("otp", session),
         challenge: challenge(),
       }),
       verifyDecision: async (candidate) => ({ verified: true, decision: candidate }),
-      pollChallenge: async (_challenge, session) => {
+      launchChallenge: async () => challenge(),
+      pollChallenge: async (_challenge, _authorization, session) => {
         if (pollFails) throw new Error("dependency unavailable");
         return {
           status: "verified",
@@ -140,6 +147,9 @@ test("late OTP persists across polling failure until authoritative acknowledgeme
   const initial = await adapter.proxy(request("/private"), event(waits));
   const gateCookie = cookie(initial, "powerotp_gate");
   await Promise.all(waits);
+  await adapter.route(
+    bridgeRequest("/_powerotp/initial-evidence", gateCookie, initialEvidence()),
+  );
 
   const delivered = await adapter.route(bridgeRequest("/_powerotp/decision", gateCookie, {}));
   const candidate = (await delivered.json()).candidate;
@@ -262,6 +272,20 @@ function challenge() {
     challengeId: "challenge_123456789",
     challengeUrl: "https://verify.powerotp.com/challenge/challenge_123456789",
     challengeOrigin: "https://verify.powerotp.com",
+  };
+}
+
+function initialEvidence() {
+  return {
+    protocolVersion: BOTBLOCKER_PROTOCOL_VERSION,
+    proofs: {},
+    evidence: {
+      routePath: "/",
+      clicks: [],
+      mouseDirectness: { averageDirectnessRatio: 0, sampleCount: 0 },
+      scroll: { smoothnessScore: 0, highSpeedEventCount: 0 },
+      honeypotActivations: [],
+    },
   };
 }
 

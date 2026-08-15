@@ -4,6 +4,8 @@ import type {
   BehaviorReport,
   BotBlockerUnavailableResponse,
   DecisionRevisionEnvelope,
+  GateRecommendationSnapshot,
+  InitialBrowserProofEvidence,
   OtpLaunchMetadata,
   ReportSequence,
   RequestContext,
@@ -29,6 +31,10 @@ export interface GateSession {
   latestDecisionOutcome?: "allow" | "otp";
   challengeVerified?: boolean;
   pendingDecision?: Promise<DecisionServiceResult>;
+  initialBrowser?: InitialBrowserProofEvidence;
+  visitorToken?: string;
+  recommendation?: GateRecommendationSnapshot;
+  clearanceVerified?: boolean;
   latestDecision?: unknown;
   latestClearance?: unknown;
 }
@@ -51,21 +57,45 @@ export type DecisionServiceResult =
   | DecisionResult
   | BotBlockerUnavailableResponse;
 
+export interface InitialDecisionResult extends DecisionResult {
+  visitorToken: string;
+}
+
+export type InitialDecisionServiceResult =
+  | InitialDecisionResult
+  | BotBlockerUnavailableResponse;
+
+export interface InitialDecisionRequest {
+  siteCredential: string;
+  context: RequestContext;
+  browser: InitialBrowserProofEvidence;
+}
+
+export interface ScopedVisitorAuthorization {
+  visitorToken: string;
+}
+
 export interface GateNodeServices {
   requestDecision(
-    context: RequestContext,
+    request: InitialDecisionRequest,
     session: Readonly<GateSession>,
-  ): Promise<DecisionServiceResult>;
+  ): Promise<InitialDecisionServiceResult>;
   verifyDecision(
     candidate: unknown,
     session: Readonly<GateSession>,
   ): Promise<DecisionVerification>;
   assessBrowser(
     report: BehaviorReport,
+    authorization: ScopedVisitorAuthorization,
     session: Readonly<GateSession>,
   ): Promise<DecisionServiceResult>;
+  launchChallenge(
+    authorization: ScopedVisitorAuthorization,
+    session: Readonly<GateSession>,
+  ): Promise<ChallengeMetadata | BotBlockerUnavailableResponse>;
   pollChallenge(
     challenge: ChallengeMetadata,
+    authorization: ScopedVisitorAuthorization,
     session: Readonly<GateSession>,
   ): Promise<AuthoritativeGateStatus | BotBlockerUnavailableResponse>;
 }
@@ -90,12 +120,17 @@ export type GateNodeEvent =
   | { type: "invalid_request"; route: "bridge" | "application" }
   | { type: "request_error"; route: "bridge" | "application" };
 
-export interface ProtectedRequestState {
-  protected: boolean;
-  access: "excluded" | "clearance" | "optimistic" | "allow" | "otp" | "unavailable";
-  sessionId?: string;
-  decision?: DecisionRevisionEnvelope;
-}
+export type ProtectedRequestState =
+  | {
+      protected: false;
+      access: "excluded";
+    }
+  | {
+      protected: true;
+      access: "checking" | "clearance" | "fail_open" | "allow" | "otp" | "unavailable";
+      sessionId?: string;
+      recommendation: GateRecommendationSnapshot;
+    };
 
 export type ProtectedRouteHandler = (
   request: IncomingMessage,

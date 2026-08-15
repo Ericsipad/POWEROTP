@@ -10,6 +10,10 @@ export type {
   GateNodeServices,
   GateSession,
   GateSessionStore,
+  InitialDecisionRequest,
+  InitialDecisionResult,
+  InitialDecisionServiceResult,
   ProtectedRequestState,
+  ScopedVisitorAuthorization,
   TrustedProxyConfig,
 } from "@powerotp/gate-node";

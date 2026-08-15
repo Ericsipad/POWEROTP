@@ -3,10 +3,17 @@ import {
   BotBlockerUnavailableResponseSchema,
   type BotBlockerUnavailableResponse,
   type DecisionRevisionEnvelope,
+  type InitialBrowserProofEvidence,
   type RequestContext,
 } from "@powerotp/contracts";
 import { validateVerifiedDecision } from "@powerotp/gate-core";
 
+import {
+  checkingSnapshot,
+  failOpenSnapshot,
+  retainsActiveOtp,
+  unavailableSnapshot,
+} from "./advisory.js";
 import type {
   DecisionResult,
   DecisionServiceResult,
@@ -30,22 +37,54 @@ export function createServices(
     verifyDecision:
       supplied?.verifyDecision ?? (async () => ({ verified: false, reason: "unavailable" })),
     assessBrowser: supplied?.assessBrowser ?? (async () => UNAVAILABLE),
+    launchChallenge: supplied?.launchChallenge ?? (async () => UNAVAILABLE),
     pollChallenge: supplied?.pollChallenge ?? (async () => UNAVAILABLE),
   };
 }
 
 export function beginDecision(options: {
   context: RequestContext;
+  initialBrowser: InitialBrowserProofEvidence;
+  siteCredential: string;
+  decisionTimeoutMs: number;
   session: GateSession;
   services: GateNodeServices;
   save(): Promise<void>;
 }): Promise<DecisionServiceResult> {
   if (options.session.pendingDecision) return options.session.pendingDecision;
+  options.session.recommendation = checkingSnapshot(true, options.session.lastApplied);
+  const timeout = setTimeout(() => {
+    if (
+      options.session.pendingDecision &&
+      !retainsActiveOtp(options.session) &&
+      options.session.recommendation?.lifecycle === "checking"
+    ) {
+      options.session.recommendation = failOpenSnapshot(true, options.session.lastApplied);
+      void options.save();
+    }
+  }, options.decisionTimeoutMs);
   const pending = Promise.resolve()
-    .then(() => options.services.requestDecision(options.context, options.session))
-    .then((result) => {
+    .then(() =>
+      options.services.requestDecision(
+        {
+          siteCredential: options.siteCredential,
+          context: options.context,
+          browser: options.initialBrowser,
+        },
+        options.session,
+      ),
+    )
+    .then(async (result): Promise<DecisionServiceResult> => {
       if (result.status === "decision") {
+        if (!isScopedVisitorToken(result.visitorToken)) {
+          if (!retainsActiveOtp(options.session)) {
+            options.session.recommendation = unavailableSnapshot(options.session.lastApplied);
+          }
+          await options.save();
+          return UNAVAILABLE;
+        }
         const challenge = result.challenge ? normalizeChallenge(result.challenge) : undefined;
+        options.session.visitorToken = result.visitorToken;
         options.session.latestDecision = result.candidate;
         options.session.latestClearance = result.clearance;
         if (challenge) {
@@ -53,17 +92,42 @@ export function beginDecision(options: {
           options.session.challengeVerified = false;
           options.session.challengeOpened = false;
         }
+        options.session.recommendation = pendingFinished(options.session);
+        await options.save();
+        return {
+          status: "decision" as const,
+          candidate: result.candidate,
+          ...(result.clearance !== undefined ? { clearance: result.clearance } : {}),
+          ...(challenge ? { challenge } : {}),
+        };
       }
-      return options.save().then(() => result);
+      if (!retainsActiveOtp(options.session)) {
+        options.session.recommendation = unavailableSnapshot(options.session.lastApplied);
+      }
+      await options.save();
+      return result;
     })
-    .catch(() => UNAVAILABLE)
+    .catch(async () => {
+      if (!retainsActiveOtp(options.session)) {
+        options.session.recommendation = unavailableSnapshot(options.session.lastApplied);
+      }
+      await options.save();
+      return UNAVAILABLE;
+    })
     .finally(() => {
+      clearTimeout(timeout);
       options.session.pendingDecision = undefined;
       void options.save();
     });
   options.session.pendingDecision = pending;
   void options.save();
   return pending;
+}
+
+export function scopedVisitorAuthorization(session: GateSession) {
+  return session.visitorToken
+    ? { visitorToken: session.visitorToken }
+    : undefined;
 }
 
 export async function verifyDecisionForSession(options: {
@@ -90,7 +154,10 @@ export async function verifyDecisionForSession(options: {
 }
 
 export function safeDecisionResult(result: DecisionServiceResult): object {
-  if (result.status === "unavailable") return result;
+  if (result.status === "unavailable") {
+    const parsed = BotBlockerUnavailableResponseSchema.safeParse(result);
+    return parsed.success ? parsed.data : UNAVAILABLE;
+  }
   return {
     status: "decision",
     candidate: result.candidate,
@@ -125,4 +192,19 @@ export function normalizeChallenge(
     challengeUrl: url.toString(),
     challengeOrigin: origin.origin,
   };
+}
+
+function pendingFinished(session: GateSession) {
+  return session.recommendation?.lifecycle === "fail_open"
+    ? failOpenSnapshot(false, session.lastApplied)
+    : checkingSnapshot(false, session.lastApplied);
+}
+
+function isScopedVisitorToken(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length >= 32 &&
+    value.length <= 4_096 &&
+    /^[\x21-\x7e]+$/.test(value)
+  );
 }

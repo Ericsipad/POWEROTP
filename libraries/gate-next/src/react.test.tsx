@@ -43,6 +43,7 @@ test("root gate persists through App Router-style history navigation and sequenc
   const calls: string[] = [];
   const fetcher = createFetch(async (path, init) => {
     calls.push(path);
+    if (path === "/_powerotp/initial-evidence") return json({ status: "accepted" });
     if (path === "/_powerotp/session") return json(bootstrap(7));
     if (path === "/_powerotp/decision") {
       return json({ status: "decision", candidate: decision("allow", 6) });
@@ -96,6 +97,7 @@ test("verified OTP does not change customer DOM or open an iframe automatically"
   const calls: string[] = [];
   const fetcher = createFetch(async (path, init) => {
     calls.push(path);
+    if (path === "/_powerotp/initial-evidence") return json({ status: "accepted" });
     if (path === "/_powerotp/session") return json(bootstrap(0));
     if (path === "/_powerotp/decision") {
       return json({ status: "decision", candidate: decision("otp", 0) });

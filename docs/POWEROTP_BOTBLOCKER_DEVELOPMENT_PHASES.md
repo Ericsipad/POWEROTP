@@ -13,9 +13,10 @@ customer-enforced integration: middleware gathers trusted request data, communic
 POWEROTP using the customer's server-only site credential for initial session creation and
 narrow server-held visitor tokens thereafter, and attaches recommended state; the browser SDK
 publishes updates; installed customer code enforces them in its own rendering/access logic.
-The recommended integration defers protected UI while POWEROTP checks first-party
-clearance/Passport/PaidTokenPass proofs, gathers approved initial browser evidence, combines it
-with trusted server IP/context, and asks POWEROTP for one of exactly two decisions:
+The recommended integration defers protected UI while POWEROTP checks first-party clearance and
+Passport proofs (human challenge-installed or purchased agent/PaidTokenPass-backed), gathers
+approved initial browser evidence, combines it with trusted server IP/context, and asks POWEROTP
+for one of exactly two decisions:
 
 - `allow`: recommend normal access and continuously observe.
 - `otp`: recommend closing access and permit customer code to call the single argument-free
@@ -304,27 +305,32 @@ reassessment.
 
 ### Phase 21 — Passport cryptographic/storage foundation
 
-Finalize legally separated identity storage, consent/audit, device public keys, top-level
-redirect, and pairwise site assertions. Test unlinkability, revocation, expiry, device
-loss, and replay.
+Finalize the shared install-once Passport envelope with explicit `human | agent` credential
+class, legally separated identity/entitlement storage, consent/audit, device or
+proof-of-possession public keys, top-level assertion flow, and pairwise site assertions. Test
+class separation, unlinkability, revocation, expiry, device loss, and replay.
 
-### Phase 22 — Passport user lifecycle
+### Phase 22 — Human Passport lifecycle
 
-Offer Passport after OTP and implement registration, assertion, pause, revoke, delete,
-recovery, renewal, local fast-path integration, continuous observation, and required
-notices without exposing cross-site history.
+After a person completes a challenge, offer explicit installation of a persistent Human
+Passport. Implement registration, assertion, pause, revoke, delete, recovery, renewal, the
+cross-site `allow` fast path, continuous observation, and required notices without exposing
+cross-site history.
 
-### Phase 23 — PaidTokenPass entitlement ledger
+### Phase 23 — Agent Passport and PaidTokenPass entitlement ledger
 
-Implement proof-of-possession credentials, one-time/all-sites scope, quota, expiry,
-revocation, idempotent consumption, refund/reversal model, and versioned owner terms.
-Keep machine access separate from human Passport and general abuse controls.
+Implement the purchased, browser/runtime-installed Agent Passport backed by the PaidTokenPass
+ledger: proof-of-possession credentials, one-time/all-sites scope, quota, expiry, revocation,
+idempotent consumption, refund/reversal model, versioned owner terms, cross-site `allow`, and
+continuous observation. Keep its internal authority and claims cryptographically separate from
+Human Passport so an agent can never impersonate a verified person.
 
-### Phase 24 — Bot payment integration
+### Phase 24 — Agent Passport purchase and installation
 
-Integrate only a user-approved real payment rail/tool. Verify settlement before issuing
-entitlement; add replay/refund/failure/reconciliation and hosted iframe purchase choices.
-Client-side payment success alone never grants access.
+Integrate only a user-approved real payment rail/tool. Verify settlement before issuing the
+Agent Passport entitlement and browser-installable proof-of-possession token; add
+replay/refund/failure/reconciliation and hosted iframe purchase choices. Client-side payment
+success alone never grants or installs a Passport.
 
 ### Phase 24A — CleanDataPage contracts and persistence
 

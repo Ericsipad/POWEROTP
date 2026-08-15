@@ -1,4 +1,7 @@
-import { createGateBrowserCoordinator } from "@powerotp/gate-node/browser";
+import {
+  createGateBrowserCoordinator,
+  type GateBrowserOptions,
+} from "@powerotp/gate-node/browser";
 import { useEffect } from "react";
 
 export interface PowerOtpBrowserGateProps {
@@ -7,6 +10,7 @@ export interface PowerOtpBrowserGateProps {
   window?: Window;
   document?: Document;
   fetch?: typeof fetch;
+  initialProofs?: GateBrowserOptions["initialProofs"];
   onError?: (code: "bootstrap" | "bridge") => void;
 }
 
@@ -16,6 +20,7 @@ export function PowerOtpBrowserGate({
   window: suppliedWindow,
   document: suppliedDocument,
   fetch: suppliedFetch,
+  initialProofs,
   onError,
 }: PowerOtpBrowserGateProps) {
   useEffect(() => {
@@ -31,6 +36,7 @@ export function PowerOtpBrowserGate({
       sensorVersion,
       ...(pollIntervalMs === undefined ? {} : { pollIntervalMs }),
       ...(suppliedFetch ? { fetch: suppliedFetch } : {}),
+      ...(initialProofs ? { initialProofs } : {}),
       ...(onError ? { onError } : {}),
     })
       .then((created) => {
@@ -49,6 +55,7 @@ export function PowerOtpBrowserGate({
     };
   }, [
     onError,
+    initialProofs,
     pollIntervalMs,
     sensorVersion,
     suppliedDocument,

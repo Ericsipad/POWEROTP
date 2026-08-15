@@ -67,7 +67,7 @@ test("middleware runs before static, SSR, API, and React handlers", async () => 
     ["/", "react"],
   ]) {
     const response = await fetch(`${origin}${path}`);
-    assert.equal(response.headers.get("x-powerotp-access"), "optimistic");
+    assert.equal(response.headers.get("x-powerotp-access"), "checking");
     assert.equal(await response.text(), body);
   }
 });
@@ -103,12 +103,9 @@ test("direct socket IP is authoritative and spoofed forwarding headers are ignor
   const contexts: RequestContext[] = [];
   const { origin } = await start(
     {
-      protect: () => true,
-      services: {
-        requestDecision(context) {
-          contexts.push(context);
-          return Promise.resolve(unavailable());
-        },
+      protect(context) {
+        contexts.push(context);
+        return true;
       },
     },
     (app) => app.use(stateJsonHandler),
@@ -132,18 +129,15 @@ test("trusted proxy header, count, and first/last selection are explicit", async
     let context: RequestContext | undefined;
     const { origin, server } = await start(
       {
-        protect: () => true,
+        protect(value) {
+          context = value;
+          return true;
+        },
         trustedProxy: {
           header,
           select,
           expectedProxyCount,
           trustedRemoteAddresses: ["127.0.0.1"],
-        },
-        services: {
-          requestDecision(value) {
-            context = value;
-            return Promise.resolve(unavailable());
-          },
         },
       },
       (app) => app.use(stateJsonHandler),
@@ -160,18 +154,15 @@ test("proxy count mismatch and untrusted proxy forwarding are never accepted", a
     let context: RequestContext | undefined;
     const { origin, server } = await start(
       {
-        protect: () => true,
+        protect(value) {
+          context = value;
+          return true;
+        },
         trustedProxy: {
           header: "x-forwarded-for",
           select: "first",
           expectedProxyCount: 2,
           trustedRemoteAddresses,
-        },
-        services: {
-          requestDecision(value) {
-            context = value;
-            return Promise.resolve(unavailable());
-          },
         },
       },
       (app) => app.use(stateJsonHandler),
@@ -188,7 +179,7 @@ test("proxy count mismatch and untrusted proxy forwarding are never accepted", a
   }
 });
 
-test("pending, rejecting, and synchronously throwing decisions never delay responses", async () => {
+test("customer handlers continue before pending or failing first-contact services", async () => {
   const failures = [
     () => new Promise<never>(() => undefined),
     () => Promise.reject(new Error("unavailable")),
@@ -211,7 +202,7 @@ test("pending, rejecting, and synchronously throwing decisions never delay respo
         setTimeout(() => reject(new Error("Express response was delayed")), 250),
       ),
     ]);
-    assert.equal((await response.json()).access, "optimistic");
+    assert.equal((await response.json()).access, "checking");
     await closeServer(server);
   }
 });
@@ -233,7 +224,7 @@ test("JSON and multipart uploads pass through without body consumption", async (
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ private: "customer body" }),
   });
-  assert.deepEqual(await json.json(), { bytes: 27, access: "optimistic" });
+  assert.deepEqual(await json.json(), { bytes: 27, access: "checking" });
 
   const boundary = "powerotp-test-boundary";
   const multipartBody =
@@ -247,7 +238,7 @@ test("JSON and multipart uploads pass through without body consumption", async (
   });
   assert.deepEqual(await multipart.json(), {
     bytes: Buffer.byteLength(multipartBody),
-    access: "optimistic",
+    access: "checking",
   });
 });
 
@@ -348,7 +339,10 @@ test("router API provides the same root-mounted protocol behavior", async () => 
   servers.push(server);
   const origin = await listen(server);
   const response = await fetch(`${origin}/private`);
-  assert.equal((await response.json()).access, "optimistic");
+  const state = await response.json();
+  assert.equal(state.access, "checking");
+  assert.equal(state.recommendation.lifecycle, "checking");
+  assert.equal(state.recommendation.recommendation, "restricted");
 });
 
 async function start(

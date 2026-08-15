@@ -1975,3 +1975,57 @@ derivation, scoring, production signed-decision delivery, OTP orchestration, Pas
 PaidTokenPass, billing, deployment, DNS, secret, activation, policy publication,
 customer-hosted CleanDataPage, Phase 13C, Phase 13D, or Phase 14 work was added. No migration,
 seed, environment/configuration change, remote mutation, commit, or push was performed.
+
+## 2026-08-15 — BotBlocker Phase 13C: shared Node and Express advisory adapters
+
+**Outcome.** Made `@powerotp/gate-node` the shared server authority for raw Node and Express
+advisory integrations. A protected customer request now receives framework-native recommendation
+state immediately and remains fully customer-controlled. The owned same-origin bridge first
+accepts the strict Phase 13B initial proof/evidence shape, verifies a correctly bound signed
+clearance locally when present, and only then starts the initial decision contact. Timeout
+publishes a real `fail_open` snapshot while the same server Promise remains pending; a late
+verifier-backed `allow` or `otp` replaces it. Active OTP state cannot be replaced by timeout,
+clearance, or a later `allow`.
+
+**Credential and visitor-token boundary.** The initial service call receives sanitized browser
+evidence, trusted path/method/IP context, and the server-only site credential. A successful first
+contact must return a bounded opaque visitor token. Gate Node stores that token only in the
+server-side gate session and removes it, clearance material, and challenge internals from browser
+decision responses. Subsequent browser assessment, explicit OTP launch, and authoritative polling
+service calls receive only the scoped token; a repeated decision request cannot resend the site
+credential. The first protected request context is retained until first contact, so an
+intervening subresource cannot replace its trusted path/method/IP. Unconfigured, malformed, or
+synchronously failing service behavior is reduced to the strict typed-unavailable shape rather
+than fabricating `allow` or echoing extra credential/token fields.
+
+**Advisory state and non-interference.** Raw Node handlers receive a closed Phase 13B
+recommendation snapshot alongside the existing request state. Verified local clearance maps to
+full-access/allow recommendation state; fresh sessions map to restricted/checking; timeout maps
+to full-access/fail-open without a backend decision; verified decisions map only to `allow | otp`.
+The Express middleware remains a thin delegation layer that copies this state to
+`req.powerOtp` and `res.locals.powerOtp`. It does not consume customer bodies, rewrite routes,
+buffer or mutate responses/streams, control SSR/APIs, or alter DOM. Browser
+`subscribe`/`getSnapshot`, the argument-free bodyless `openOtp()`, explicit-only iframe opening,
+sensor cadence, sequence/nonce/audience/site/session/expiry checks, polling, and acknowledgement
+remain unchanged.
+
+**Tests and compatibility.** Added coverage for bounded initial evidence and prohibited raw
+fingerprint fields, first-contact credential use, server-held token forwarding and
+non-disclosure, verified local clearance state, timeout with surviving pending work, late allow,
+late OTP, active-OTP precedence, raw Node request-body/route/stream ownership, Express/raw Node
+state conformance, unavailable-response secret stripping, synchronous launch failures, stable
+first-contact context, typed unavailable defaults, trusted proxies, and same-origin bridge controls.
+Express upload, streaming, compressed-response, error, WebSocket, SSR/API/static, and React
+advisory tests remain green. Shared-export compatibility updates and tests pass for Next.js,
+including production bundle credential scanning; Phase 13D request/provider work was not added.
+
+**Verification.** Focused contracts, gate-core, gate-node, Express, and affected Next
+compatibility suites passed. Full `npm run verify` passed, including all workspace builds,
+lint/typechecking, repository tests, and the production Next fixture build. `npm audit` reported
+zero vulnerabilities. Final `git diff --check` passed.
+
+**Exclusions and operations.** No real RapidAuth/intelligence ingestion, fingerprint/IP hash
+derivation, scoring, production OTP orchestration, Passport/PaidTokenPass behavior, billing,
+deployment, DNS, secret, activation, policy publication, customer-hosted CleanDataPage,
+Phase 13D provider integration, or Phase 14 MCP work was added. No migration, seed, environment
+or server configuration, remote mutation, commit, push, or deployment was performed.

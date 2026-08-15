@@ -21,9 +21,14 @@ import {
   withinHeaderLimits,
 } from "./http.js";
 import {
-  beginDecision,
   createServices,
 } from "./runtime.js";
+import {
+  allowSnapshot,
+  checkingSnapshot,
+  protectedState,
+  unavailableSnapshot,
+} from "./advisory.js";
 import { createMemoryGateSessionStore, resolveGateSession } from "./session.js";
 import type {
   GateNodeOptions,
@@ -94,6 +99,7 @@ export function createPowerOtpRequestListener(options: GateNodeOptions): Request
         if (
           await handleBridge(request, response, path, {
             siteId,
+            siteCredential: options.siteCredential,
             audience: options.audience,
             decisionTimeoutMs,
             clearanceCookieName: cookieName,
@@ -147,11 +153,12 @@ export function createPowerOtpRequestListener(options: GateNodeOptions): Request
         });
         await options.handle(request, response, {
           protected: true,
-          access: "optimistic",
+          access: "unavailable",
+          recommendation: unavailableSnapshot(),
         });
         return;
       }
-      session.requestContext = context;
+      session.requestContext ??= context;
       await store.set(session);
       const clearance = verifyClearanceCookie({
         value: readCookie(request, cookieName),
@@ -161,34 +168,26 @@ export function createPowerOtpRequestListener(options: GateNodeOptions): Request
         gateSessionId: session.id,
         now: now(),
       });
+      const hadLocalClearance = session.clearanceVerified === true;
+      session.clearanceVerified = false;
       if (clearance.valid && session.activeChallenge === undefined) {
-        await options.handle(request, response, {
-          protected: true,
-          access: "clearance",
-          sessionId: session.id,
-        });
+        session.clearanceVerified = true;
+        session.recommendation = allowSnapshot(session.lastApplied);
+        await store.set(session);
+        await options.handle(request, response, protectedState(session));
         return;
       }
-
-      const pending = beginDecision({
-        context,
-        session,
-        services,
-        save: () => Promise.resolve(store.set(session)),
-      });
-      void pending.then((result) => {
-        if (result.status === "unavailable") {
-          options.onEvent?.({
-            type: "decision_unavailable",
-            reason: result.reason,
-          });
-        }
-      });
-      await options.handle(request, response, {
-        protected: true,
-        access: "optimistic",
-        sessionId: session.id,
-      });
+      if (
+        hadLocalClearance &&
+        !session.lastApplied &&
+        !session.visitorToken &&
+        session.activeChallenge === undefined
+      ) {
+        session.recommendation = checkingSnapshot(false);
+      }
+      session.recommendation ??= checkingSnapshot(false, session.lastApplied);
+      await store.set(session);
+      await options.handle(request, response, protectedState(session));
     } catch {
       options.onEvent?.({ type: "request_error", route });
       if (!response.headersSent) sendJson(response, 500, unavailable());

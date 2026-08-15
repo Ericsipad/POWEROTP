@@ -119,14 +119,11 @@ test("protected uploads and streams are never consumed by Proxy", async () => {
 test("direct address is authoritative and spoofed forwarded headers are ignored", async () => {
   const contexts: RequestContext[] = [];
   const adapter = createPowerOtpNext(baseOptions({
-    protect: () => true,
-    resolveDirectAddress: () => "203.0.113.8",
-    services: {
-      requestDecision(context) {
-        contexts.push(context);
-        return Promise.resolve(unavailable());
-      },
+    protect(context) {
+      contexts.push(context);
+      return true;
     },
+    resolveDirectAddress: () => "203.0.113.8",
   }));
   await adapter.proxy(
     request("/private", {
@@ -141,19 +138,16 @@ test("direct address is authoritative and spoofed forwarded headers are ignored"
 test("forwarded IP requires explicit peer, header, position, and count", async () => {
   let context: RequestContext | undefined;
   const adapter = createPowerOtpNext(baseOptions({
-    protect: () => true,
+    protect(value) {
+      context = value;
+      return true;
+    },
     resolveDirectAddress: () => "203.0.113.8",
     trustedProxy: {
       header: "x-forwarded-for",
       trustedRemoteAddresses: ["203.0.113.8"],
       select: "first",
       expectedProxyCount: 2,
-    },
-    services: {
-      requestDecision(value) {
-        context = value;
-        return Promise.resolve(unavailable());
-      },
     },
   }));
   await adapter.proxy(
