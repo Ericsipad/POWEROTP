@@ -1,6 +1,6 @@
 # PowerOTP BotBlocker Development Plan
 
-Last updated: 2026-08-14 (clarified the additive advisory integration boundary;
+Last updated: 2026-08-15 (clarified broad fingerprint collection and callback-first OTP status;
 execution remains governed by
 [`POWEROTP_BOTBLOCKER_DEVELOPMENT_PHASES.md`](POWEROTP_BOTBLOCKER_DEVELOPMENT_PHASES.md))
 
@@ -313,6 +313,27 @@ After an access recommendation, the runtime sensor:
 - Treats an AI/summary decoy activation as one centrally weighted risk signal, not permanent
   proof.
 
+Behavior reports above are not the complete browser-fingerprint specification. BotBlocker also
+collects a separate, versioned broad browser/device capability vector for session storage and
+later server-side matching. It should include every useful non-secret signal that supported
+browser APIs make available, such as screen geometry/color/depth/pixel ratio, timezone,
+languages, platform, memory/concurrency/touch capabilities, supported APIs and media codecs,
+WebGL, canvas/audio characteristics, and other stable capability outputs added by later sensor
+versions. POWEROTP stores the observed vector with the visitor session before deciding which
+features or combinations receive decision weight. The server canonicalizes the vector and
+derives keyed exact/component/fuzzy matching values; a browser-provided fingerprint hash is
+never accepted as authoritative identity. Cross-site matches remain internal POWEROTP evidence
+and are never exposed as a network-global customer identifier.
+
+Cookie-derived evidence follows actual browser boundaries. Browser JavaScript cannot read
+HttpOnly cookies or another origin's cookies. Arbitrary readable cookie values may be login or
+session bearer credentials and therefore must not be copied into browser reports. A customer
+may explicitly classify named, non-secret first-party cookies as matching inputs; the adapter
+then sends them through a dedicated bounded path for server-side keyed derivation and does not
+persist or expose the raw value. Cookie presence or a derived match is evidence only: unrelated
+sites normally set unrelated values, browsers partition third-party state, and deletion or
+rotation prevents cookie matching from being an enforcement mechanism.
+
 Versioned immutable sensor assets are selected through signed policy.
 
 ### OTP integration
@@ -324,6 +345,36 @@ Reuse the existing verification state machine, interaction-token protections, an
 - Complete and production-test only the methods sold in the initial BotBlocker tier.
 - Do not advertise unfinished `sms_code` or `voice_challenge`.
 - Add challenge idempotency, timeout, retry, recovery, spend limits, number suppression, velocity limits, and abuse kill switches.
+- Make signed customer callbacks the primary challenge-status delivery path. The project
+  dashboard card shows the callback URL preconstructed from the project's verified origin:
+  `https://customer.example/_powerotp/webhooks/challenge-status`. The public MCP generates that
+  fixed adapter-owned route and its environment-variable instructions; session IDs, states,
+  ciphertext, and secret material never appear in the URL path or query.
+- Generate an independent 256-bit webhook signing secret per project and rotation version.
+  Show the value once for placement in the customer's `POWEROTP_WEBHOOK_SIGNING_SECRET`
+  environment variable, never display it again, and support explicit replacement/overlap
+  rotation. Because POWEROTP must produce future HMAC signatures, the signing key cannot be
+  stored only as a one-way hash: store it encrypted at rest under the existing secret-management
+  boundary and store a separate hash/fingerprint for lookup and audit. Never return the
+  recoverable value through ordinary project reads.
+- Send bounded HTTPS JSON callback events containing an idempotent event ID, public project/site
+  binding, opaque challenge ID, opaque/encrypted session reference, authoritative status,
+  timestamp, expiry, and nonce. Sign the timestamp plus exact body in headers. The adapter
+  verifies signature, site/session/challenge binding, freshness, nonce replay, and idempotency
+  before updating its server-side gate session. Browser cookies do not authenticate this
+  server-to-server callback.
+- Callback delivery updates adapter state but cannot directly execute code in an already-open
+  browser. A valid hosted-iframe UX `postMessage` prompts an immediate same-origin local status
+  request; that request reads the callback-updated adapter session and still cannot treat the
+  message itself as proof.
+- Use authoritative upstream polling only as fallback when callback state has not arrived.
+  Start the first fallback check two seconds after OTP completion/opening remains pending, then
+  retry with bounded jittered backoff (2, 4, 8, then 15 seconds maximum) until terminal status,
+  expiry, or cancellation. A fallback result passes the same site/session/challenge validation
+  and loss-safe browser acknowledgement path as callback-delivered state.
+- Retry failed callback deliveries with idempotency and bounded backoff. Multi-instance and
+  serverless adapters require a shared concurrency-safe session store so either the callback or
+  fallback poll can update the state read by the visitor's next local status request.
 
 ### PowerOTP Passport
 
