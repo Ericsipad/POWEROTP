@@ -409,6 +409,49 @@ test("an OTP result can never issue its paired clearance", async () => {
   );
 });
 
+test("an active OTP challenge overrides an earlier valid clearance", async () => {
+  const store = createMemoryGateSessionStore();
+  const { origin } = await start({
+    protect: () => true,
+    sessionStore: store,
+  });
+  const first = await fetch(`${origin}/private`);
+  const gateCookie = sessionCookie(first);
+  const gateSessionId = gateCookie.slice(gateCookie.indexOf("=") + 1);
+  const session = await store.get(gateSessionId);
+  assert.ok(session);
+  session.activeChallenge = {
+    challengeId: "challenge_123456789",
+    challengeUrl: "https://verify.powerotp.com/challenge/challenge_123456789",
+    challengeOrigin: "https://verify.powerotp.com",
+  };
+  await store.set(session);
+  const now = Date.now();
+  const clearance = signSiteClearance(
+    {
+      signatureStatus: "unsigned",
+      siteId,
+      gateSessionId,
+      audience,
+      nonce: "clearance_conflict_123456",
+      issuedAt: now - 1,
+      expiresAt: now + 60_000,
+    },
+    {
+      keyId: verificationKeys.active.keyId,
+      privateKey: keyPair.privateKey,
+    },
+  );
+  const encoded = Buffer.from(JSON.stringify(clearance), "utf8").toString("base64url");
+
+  const response = await fetch(`${origin}/private`, {
+    headers: {
+      cookie: `${gateCookie}; powerotp_access=${encoded}`,
+    },
+  });
+  assert.equal((await response.json()).access, "optimistic");
+});
+
 test("minimal raw Node fixture runs without fabricated decisions", async () => {
   const server = createGateNodeFixture({
     siteId,

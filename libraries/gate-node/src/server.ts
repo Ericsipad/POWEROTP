@@ -161,7 +161,7 @@ export function createPowerOtpRequestListener(options: GateNodeOptions): Request
         gateSessionId: session.id,
         now: now(),
       });
-      if (clearance.valid) {
+      if (clearance.valid && session.activeChallenge === undefined) {
         await options.handle(request, response, {
           protected: true,
           access: "clearance",

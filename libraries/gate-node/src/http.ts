@@ -117,6 +117,19 @@ export function validateTrustedProxy(config: TrustedProxyConfig | undefined): vo
   if (config.select !== "first" && config.select !== "last") {
     throw new TypeError("Trusted proxy address selection must be explicit");
   }
+  if (
+    config.expectedProxyCount !== undefined &&
+    (!Number.isSafeInteger(config.expectedProxyCount) ||
+      config.expectedProxyCount < 1 ||
+      config.expectedProxyCount > 32)
+  ) {
+    throw new TypeError("Expected proxy count must be an integer from 1 through 32");
+  }
+  if (config.header === "x-real-ip" && config.expectedProxyCount !== undefined) {
+    if (config.expectedProxyCount !== 1) {
+      throw new TypeError("X-Real-IP supports exactly one expected proxy");
+    }
+  }
 }
 
 export function resolveClientIp(
@@ -131,6 +144,12 @@ export function resolveClientIp(
   if (typeof header !== "string" || header.length > 512) return undefined;
   const values = header.split(",").map((value) => stripMapped(value.trim()));
   if (config.header === "x-real-ip" && values.length !== 1) return undefined;
+  if (
+    config.expectedProxyCount !== undefined &&
+    values.length !== config.expectedProxyCount
+  ) {
+    return undefined;
+  }
   const selected = config.select === "last" ? values.at(-1) : values[0];
   return selected && isIP(selected) ? selected : undefined;
 }

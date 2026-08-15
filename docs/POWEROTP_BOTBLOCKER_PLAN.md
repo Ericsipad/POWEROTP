@@ -158,12 +158,14 @@ idiomatic APIs):
 
 ```typescript
 import express from "express";
-import { createPowerOtpBotBlocker } from "@powerotp/botblocker-express";
+import { createPowerOtpBotBlocker } from "@powerotp/gate-express";
 
 const app = express();
 const botBlocker = createPowerOtpBotBlocker({
   siteId: process.env.POWEROTP_SITE_ID!,
   siteCredential: process.env.POWEROTP_SITE_CREDENTIAL!,
+  audience: "https://customer.example",
+  verificationKeys,
   decisionTimeoutMs: 200, // 50-2000, 200 recommended
   protect: ({ path, method }) =>
     method !== "OPTIONS" && !path.startsWith("/.well-known/health"),
@@ -172,7 +174,7 @@ const botBlocker = createPowerOtpBotBlocker({
 app.use(botBlocker.middleware());
 app.use(express.static("dist/client"));
 app.use("/api", apiRouter);
-app.get("*", renderReactApplication);
+app.get("/{*path}", renderReactApplication);
 ```
 
 The middleware must precede static, SSR, and API handlers so it can attach the browser sensor

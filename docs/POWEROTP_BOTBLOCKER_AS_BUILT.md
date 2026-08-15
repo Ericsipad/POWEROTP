@@ -25,13 +25,14 @@ hashed credential domain and every later-phase runtime capability returns a type
 response rather than a fabricated decision, score, challenge result, Passport result, paid
 entitlement, or visitor.
 
-Phases 9–11 add the framework-neutral browser gate and continuous sanitized sensor plus a
-dependency-free raw Node HTTP wrapper. The wrapper verifies signed clearances locally, keeps
-site credentials server-only, exposes bounded same-origin bridge routes, and defaults every
-unbacked central capability to typed unavailable. There is still no Express/Next.js wrapper,
-real intelligence ingestion, matching, scoring, OTP orchestration, Passport/PaidTokenPass
-implementation, billing/metering, production BotBlocker key, policy release, credential,
-deployment, or traffic activation.
+Phases 9–12 add the framework-neutral browser gate and continuous sanitized sensor plus raw
+Node HTTP and Express 5 wrappers. The wrappers verify signed clearances locally, keep site
+credentials server-only, expose bounded same-origin bridge routes, and default every unbacked
+central capability to typed unavailable. The Express package adds early middleware/router
+APIs and a credential-free React root helper without rewriting application streams or uploads.
+There is still no Next.js wrapper, real intelligence ingestion, matching, scoring, OTP
+orchestration, Passport/PaidTokenPass implementation, billing/metering, production BotBlocker
+key, policy release, credential, deployment, or traffic activation.
 `enabled: true` remains only stored preference and is insufficient for readiness. The existing
 hosted-widget bot-signal honeypot and `/v1/projects/{projectId}/visitors` OTP dashboard route
 remain separate from BotBlocker.
@@ -1574,3 +1575,121 @@ commit, push, or remote mutation was performed.
   contracts. It must preserve middleware ordering, proxy/stream/upload/error exclusions,
   WebSocket non-interference, credential separation, and all gate-node conformance invariants
   without starting Next.js, ingestion, scoring, OTP orchestration, or CleanDataPage work.
+
+## 2026-08-14 — BotBlocker Phase 12: Express wrapper
+
+**Outcome.** Added the private `@powerotp/gate-express` workspace for Express 5 and React 19.
+It is a thin adapter over `@powerotp/gate-node`: protected Express handlers continue
+immediately, while the shared listener retains sole ownership of sessions, signed-clearance
+verification, decision startup, bridge routes, discovery, request limits, exclusions, and
+authoritative OTP state. No Next.js wrapper, central decision delivery, ingestion, scoring,
+OTP orchestration, customer-hosted CleanDataPage route, production activation, or remote
+change was added.
+
+**Exact files.**
+
+- Workspace/build: `package.json`, `package-lock.json`,
+  `libraries/gate-express/package.json`, `tsconfig.json`, `tsconfig.typecheck.json`, and
+  `README.md`.
+- Express/React production: `libraries/gate-express/src/index.ts`, `middleware.ts`,
+  `react.tsx`, and `fixture.tsx`.
+- Conformance tests: `libraries/gate-express/src/server.test.ts`, `security.test.ts`, and
+  `react.test.tsx`.
+- Shared invariant refinements: `libraries/gate-node/src/types.ts`, `http.ts`, `server.ts`,
+  and `server.test.ts`.
+- Evidence: this file, `docs/POWEROTP_BOTBLOCKER_PLAN.md`, `docs/THREAT_MODEL.md`, and
+  `docs/POWEROTP_BOTBLOCKER_SOC2_ISO27001_CONTROL_MATRIX.md`.
+
+All production modules remain below 300 lines. The package adds only Express/React
+requirements: Express, React, and React DOM are peers; the existing gate-node workspace is
+the sole runtime dependency. Type packages and the already-used `happy-dom` are development
+only.
+
+**Express API and ordering.**
+
+- `createPowerOtpBotBlocker(options)` accepts the shared server-only site ID/credential,
+  audience, public verification keys, timeout, route predicate, trusted-proxy settings,
+  limits, services, session store, discovery, event, cookie, and clock ports. It exposes a
+  stable `middleware()` plus an equivalent root-mounted `router()`; applications mount one,
+  not both.
+- Middleware/router mounting must precede body parsers, `express.static`, SSR, protected API,
+  and React handlers. This lets the shared listener own `/_powerotp/*` JSON bodies and
+  discovery before customer middleware can consume or shadow them. Downstream state is
+  available on `request.powerOtp` and `response.locals.powerOtp`.
+- `PowerOtpBrowserGate` is the explicit React-root integration for streamed or compressed HTML.
+  It accepts no site credential, starts the Phase 11 browser coordinator after mount, derives
+  report sequence/restored OTP state from `/_powerotp/session`, routes all candidates through
+  the verifier-backed controller, and disposes the sensor/controller on unmount.
+
+**Streaming, uploads, errors, and WebSockets.**
+
+- The adapter does not consume application JSON/multipart/upload streams, buffer response
+  streams, inject into HTML, or rewrite compressed bodies. Path/header limits still apply
+  before application routing; the body limit applies only to owned same-origin bridge JSON.
+- Downstream Express error middleware remains authoritative. Errors before headers may emit
+  the application's bounded error; after headers it must delegate or destroy rather than
+  attempt a second response. Gate-owned failures still use the shared content-free errors.
+- Node WebSocket `upgrade` events naturally bypass Express. An upgrade-shaped request that
+  reaches the middleware is explicitly marked excluded and passed through without a session,
+  decision, body read, or response write.
+
+**Proxy, clearance, and session refinements.**
+
+- The direct socket IP remains authoritative without configuration. Forwarded IP trust still
+  requires an exact header, first/last selection, and explicit trusted remote proxy IPs.
+  `expectedProxyCount` may now require an exact chain length (1–32); count mismatches, untrusted
+  remote proxies, wildcard/empty/malformed configuration, malformed values, and overlong
+  chains cannot become the client IP. Express `trust proxy` never implicitly configures this
+  boundary.
+- A valid signed clearance now also requires that the server session have no active OTP
+  challenge. This closes the prior-clearance/active-OTP conflict: an already-issued challenge
+  remains authoritative and fail-open dependency behavior cannot restore clearance access.
+- The default bounded store remains process-local and active-OTP sessions remain non-evictable.
+  Express cluster/multi-instance deployments must inject a bounded concurrency-safe shared
+  `GateSessionStore`; this package makes no durability claim for the default.
+
+**Security and discovery behavior.**
+
+- The adapter preserves exactly `allow | otp`, immediate optimistic behavior, typed unavailable
+  defaults, local Ed25519 site/session/audience/time verification, hardened private cookies,
+  same-origin bridge marker/Fetch Metadata/Origin controls, authoritative challenge polling,
+  loss-safe acknowledgement, and strict protocol-v1 discovery.
+- Server configuration is constructor-injected; the package does not read `process.env`.
+  Site credentials, signing keys, environment values, authorization, cookies, query values,
+  request bodies, and customer content are absent from browser props, fixture markup,
+  discovery, bridge responses, and fixed-category events.
+- Optional CleanDataPage discovery still permits only POWEROTP-hosted HTTPS links. Neither the
+  package nor its fixture creates `/powerotp/aisummary` or customer CleanDataPage content.
+
+**Tests and results.**
+
+- `@powerotp/gate-express`: build/typecheck passed; 22 tests, 0 failures. Coverage includes
+  middleware ordering before static/SSR/API/React routes, infrastructure/static/health/OPTIONS
+  exclusions, direct and explicitly trusted proxy modes/count/position/header behavior,
+  forwarding spoof rejection, immediate pending/rejecting/throwing service behavior, late
+  allow/OTP, signed-clearance binding/expiry/conflict, same-origin CSRF, bounded malformed
+  inputs, JSON/multipart non-interference, streaming/compressed responses, pre/post-header
+  errors, WebSocket upgrades, strict discovery, credential absence, React fixture lifecycle,
+  trusted sensor sequence, and decision-revision application.
+- `@powerotp/gate-node`: 16 tests, 0 failures, including the new active-OTP/prior-clearance
+  regression. Focused `@powerotp/gate-core`, `@powerotp/botblocker-signing`, and
+  `@powerotp/contracts` suites passed unchanged.
+- `npm run verify`: passed, including every workspace build/typecheck/test and the Next.js
+  production build. `npm audit`: 0 vulnerabilities. `git diff --check`: clean.
+
+**Manual/migration/deployment steps.** None. No migration, seed, key, credential, environment
+setting, policy release, DNS/configuration change, deployment, customer activation, commit,
+push, or remote mutation was performed.
+
+**Findings, limitations, and Phase 13 prerequisites.**
+
+- Signed decision/revision production delivery still does not exist. Injected Express services
+  remain verifier-backed boundaries; defaults return typed unavailable and fabricate nothing.
+- Immediate optimistic rendering still cannot retract content delivered before a late OTP page
+  lock. Application-layer wrappers also cannot protect traffic that bypasses the process;
+  customers must restrict direct-origin access independently.
+- Phase 13 may add only the Next.js native `proxy.ts`/App Router wrapper, root gate component,
+  owned same-origin handlers, and strict discovery over these shared contracts. It must test
+  App Router navigation, server/client and runtime boundaries, assets, CSP/iframe behavior,
+  streaming, and bundle credential absence without starting MCP generation, ingestion,
+  scoring, OTP orchestration, or CleanDataPage work.

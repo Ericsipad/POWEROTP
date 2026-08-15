@@ -196,6 +196,10 @@ impact — they cannot eliminate it:
 - The Phase 11 raw Node wrapper uses the direct socket IP by default. A forwarded address is
   considered only when the deployment names the exact header, first/last chain position, and
   explicit trusted proxy IPs; wildcard trust and an omitted chain position are rejected.
+- The Phase 12 Express wrapper reuses that resolver rather than trusting Express `req.ip`.
+  It may additionally require an exact 1–32-value forwarded chain with
+  `expectedProxyCount`; count mismatch, an untrusted direct peer, or trust-all Express
+  configuration cannot authorize a forwarded value.
 
 ### Replay and session fixation
 
@@ -212,6 +216,9 @@ impact — they cannot eliminate it:
   keeps ordering and challenge state server-side, and never evicts an active OTP challenge
   from its bounded default store. Authoritative verification remains active server-side until
   the browser acknowledges applying the bound polling result.
+- Express composes that same server-side store and bridge. Its default remains process-local;
+  clustered or multi-instance deployments require an injected concurrency-safe shared store
+  and cannot claim active-OTP durability from the default.
 
 ### Forged clearance and signed policy
 
@@ -219,6 +226,8 @@ impact — they cannot eliminate it:
   verification keys, never signing keys.
 - Adapters reject any clearance or policy that fails signature verification, fails schema
   validation, targets a different site audience, or attempts an unauthorized version rollback.
+- A valid clearance cannot override an active server-side OTP challenge, including when the
+  clearance was issued earlier and remains otherwise unexpired.
 - Key rotation maintains an active/previous key overlap window (Phase 4) so a rotation cannot
   itself cause a denial-of-service by invalidating everything atomically.
 - A compromised policy-publication path is treated as a full incident: canary rollout and
@@ -271,6 +280,9 @@ impact — they cannot eliminate it:
   the decision service throws synchronously, and leaves the decision Promise pending. Its
   bounded session store may fail open for a new ordinary visitor at capacity but pins every
   active OTP challenge, so capacity pressure cannot convert active OTP into optimistic access.
+- The Express wrapper preserves the same behavior without reading application JSON/multipart
+  bodies or buffering streams/compressed HTML. Its React root helper applies late revisions
+  through the verifier-backed controller; pending work is not tied to the UX timeout.
 
 ### Direct-origin bypass
 

@@ -75,6 +75,7 @@ export interface TrustedProxyConfig {
   header: "x-forwarded-for" | "x-real-ip";
   trustedRemoteAddresses: readonly string[];
   select: "first" | "last";
+  expectedProxyCount?: number;
 }
 
 export interface GateNodeLimits {
