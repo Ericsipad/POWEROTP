@@ -52,9 +52,10 @@ export const BOTBLOCKER_TIMEOUT_DEFAULT_MS = 200;
  * The customer-configurable decision-timeout UX setting (see
  * `docs/POWEROTP_BOTBLOCKER_PLAN.md`'s Purpose section). This is a
  * responsiveness value, never a security boundary — see
- * `docs/THREAT_MODEL.md`'s "Optimistic-load limitation". Expiry never
- * cancels the pending decision; it only stops the adapter from holding the
- * request/page open any longer while waiting for one.
+ * `docs/THREAT_MODEL.md`'s "Plugin instruction and customer-enforcement
+ * boundary".
+ * Expiry publishes fail-open lifecycle state but never cancels the pending
+ * decision. Installed customer code enforces that recommendation.
  */
 export const DecisionTimeoutMsSchema = z
   .number()

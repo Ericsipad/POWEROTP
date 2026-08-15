@@ -151,23 +151,28 @@ until the Phase 27 Cloudflare Worker takeover; the takeover must preserve the or
 authentication/audience semantics. Operator traffic crosses a distinct, authenticated
 `/v1/control/botblocker/*` boundary and must never be authorized by a runtime site credential.
 
-### Optimistic-load limitation
+### Plugin instruction and customer-enforcement boundary
 
-The product is intentionally fail-open on timing: the customer's site renders before a
-decision resolves, and a late `otp` decision cannot retract page content already delivered to
-the visitor's browser. This is a stated design limit, not a defect. Mitigations only bound its
-impact — they cannot eliminate it:
+POWEROTP controls recommended website state through an additive plugin protocol. Its adapters
+collect approved evidence, communicate server-to-server using the customer site's credential
+and visitor gate session, and publish state. Installed customer code is expected to enforce the
+instruction, but POWEROTP itself cannot rewrite customer routes, suppress responses, or freeze
+customer DOM. This is a trust boundary, not merely a packaging choice:
 
-- Keep the default RapidAuth decision fast (sub-50 ms target from a warm edge) so most
-  decisions resolve before or very close to render.
-- Freeze the page and open the challenge immediately on any `otp` decision, including late and
-  revised ones, so exposure is time-bounded rather than unbounded.
-- Never describe the timeout as a security boundary in customer-facing copy; describe it as a
-  UX responsiveness setting only. The actual security boundary is the eventual `allow`/`otp`
-  decision and the OTP challenge, not the timeout window.
-- Advise customers to additionally opt genuinely sensitive server actions (payment
-  submission, account creation) into decision-blocking behavior rather than relying on the
-  optimistic default for those specific actions.
+- A customer that wants pre-content gating must deliberately defer its own protected SSR,
+  data fetches, routes, and client rendering while POWEROTP reports `checking`.
+- POWEROTP cannot technically guarantee that customer enforcement code followed `allow`/`otp`,
+  and cannot retract content the customer already delivered. Product/security claims must
+  never imply otherwise.
+- Recommendation mapping is fixed: checking means restricted/withheld; verified allow or
+  fail-open means full access; verified OTP means restricted plus call OTP; authoritative OTP
+  success means full access. These states do not add a third backend decision.
+- The 50–2,000 ms setting publishes fail-open access state on timeout/network failure. It is a
+  responsiveness/availability rule, not a signed backend `allow`; pending work continues.
+- A verified late `otp` updates advisory state. Customer code chooses whether to close access
+  and call the single argument-free `gate.openOtp()` API.
+- Current Phase 9–13 code still applies an automatic page lock; Phase 13B must remove that
+  behavior before any customer integration or Phase 14 MCP manifest is released.
 
 ### API-key separation
 
@@ -176,10 +181,22 @@ impact — they cannot eliminate it:
   `postMessage` payload.
 - A separate, low-privilege public site identifier (`siteId`) may appear in the browser; it
   identifies the site for routing but authorizes nothing by itself.
-- Server-to-server calls (RapidAuth, browser-assessment, risk-events, challenge management) are
-  authenticated with the site credential; browser-to-POWEROTP calls (report submission,
-  challenge polling, iframe traffic) are authenticated with short-lived, narrowly scoped,
-  signed tokens issued by the server-side adapter — never the raw site credential.
+- The server adapter uses the site credential for authenticated first RapidAuth contact/session
+  creation (and separately authorized site-level configuration operations). POWEROTP mints a
+  narrow visitor gate-session token for subsequent per-visitor assessment, event, challenge,
+  polling, and iframe-launch operations. The browser receives neither the site credential nor
+  any equivalent customer-wide authority.
+- The gate-session token is short-lived, revocable, audience/site/session-bound, and held by the
+  adapter. Browser requests use only the HttpOnly local session cookie; the adapter forwards
+  the scoped token server-to-server.
+- `gate.openOtp()` accepts no method, policy, or content selection and never accepts a site
+  credential. The server derives the iframe launch from the authenticated site/session's
+  authoritative `otp` decision.
+- The browser sends an empty same-origin opener request. Its HttpOnly gate-session cookie binds
+  the visitor; the customer server resolves trusted site/session state and forwards the
+  server-held token minted during site-credential-authenticated first contact. A gate-session
+  ID, public site ID, or internal user-intelligence ID is never accepted as authorization by
+  itself. Exposing the scoped token to browser JavaScript would collapse this boundary.
 - Compromise of a public bundle must never be sufficient to mint a decision, forge a clearance,
   or read another site's data.
 
@@ -216,6 +233,9 @@ impact — they cannot eliminate it:
   privilege change (e.g. anonymous visitor to Passport holder) without a fresh signed
   assertion; this prevents an attacker from fixating a pre-verification session ID and
   inheriting a later-verified visitor's clearance.
+- `openOtp()` never accepts a caller-supplied session ID. Duplicate/malformed cookies fail
+  validation, and the server-side session lookup plus scoped token claims must agree on
+  site/session/audience before POWEROTP reads the related user-intelligence record.
 - The raw Node wrapper stores an opaque 192-bit session ID in an HttpOnly/SameSite cookie,
   keeps ordering and challenge state server-side, and never evicts an active OTP challenge
   from its bounded default store. Authoritative verification remains active server-side until
@@ -242,14 +262,19 @@ impact — they cannot eliminate it:
 
 ### Iframe / postMessage authority
 
+- Customer code explicitly calls the one argument-free `gate.openOtp()` API after receiving an
+  `otp` recommendation. POWEROTP validates the site/session decision and selects the OTP method
+  and iframe content server-side after resolving the gate-session-to-user-intelligence
+  relationship; caller-supplied IDs, method/content overrides, and non-empty opener bodies are
+  rejected.
 - The hosted OTP iframe is the only source of an authoritative "verified" state. A
   same-window/opener `postMessage` from the customer's own page script is never treated as
   authoritative, exactly as already documented for the existing widget in
   [`AS_BUILT.md`](AS_BUILT.md) ("the postMessage relay is a UX convenience, never
   authoritative").
 - The adapter independently confirms verification status against the server (polling or a
-  signed callback) before lifting the page freeze; it never lifts the freeze on a `postMessage`
-  event alone.
+  signed callback) before publishing verified state; it never treats a `postMessage` event
+  alone as authorization.
 - `postMessage` payloads are validated for expected origin and shape before use; the customer
   page's own script is treated as untrusted for this purpose since anything else running in
   that browser tab can also post messages.
@@ -266,23 +291,23 @@ impact — they cannot eliminate it:
 - The adapter and browser sensor must apply the most recent valid decision they have observed,
   never a locally cached older one, and must reject a decision with an older sequence number
   than one already applied for that session.
-- Pausing customer-page monitoring while the OTP iframe is open must not create a window where
-  a stale pre-OTP decision is reapplied; monitoring resumes only in a fresh interval after
-  authoritative success.
+- Pausing customer-page monitoring after the customer explicitly opens the OTP iframe must not
+  create a window where a stale pre-OTP decision is reapplied; monitoring resumes only in a
+  fresh interval after authoritative success.
 
 ### Fail-open timeout / network behavior
 
-- Ordinary page loads are fail-open on both the UI decision timeout and RapidAuth/network
-  failure: the site stays open. This is an explicit product decision (see
+- The browser SDK publishes fail-open access state on both the decision timeout and
+  RapidAuth/network failure. Customer code decides whether that state opens its UI. This is an
+  explicit product decision (see
   [`POWEROTP_BOTBLOCKER_PLAN.md`](POWEROTP_BOTBLOCKER_PLAN.md#failure-and-security-rules)), not
   an oversight, and must be documented to customers as such.
 - A locally valid, unexpired, correctly signed clearance remains usable during control-plane
   outage.
-- Fail-open must never be extended to bypass an already-issued `otp` decision or an
-  in-progress challenge; those states persist across outages.
-- Customers who need fail-closed behavior for a specific sensitive action must opt that action
-  into decision-blocking mode explicitly; this is a per-route customer choice, not a global
-  BotBlocker default.
+- Fail-open state must never overwrite an already-issued `otp` decision or an in-progress
+  challenge; those recommendations/states persist across outages.
+- Customers requiring fail-closed behavior implement it in their own server/client access
+  logic. POWEROTP reports state but does not enforce it.
 - The raw Node wrapper invokes the protected application handler immediately, including when
   the decision service throws synchronously, and leaves the decision Promise pending. Its
   bounded session store may fail open for a new ordinary visitor at capacity but pins every
@@ -298,17 +323,17 @@ impact — they cannot eliminate it:
 
 ### Direct-origin bypass
 
-- Any adapter that runs at the application layer (Express, Next.js, raw Node HTTP) protects
+- Any adapter that runs at the application layer (Express, Next.js, raw Node HTTP) observes
   only requests that reach that process. If the customer's origin is directly reachable
-  (bypassing a CDN/WAF the customer believes is in front of it, or bypassing the adapter
-  process itself via a misrouted path), BotBlocker cannot see or gate that traffic.
+  (bypassing a CDN/WAF or the adapter process itself), BotBlocker cannot observe that traffic
+  or publish state for it.
 - This is a known, customer-configuration-dependent limitation, not something BotBlocker can
   fully close from inside the customer's own infrastructure. Wrapper documentation and MCP
   installation output must state it plainly and recommend the customer restrict direct origin
   access at their own network/CDN layer.
-- The later Cloudflare-edge and customer-owned-Worker adapters reduce this risk for customers
-  who adopt them, by moving enforcement in front of the origin, but do not eliminate it for
-  customers who do not.
+- Later Cloudflare-edge/customer-owned-Worker adapters improve request-path coverage but do not
+  change the plugin-instruction/customer-enforcement boundary unless a customer independently
+  configures its own edge enforcement.
 
 ### Cross-project data access
 

@@ -34,6 +34,14 @@ Next.js wrapper also provides native Node-runtime Proxy handling and App Router/
 handlers. There is still no real intelligence ingestion, matching, scoring, OTP orchestration,
 Passport/PaidTokenPass implementation, billing/metering, production BotBlocker key, policy
 release, credential, deployment, or traffic activation.
+
+Phase 13A corrected the intended product boundary after the user identified that Phase 0 had
+canonized the wrong interpretation. POWEROTP must be additive, plugin-directed, and
+customer-enforced: middleware uses the site credential for first session contact and narrow
+server-held visitor tokens thereafter, publishes recommended state, and customer plugin code
+enforces it and explicitly calls the one argument-free OTP opener. Existing Phase 9–13 code
+still automatically applies a page lock and does not yet expose the corrected state API;
+Phases 13B–13D must fix that before Phase 14 can publish integrations.
 `enabled: true` remains only stored preference and is insufficient for readiness. The existing
 hosted-widget bot-signal honeypot and `/v1/projects/{projectId}/visitors` OTP dashboard route
 remain separate from BotBlocker.
@@ -1803,3 +1811,106 @@ push, or remote mutation was performed.
   manifests for the completed raw Node, Express, and Next wrappers. It must not begin real
   ingestion, matching, scoring, OTP orchestration, production activation, or CleanDataPage
   implementation.
+
+## 2026-08-14 — BotBlocker Phase 13A: plugin-state boundary specification recovery
+
+**Outcome.** Specification-only correction (documentation plus one non-runtime contract
+comment). The user clarified that POWEROTP controls recommended website state through an
+additive plugin protocol. Middleware collects trusted data and communicates server-to-server
+using the customer's site credential for first RapidAuth/session contact and narrow
+server-held visitor tokens thereafter; browser SDK state tells the installed customer plugin
+whether POWEROTP recommends restricted/withheld, full-access, or OTP mode. Customer code is the
+enforcement point because POWEROTP cannot rewrite its application.
+
+This phase also fixed OTP launch ownership. Customer code receives an `otp` recommendation and
+may call exactly one argument-free `gate.openOtp()` API. The caller cannot select the OTP
+method, policy, or iframe content. POWEROTP validates the authenticated site/session decision
+server-side, resolves the visitor gate session to its internal user-intelligence record,
+selects what the hosted iframe shows, and returns only short-lived launch metadata. Initial
+RapidAuth uses the site credential to mint a scoped token stored by the adapter. The empty
+same-origin request relies on the HttpOnly local gate-session cookie, and the customer server
+forwards only that narrow token upstream.
+
+**Why this correction was required.**
+
+- The original plan commit `139c3ef` described the adapter running before customer handlers,
+  but later progressive-phase text mixed that concept with optimistic rendering.
+- Commit `52cce5e` explicitly reconciled the product to an automatic optimistic/page-lock
+  model. Phases 9–13 then correctly implemented that written specification, including
+  automatic DOM freeze behavior.
+- The user confirmed that this was the wrong product boundary. POWEROTP controls the
+  recommendation, and supported customer plugin code is expected to enforce it; any pre-content
+  gate remains customer-authored conditional rendering around the SDK. POWEROTP cannot
+  technically force compliance or retract customer content already delivered.
+- Historical Phase 0–13 entries remain unchanged as evidence of what was actually specified
+  and built. This entry supersedes their product-intent claims without falsifying history.
+
+**Exact files changed.**
+
+- `docs/POWEROTP_BOTBLOCKER_PLAN.md`: rewrote Purpose, invariants, system flow, Gate Adapter,
+  browser SDK/OTP opener, initial adapters, and failure/security rules around customer-owned
+  rendering and the single server-selected OTP launch.
+- `docs/POWEROTP_BOTBLOCKER_DEVELOPMENT_PHASES.md`: corrected the end goal and Phase 0/9/19/20
+  descriptions; inserted corrective Phases 13A–13D without renumbering 14–31.
+- `docs/THREAT_MODEL.md`: replaced the optimistic enforcement claim with the plugin-instruction/
+  customer-enforcement boundary and explicit OTP launch authority.
+- `docs/POWEROTP_BOTBLOCKER_SOC2_ISO27001_CONTROL_MATRIX.md`: records the identified Phase 9–13
+  implementation gap without claiming the corrective code exists.
+- `docs/POWEROTP_BOTBLOCKER_AS_BUILT.md`: current-status clarification and this entry.
+- `libraries/contracts/src/botblocker.ts`: corrected the timeout comment/reference; no schema,
+  type, constant, wire shape, or runtime behavior changed.
+
+**Locked product semantics.**
+
+- Middleware attaches trusted framework-native request/session state, communicates
+  server-to-server with the site credential for first contact and narrow server-held visitor
+  tokens thereafter, and leaves customer handlers, bodies, streams, routes, SSR, and responses
+  untouched.
+- The browser SDK collects only approved evidence and publishes recommendation snapshots.
+  Supported customer plugin code maps `checking` to restricted/withheld; verified `allow`,
+  timeout fail-open, or unavailable fail-open to full access; verified `otp` to restricted plus
+  call OTP; and authoritative OTP success to full access.
+- Customers wanting pre-content gating must defer their own SSR/data fetch/render while state
+  is `checking`. POWEROTP controls the instruction but cannot technically force customer code
+  to comply.
+- Exactly `allow | otp` are backend decisions. `checking`, fail-open, unavailable, and
+  observing are lifecycle states, not third decisions.
+- The customer-configured 50–2,000 ms timeout publishes fail-open access state and never
+  cancels pending work. A verified late `otp` replaces the recommendation.
+- The first report remains five seconds after access state permits normal observation,
+  recurring reports remain every 30 seconds, and every real later backend update may revise
+  the recommendation.
+- POWEROTP does not automatically freeze/unfreeze customer DOM. Monitoring pauses only after
+  the customer explicitly invokes `openOtp()` and resumes after authoritative success.
+- `openOtp()` accepts no API key, session/site/user-intelligence ID, method, policy, content, or
+  challenge argument. The SDK sends an empty same-origin request; the HttpOnly cookie binds the
+  visitor, the adapter retrieves its server-held scoped token, and POWEROTP resolves the
+  gate-session relationship server-side.
+- Session and public site IDs identify records but authorize nothing. Initial RapidAuth mints a
+  token that is sufficient for that visitor's later approved operations only because it is
+  short-lived, revocable, site/session/audience-bound, and server-held.
+- Initial browser evidence remains bounded/sanitized. Browser-supplied raw fingerprint hashes
+  remain forbidden; Phase 15 derives keyed fingerprint/IP lookup hashes server-side.
+
+**Tests and verification.** No runtime code or contract changed, so no runtime suite was
+required for this specification-only phase. Cross-document/source-comment searches confirmed
+no current product specification still claims that POWEROTP automatically controls customer
+rendering. Historical as-built descriptions intentionally retain those terms.
+`npm run typecheck -w @powerotp/contracts` passed; `git diff --check` was clean.
+
+**Manual/migration/deployment steps.** None. No runtime code, dependency, migration, seed,
+environment setting, key, credential, policy release, DNS/configuration, deployment, customer
+activation, commit, push, or remote service was changed.
+
+**Phase 13B prerequisites and exclusions.**
+
+- Phase 13B must add strict initial proof/evidence and public recommendation snapshots,
+  subscribe/getSnapshot state access, and the single argument-free `openOtp()` call.
+- It must remove automatic page-lock/iframe DOM effects from the default browser coordinator
+  while preserving verifier-backed revisions, timeout-with-pending-work, 5-second/30-second
+  sensing, polling, acknowledgement, and credential separation.
+- It must prove the opener accepts an empty body only, relies on the HttpOnly session rather
+  than caller IDs, and cannot expose or accept the site credential.
+- Phase 13B must not redesign server adapters, implement MCP, ingest real intelligence, derive
+  fingerprints, score visitors, orchestrate production OTP, activate customers, or start
+  Phase 13C or later work.
