@@ -5,6 +5,7 @@ export {
   type PowerOtpRequest,
 } from "./middleware.js";
 export type {
+  AdvisoryRequestState,
   GateNodeEvent,
   GateNodeLimits,
   GateNodeServices,
@@ -13,7 +14,6 @@ export type {
   InitialDecisionRequest,
   InitialDecisionResult,
   InitialDecisionServiceResult,
-  ProtectedRequestState,
   ScopedVisitorAuthorization,
   TrustedProxyConfig,
 } from "@powerotp/gate-node";

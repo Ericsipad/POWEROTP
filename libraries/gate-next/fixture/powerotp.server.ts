@@ -16,5 +16,4 @@ export const powerOtp = createPowerOtpNext({
       publicKey: keys.publicKey,
     },
   },
-  protect: () => true,
 });

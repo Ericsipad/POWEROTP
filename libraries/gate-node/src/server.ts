@@ -25,8 +25,8 @@ import {
 } from "./runtime.js";
 import {
   allowSnapshot,
+  advisoryState,
   checkingSnapshot,
-  protectedState,
   unavailableSnapshot,
 } from "./advisory.js";
 import { createMemoryGateSessionStore, resolveGateSession } from "./session.js";
@@ -129,12 +129,11 @@ export function createPowerOtpRequestListener(options: GateNodeOptions): Request
       }
       if (
         context.method === "OPTIONS" ||
-        isInfrastructureExcluded(path) ||
-        !options.protect(context)
+        isInfrastructureExcluded(path)
       ) {
         await options.handle(request, response, {
-          protected: false,
-          access: "excluded",
+          advisory: false,
+          status: "excluded",
         });
         return;
       }
@@ -152,8 +151,8 @@ export function createPowerOtpRequestListener(options: GateNodeOptions): Request
           reason: "dependency_unavailable",
         });
         await options.handle(request, response, {
-          protected: true,
-          access: "unavailable",
+          advisory: true,
+          status: "unavailable",
           recommendation: unavailableSnapshot(),
         });
         return;
@@ -174,7 +173,7 @@ export function createPowerOtpRequestListener(options: GateNodeOptions): Request
         session.clearanceVerified = true;
         session.recommendation = allowSnapshot(session.lastApplied);
         await store.set(session);
-        await options.handle(request, response, protectedState(session));
+        await options.handle(request, response, advisoryState(session));
         return;
       }
       if (
@@ -187,7 +186,7 @@ export function createPowerOtpRequestListener(options: GateNodeOptions): Request
       }
       session.recommendation ??= checkingSnapshot(false, session.lastApplied);
       await store.set(session);
-      await options.handle(request, response, protectedState(session));
+      await options.handle(request, response, advisoryState(session));
     } catch {
       options.onEvent?.({ type: "request_error", route });
       if (!response.headersSent) sendJson(response, 500, unavailable());

@@ -19,14 +19,13 @@ export const powerOtp = createPowerOtpNext({
   audience: "https://customer.example",
   verificationKeys,
   decisionTimeoutMs: 200,
-  protect: () => true,
 });
 ```
 
-`protect: () => true` applies BotBlocker state to the whole customer application. The adapter
-still excludes its owned bridge/discovery endpoints, framework/static assets, health checks,
-`OPTIONS`, and WebSocket upgrades. It reports state only; the customer root remains responsible
-for withholding or rendering the website.
+The adapter publishes advisory state for every customer application request. It does not block
+or modify any request, response, route, or render. Owned bridge/discovery endpoints,
+framework/static assets, health checks, `OPTIONS`, and WebSocket upgrades are fixed technical
+exclusions; there is no selective-route callback.
 
 Next.js does not expose a socket address on `NextRequest`. By default no forwarding header is
 trusted and `clientIp` is omitted. If a deployment exposes an authenticated direct peer address,
@@ -60,7 +59,7 @@ export const config = {
 
 Proxy runs after `next.config` headers/redirects and before App Router/filesystem routes. The
 matcher keeps framework assets, health/infrastructure paths, and owned bridge/discovery routes
-out of Proxy. The adapter independently excludes `OPTIONS` and never reads protected page,
+out of Proxy. The adapter independently excludes `OPTIONS` and never reads application page,
 API, Server Action, upload, or streaming bodies.
 
 For server-owned App Router decisions, read the framework request state after Proxy:
@@ -110,29 +109,21 @@ import { PowerOtpNextProvider } from "@powerotp/gate-next/react";
 </PowerOtpNextProvider>;
 ```
 
-The customer root can withhold the whole website without displaying any POWEROTP placeholder
-screen. When OTP is recommended, that root explicitly calls `openOtp()` and the only visible
-POWEROTP content is the server-selected hosted iframe:
+The provider and hook only report state. They do not hide customer content or act on a
+recommendation:
 
 ```tsx
-import { useEffect } from "react";
-
 const { snapshot, openOtp } = usePowerOtp();
 
-useEffect(() => {
-  if (snapshot.recommendation === "otp_required" && !snapshot.otpOpen) {
-    void openOtp();
-  }
-}, [openOtp, snapshot.otpOpen, snapshot.recommendation]);
-
-return snapshot.recommendation === "full_access" ? children : null;
+// Customer code decides whether and how to use snapshot.
+// Customer code may explicitly call the argument-free openOtp() when it chooses.
 ```
 
 The provider persists across App Router client navigations and publishes the shared
 `getSnapshot`/`subscribe` state through React's external-store contract. `openOtp()` is
-argument-free and does nothing until customer root code invokes it for a verified OTP
-recommendation. The provider and hook render no checking, access, OTP, button, or other product
-screen themselves.
+argument-free and does nothing until customer code invokes it for a verified OTP recommendation.
+The provider and hook never suppress customer rendering and render no checking, access, OTP,
+button, or other product screen themselves.
 The shared coordinator derives session ID, sensor sequence, and restored OTP state only from
 `/_powerotp/session`; every decision is verified by the same-origin server bridge. `postMessage`
 only triggers authoritative polling. `PowerOtpNextGate` remains as a no-children compatibility
@@ -145,4 +136,5 @@ separately on POWEROTP. Do not use `*`.
 
 Mount the root gate explicitly because Proxy must not rewrite, buffer, or inject into streamed
 or compressed App Router output. Restrict direct-origin access independently; an
-application-layer adapter cannot protect traffic that bypasses the Next.js process.
+application-layer adapter cannot observe or publish state for traffic that bypasses the Next.js
+process.

@@ -2,11 +2,11 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { Readable } from "node:stream";
 
 import {
+  type AdvisoryRequestState,
   createMemoryGateSessionStore,
   createPowerOtpRequestListener,
   type GateNodeOptions,
   type GateSessionStore,
-  type ProtectedRequestState,
 } from "@powerotp/gate-node";
 import { NextResponse, type NextFetchEvent, type NextRequest } from "next/server";
 
@@ -22,7 +22,7 @@ export type GateNextOptions = Omit<GateNodeOptions, "handle" | "sessionStore"> &
 export interface PowerOtpNextAdapter {
   proxy(request: NextRequest, event: NextFetchEvent): Promise<Response>;
   route(request: NextRequest): Promise<Response>;
-  getRequestState(headers: PowerOtpRequestHeaders): ProtectedRequestState;
+  getRequestState(headers: PowerOtpRequestHeaders): AdvisoryRequestState;
 }
 
 export interface PowerOtpRequestHeaders {
@@ -33,7 +33,7 @@ const REQUEST_STATE_HEADER = "x-powerotp-request-state";
 
 export function createPowerOtpNext(options: GateNextOptions): PowerOtpNextAdapter {
   const store = options.sessionStore ?? createMemoryGateSessionStore();
-  const continuations = new WeakMap<object, (state: ProtectedRequestState) => void>();
+  const continuations = new WeakMap<object, (state: AdvisoryRequestState) => void>();
   const listener = createPowerOtpRequestListener({
     ...options,
     sessionStore: store,
@@ -43,7 +43,7 @@ export function createPowerOtpNext(options: GateNextOptions): PowerOtpNextAdapte
   });
 
   async function run(request: NextRequest, includeBody: boolean): Promise<RunResult> {
-    let state: ProtectedRequestState | undefined;
+    let state: AdvisoryRequestState | undefined;
     const response = new NodeResponseCapture();
     const directAddress = options.resolveDirectAddress?.(request);
     const incoming = toIncomingRequest(request, includeBody, directAddress);
@@ -67,7 +67,7 @@ export function createPowerOtpNext(options: GateNextOptions): PowerOtpNextAdapte
       const result = await run(request, false);
       if (!result.state) return result.response.toResponse(request.method);
 
-      if (result.state.protected && result.state.sessionId) {
+      if (result.state.advisory && result.state.sessionId) {
         event.waitUntil(
           Promise.resolve(store.get(result.state.sessionId))
             .then((session) => session?.pendingDecision)
@@ -95,7 +95,7 @@ export function createPowerOtpNext(options: GateNextOptions): PowerOtpNextAdapte
   };
 }
 
-function encodeRequestState(state: ProtectedRequestState, credential: string): string {
+function encodeRequestState(state: AdvisoryRequestState, credential: string): string {
   const payload = Buffer.from(JSON.stringify(state), "utf8").toString("base64url");
   const signature = signRequestState(payload, credential);
   return `${payload}.${signature}`;
@@ -104,7 +104,7 @@ function encodeRequestState(state: ProtectedRequestState, credential: string): s
 function decodeRequestState(
   value: string | null,
   credential: string,
-): ProtectedRequestState {
+): AdvisoryRequestState {
   if (!value || value.length > 8_192) return unavailableRequestState();
   try {
     const parts = value.split(".");
@@ -115,7 +115,7 @@ function decodeRequestState(
       return unavailableRequestState();
     }
     const parsed: unknown = JSON.parse(Buffer.from(parts[0], "base64url").toString("utf8"));
-    return isProtectedRequestState(parsed) ? parsed : unavailableRequestState();
+    return isAdvisoryRequestState(parsed) ? parsed : unavailableRequestState();
   } catch {
     return unavailableRequestState();
   }
@@ -125,16 +125,16 @@ function signRequestState(payload: string, credential: string): string {
   return createHmac("sha256", credential).update(payload).digest("base64url");
 }
 
-function isProtectedRequestState(value: unknown): value is ProtectedRequestState {
+function isAdvisoryRequestState(value: unknown): value is AdvisoryRequestState {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const state = value as Record<string, unknown>;
-  if (state.protected === false) {
-    return state.access === "excluded" && Object.keys(state).length === 2;
+  if (state.advisory === false) {
+    return state.status === "excluded" && Object.keys(state).length === 2;
   }
   if (
-    state.protected !== true ||
+    state.advisory !== true ||
     !["checking", "clearance", "fail_open", "allow", "otp", "unavailable"].includes(
-      String(state.access),
+      String(state.status),
     ) ||
     !isRecommendation(state.recommendation)
   ) {
@@ -156,10 +156,10 @@ function isRecommendation(value: unknown): boolean {
   );
 }
 
-function unavailableRequestState(): ProtectedRequestState {
+function unavailableRequestState(): AdvisoryRequestState {
   return {
-    protected: true,
-    access: "unavailable",
+    advisory: true,
+    status: "unavailable",
     recommendation: {
       lifecycle: "unavailable",
       recommendation: "full_access",
@@ -181,7 +181,7 @@ function isWebSocketUpgrade(request: NextRequest): boolean {
 
 interface RunResult {
   response: NodeResponseCapture;
-  state?: ProtectedRequestState;
+  state?: AdvisoryRequestState;
 }
 
 function toIncomingRequest(

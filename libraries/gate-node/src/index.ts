@@ -14,6 +14,8 @@ export {
   resolveClientIp,
 } from "./http.js";
 export type {
+  AdvisoryRequestState,
+  AdvisoryRouteHandler,
   BrowserBootstrap,
   ChallengeMetadata,
   DecisionResult,
@@ -27,8 +29,6 @@ export type {
   InitialDecisionRequest,
   InitialDecisionResult,
   InitialDecisionServiceResult,
-  ProtectedRequestState,
-  ProtectedRouteHandler,
   ScopedVisitorAuthorization,
   TrustedProxyConfig,
 } from "./types.js";

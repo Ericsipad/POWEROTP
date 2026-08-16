@@ -42,7 +42,7 @@ afterEach(async () => {
 });
 
 test("signed clearance verifies locally and rejects expiry or binding mismatches", async () => {
-  const { origin } = await start({ protect: () => true });
+  const { origin } = await start({});
   const initial = await fetch(`${origin}/private`);
   const gateCookie = sessionCookie(initial);
   const gateSessionId = cookieValue(gateCookie);
@@ -51,17 +51,17 @@ test("signed clearance verifies locally and rejects expiry or binding mismatches
   const cases = [
     {
       name: "valid",
-      access: "clearance",
+      status: "clearance",
       claims: { siteId, gateSessionId, audience, issuedAt: now - 1, expiresAt: now + 60_000 },
     },
     {
       name: "expired",
-      access: "checking",
+      status: "checking",
       claims: { siteId, gateSessionId, audience, issuedAt: now - 60_000, expiresAt: now - 1 },
     },
     {
       name: "wrong site",
-      access: "checking",
+      status: "checking",
       claims: {
         siteId: "site_6543210987654321",
         gateSessionId,
@@ -72,7 +72,7 @@ test("signed clearance verifies locally and rejects expiry or binding mismatches
     },
     {
       name: "wrong session",
-      access: "checking",
+      status: "checking",
       claims: {
         siteId,
         gateSessionId: "wrong_gate_session_123456",
@@ -83,7 +83,7 @@ test("signed clearance verifies locally and rejects expiry or binding mismatches
     },
     {
       name: "wrong audience",
-      access: "checking",
+      status: "checking",
       claims: {
         siteId,
         gateSessionId,
@@ -111,14 +111,13 @@ test("signed clearance verifies locally and rejects expiry or binding mismatches
         cookie: `${gateCookie}; powerotp_access=${encode(clearance)}`,
       },
     });
-    assert.equal((await response.json()).access, item.access, item.name);
+    assert.equal((await response.json()).status, item.status, item.name);
   }
 });
 
 test("an active OTP challenge overrides a previously valid clearance", async () => {
   const store = createMemoryGateSessionStore();
   const { origin } = await start({
-    protect: () => true,
     sessionStore: store,
   });
   const initial = await fetch(`${origin}/private`);
@@ -148,7 +147,7 @@ test("an active OTP challenge overrides a previously valid clearance", async () 
   const response = await fetch(`${origin}/private`, {
     headers: { cookie: `${gateCookie}; powerotp_access=${encode(clearance)}` },
   });
-  assert.equal((await response.json()).access, "checking");
+  assert.equal((await response.json()).status, "checking");
 });
 
 test("late allow is delivered and issues clearance only after both verifications", async () => {
@@ -158,7 +157,6 @@ test("late allow is delivered and issues clearance only after both verifications
   });
   let currentSession: Readonly<GateSession> | undefined;
   const { origin } = await start({
-    protect: () => true,
     services: {
       requestDecision(_context, session) {
         currentSession = session;
@@ -168,7 +166,7 @@ test("late allow is delivered and issues clearance only after both verifications
     },
   });
   const initial = await fetch(`${origin}/private`);
-  assert.equal((await initial.json()).access, "checking");
+  assert.equal((await initial.json()).status, "checking");
   const gateCookie = sessionCookie(initial);
   await submitInitialEvidence(origin, gateCookie);
   const deliveredPromise = decisionRequest(origin, gateCookie);
@@ -185,13 +183,12 @@ test("late allow is delivered and issues clearance only after both verifications
   const cleared = await fetch(`${origin}/private`, {
     headers: { cookie: `${gateCookie}; ${clearanceCookie?.split(";", 1)[0]}` },
   });
-  assert.equal((await cleared.json()).access, "clearance");
+  assert.equal((await cleared.json()).status, "clearance");
 });
 
 test("late OTP remains authoritative through polling failure and acknowledgement", async () => {
   let pollFails = true;
   const { origin } = await start({
-    protect: () => true,
     services: {
       requestDecision: async (_context, session) => ({
         status: "decision",
@@ -404,7 +401,6 @@ function baseOptions(overrides: Partial<GateExpressOptions>): GateExpressOptions
     verificationKeys,
     decisionTimeoutMs: 50,
     cookieSecure: true,
-    protect: () => false,
     ...overrides,
   };
 }

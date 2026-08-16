@@ -4,7 +4,7 @@ import {
   type ReportSequence,
 } from "@powerotp/contracts";
 
-import type { GateSession, ProtectedRequestState } from "./types.js";
+import type { AdvisoryRequestState, GateSession } from "./types.js";
 
 export function checkingSnapshot(
   decisionPending: boolean,
@@ -78,11 +78,11 @@ export function verifiedSnapshot(lastApplied?: ReportSequence): GateRecommendati
   });
 }
 
-export function protectedState(session: GateSession): ProtectedRequestState {
+export function advisoryState(session: GateSession): AdvisoryRequestState {
   const recommendation = session.recommendation ?? checkingSnapshot(false, session.lastApplied);
   return {
-    protected: true,
-    access: accessFor(session, recommendation),
+    advisory: true,
+    status: statusFor(session, recommendation),
     sessionId: session.id,
     recommendation,
   };
@@ -95,10 +95,10 @@ export function retainsActiveOtp(session: GateSession): boolean {
   );
 }
 
-function accessFor(
+function statusFor(
   session: GateSession,
   snapshot: GateRecommendationSnapshot,
-): Extract<ProtectedRequestState, { protected: true }>["access"] {
+): Extract<AdvisoryRequestState, { advisory: true }>["status"] {
   if (snapshot.lifecycle === "checking") return "checking";
   if (snapshot.lifecycle === "fail_open") return "fail_open";
   if (snapshot.lifecycle === "unavailable") return "unavailable";

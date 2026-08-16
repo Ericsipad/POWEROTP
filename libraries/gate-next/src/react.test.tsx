@@ -31,20 +31,18 @@ test("client entry contains no credential or environment boundary", async () => 
   assert.match(source, /@powerotp\/gate-node\/browser/);
 });
 
-test("fixture protects the whole site without adding customer-visible gate screens", async () => {
-  const [root, server, page] = await Promise.all([
-    readFile(new URL("../fixture/app/powerotp-root.tsx", import.meta.url), "utf8"),
+test("fixture publishes whole-application state without acting on customer content", async () => {
+  const [layout, server, page] = await Promise.all([
+    readFile(new URL("../fixture/app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../fixture/powerotp.server.ts", import.meta.url), "utf8"),
     readFile(new URL("../fixture/app/page.tsx", import.meta.url), "utf8"),
   ]);
-  assert.match(server, /protect:\s*\(\)\s*=>\s*true/);
-  assert.match(root, /snapshot\.recommendation === "otp_required"/);
-  assert.match(root, /void openOtp\(\)/);
-  assert.match(root, /snapshot\.recommendation === "full_access" \? children : null/);
-  assert.ok(!root.includes("<main"));
-  assert.ok(!root.includes("<button"));
-  assert.ok(!root.includes("checking view"));
-  assert.ok(!root.includes("OTP-required view"));
+  assert.ok(!server.includes("protect:"));
+  assert.match(layout, /<PowerOtpNextProvider/);
+  assert.match(layout, /\{children\}/);
+  assert.ok(!layout.includes("PowerOtpCustomerRoot"));
+  assert.ok(!layout.includes("openOtp"));
+  assert.ok(!layout.includes("snapshot.recommendation"));
   assert.match(page, /data-customer-website="true"/);
 });
 

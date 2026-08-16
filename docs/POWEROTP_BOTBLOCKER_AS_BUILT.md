@@ -35,18 +35,26 @@ handlers. There is still no real intelligence ingestion, matching, scoring, OTP 
 Passport/PaidTokenPass implementation, billing/metering, production BotBlocker key, policy
 release, credential, deployment, or traffic activation.
 
-Phase 13A corrected the intended product boundary after the user identified that Phase 0 had
-canonized the wrong interpretation. POWEROTP must be additive, plugin-directed, and
-customer-enforced: middleware uses the site credential for first session contact and narrow
-server-held visitor tokens thereafter, publishes recommended state, and customer plugin code
-enforces it and explicitly calls the one argument-free OTP opener. Phase 13B now provides the
-strict advisory browser snapshot/state API and removes automatic page-lock/iframe effects.
+The Phase 13 correction establishes a strict state-publication boundary. Middleware uses the
+site credential for first session contact and narrow server-held visitor tokens thereafter,
+then publishes advisory state for every customer application request except fixed technical
+exclusions. Neither adapter nor provider enforces, blocks, hides, branches, or renders customer
+content. Customer code alone decides whether and how to use the state or explicitly call the
+one argument-free OTP opener. Phase 13B provides the strict advisory browser snapshot/state API
+and removes automatic page-lock/iframe effects.
 Phase 13C makes gate-node the shared raw Node/Express authority, and Phase 13D completes
 authenticated Next.js request state plus the additive App Router provider/hook. The three
 supported wrappers now pass cross-wrapper conformance, so Phase 14 may publish integrations.
 `enabled: true` remains only stored preference and is insufficient for readiness. The existing
 hosted-widget bot-signal honeypot and `/v1/projects/{projectId}/visitors` OTP dashboard route
 remain separate from BotBlocker.
+
+Phase 14 adds the public, anonymous, read-only, credential-free BotBlocker MCP generator:
+architecture/data-boundary resources plus versioned, checksummed node-http/express/nextjs
+integration-manifest tools built directly from the shipped Phase 13B–13D APIs. It adds no new
+backend service and does not itself unblock activation — self-service dashboard issuance of a
+site credential and verification key pair still does not exist (see Phase 5), so MCP's own
+environment-variable guidance says so rather than describing an unbuilt dashboard flow.
 
 ## Phase log
 
@@ -1488,6 +1496,11 @@ All production modules remain below 300 lines. Runtime dependencies are only the
 
 **HTTP, proxy, limit, and exclusion behavior.**
 
+The bullets below record the Phase 11 API as built at that time. Phase 13D supersedes its
+selective-route and enforcement-suggesting names: current wrappers publish
+`AdvisoryRequestState` for every customer application request except fixed technical exclusions
+and expose no `protect` predicate.
+
 - `createPowerOtpRequestListener()` wraps a raw Node request listener, while
   `createPowerOtpServer()` creates a Node server with `requireHostHeader` and the configured
   header-size bound. The customer handler runs immediately with `access: "optimistic"` when
@@ -1817,12 +1830,12 @@ push, or remote mutation was performed.
 ## 2026-08-14 — BotBlocker Phase 13A: plugin-state boundary specification recovery
 
 **Outcome.** Specification-only correction (documentation plus one non-runtime contract
-comment). The user clarified that POWEROTP controls recommended website state through an
-additive plugin protocol. Middleware collects trusted data and communicates server-to-server
-using the customer's site credential for first RapidAuth/session contact and narrow
-server-held visitor tokens thereafter; browser SDK state tells the installed customer plugin
-whether POWEROTP recommends restricted/withheld, full-access, or OTP mode. Customer code is the
-enforcement point because POWEROTP cannot rewrite its application.
+comment). This phase correctly removed automatic POWEROTP rendering/DOM control, but it
+incorrectly recorded an additional expectation that installed customer code would enforce fixed
+rendering/access mappings. The user later clarified the narrower boundary: adapters/providers
+publish advisory state only, supported integration code never enforces it, and customer code
+alone decides whether and how to act. This entry preserves what Phase 13A changed while the
+current-status section and Phase 13D correction record the authoritative semantics.
 
 This phase also fixed OTP launch ownership. Customer code receives an `otp` recommendation and
 may call exactly one argument-free `gate.openOtp()` API. The caller cannot select the OTP
@@ -1840,10 +1853,10 @@ forwards only that narrow token upstream.
 - Commit `52cce5e` explicitly reconciled the product to an automatic optimistic/page-lock
   model. Phases 9–13 then correctly implemented that written specification, including
   automatic DOM freeze behavior.
-- The user confirmed that this was the wrong product boundary. POWEROTP controls the
-  recommendation, and supported customer plugin code is expected to enforce it; any pre-content
-  gate remains customer-authored conditional rendering around the SDK. POWEROTP cannot
-  technically force compliance or retract customer content already delivered.
+- The user confirmed that automatic POWEROTP DOM control was the wrong product boundary. Phase
+  13A removed that behavior but still overstated supported integration behavior by calling
+  customer enforcement expected. The authoritative correction is state publication only:
+  customer behavior is neither generated, required, assumed, nor verified by POWEROTP.
 - Historical Phase 0–13 entries remain unchanged as evidence of what was actually specified
   and built. This entry supersedes their product-intent claims without falsifying history.
 
@@ -1854,27 +1867,25 @@ forwards only that narrow token upstream.
   rendering and the single server-selected OTP launch.
 - `docs/POWEROTP_BOTBLOCKER_DEVELOPMENT_PHASES.md`: corrected the end goal and Phase 0/9/19/20
   descriptions; inserted corrective Phases 13A–13D without renumbering 14–31.
-- `docs/THREAT_MODEL.md`: replaced the optimistic enforcement claim with the plugin-instruction/
-  customer-enforcement boundary and explicit OTP launch authority.
+- `docs/THREAT_MODEL.md`: at the time, replaced the optimistic enforcement claim with a
+  plugin-instruction/customer-enforcement boundary; that intermediate wording is now superseded
+  by the state-publication/customer-control boundary.
 - `docs/POWEROTP_BOTBLOCKER_SOC2_ISO27001_CONTROL_MATRIX.md`: records the identified Phase 9–13
   implementation gap without claiming the corrective code exists.
 - `docs/POWEROTP_BOTBLOCKER_AS_BUILT.md`: current-status clarification and this entry.
 - `libraries/contracts/src/botblocker.ts`: corrected the timeout comment/reference; no schema,
   type, constant, wire shape, or runtime behavior changed.
 
-**Locked product semantics.**
+**Product semantics recorded by Phase 13A, corrected to the current state-only boundary.**
 
 - Middleware attaches trusted framework-native request/session state, communicates
   server-to-server with the site credential for first contact and narrow server-held visitor
   tokens thereafter, and leaves customer handlers, bodies, streams, routes, SSR, and responses
   untouched.
 - The browser SDK collects only approved evidence and publishes recommendation snapshots.
-  Supported customer plugin code maps `checking` to restricted/withheld; verified `allow`,
-  timeout fail-open, or unavailable fail-open to full access; verified `otp` to restricted plus
-  call OTP; and authoritative OTP success to full access.
-- Customers wanting pre-content gating must defer their own SSR/data fetch/render while state
-  is `checking`. POWEROTP controls the instruction but cannot technically force customer code
-  to comply.
+  Snapshot labels describe POWEROTP's recommendation and cause no customer-content effect.
+- Customer code alone decides whether and how to use a recommendation. Pre-content behavior,
+  SSR/data-fetch policy, routing, and rendering are not supplied or prescribed by the adapter.
 - Exactly `allow | otp` are backend decisions. `checking`, fail-open, unavailable, and
   observing are lifecycle states, not third decisions.
 - The customer-configured 50–2,000 ms timeout publishes fail-open access state and never
@@ -1894,10 +1905,11 @@ forwards only that narrow token upstream.
 - Initial browser evidence remains bounded/sanitized. Browser-supplied raw fingerprint hashes
   remain forbidden; Phase 15 derives keyed fingerprint/IP lookup hashes server-side.
 
-**Tests and verification.** No runtime code or contract changed, so no runtime suite was
+**Tests and verification at the time.** No runtime code or contract changed, so no runtime suite was
 required for this specification-only phase. Cross-document/source-comment searches confirmed
-no current product specification still claims that POWEROTP automatically controls customer
-rendering. Historical as-built descriptions intentionally retain those terms.
+no current product specification still claimed that POWEROTP automatically controlled customer
+rendering. The later state-only clarification additionally removed the mistaken expectation of
+customer enforcement from current normative documents.
 `npm run typecheck -w @powerotp/contracts` passed; `git diff --check` was clean.
 
 **Manual/migration/deployment steps.** None. No runtime code, dependency, migration, seed,
@@ -1980,8 +1992,10 @@ seed, environment/configuration change, remote mutation, commit, or push was per
 ## 2026-08-15 — BotBlocker Phase 13C: shared Node and Express advisory adapters
 
 **Outcome.** Made `@powerotp/gate-node` the shared server authority for raw Node and Express
-advisory integrations. A protected customer request now receives framework-native recommendation
-state immediately and remains fully customer-controlled. The owned same-origin bridge first
+advisory integrations. At the time, a customer-selected request received framework-native
+recommendation state immediately and remained fully customer-controlled. The later Phase 13D
+state-only correction removed that selector so every customer application request receives
+advisory state except fixed technical exclusions. The owned same-origin bridge first
 accepts the strict Phase 13B initial proof/evidence shape, verifies a correctly bound signed
 clearance locally when present, and only then starts the initial decision contact. Timeout
 publishes a real `fail_open` snapshot while the same server Promise remains pending; a late
@@ -1994,7 +2008,7 @@ contact must return a bounded opaque visitor token. Gate Node stores that token 
 server-side gate session and removes it, clearance material, and challenge internals from browser
 decision responses. Subsequent browser assessment, explicit OTP launch, and authoritative polling
 service calls receive only the scoped token; a repeated decision request cannot resend the site
-credential. The first protected request context is retained until first contact, so an
+credential. The first customer application request context is retained until first contact, so an
 intervening subresource cannot replace its trusted path/method/IP. Unconfigured, malformed, or
 synchronously failing service behavior is reduced to the strict typed-unavailable shape rather
 than fabricating `allow` or echoing extra credential/token fields.
@@ -2039,19 +2053,39 @@ framework-native recommendation/session state through a Next request-header over
 replaces caller-supplied state before forwarding a server-authenticated value, never adds it to
 the browser response, and `getRequestState()` reduces missing, malformed, forged, or modified
 values to a typed `unavailable`/`full_access` snapshot. Proxy still returns
-`NextResponse.next()` without rewriting, redirecting, consuming a protected body, buffering a
+`NextResponse.next()` without rewriting, redirecting, consuming an application body, buffering a
 response, or controlling customer SSR, routes, APIs, Server Actions, uploads, streams, errors,
 or rendering.
+
+**State-only correction.** Removed the former customer `protect(context)` selector from the
+shared Node options and all wrappers. Every customer application request now receives advisory
+state except fixed owned, infrastructure, static, health, `OPTIONS`, and WebSocket exclusions.
+Renamed the framework contract from enforcement-suggesting
+`ProtectedRequestState`/`protected`/`access` to
+`AdvisoryRequestState`/`advisory`/`status`. These are API corrections before Phase 14 generates
+public integrations; no adapter gains authority over customer behavior.
+
+**Documentation-source audit.** The repeated bad guidance was traced to Phase 13A wording that
+correctly removed automatic POWEROTP DOM control but incorrectly said supported customer
+integrations were expected to enforce fixed recommendation mappings. That wording propagated
+into the plan, phase schedule, threat model, control matrix, and Phase 13D fixture instructions.
+All current normative documents and wrapper READMEs now state the narrower rule: POWEROTP
+publishes state only and neither generates nor prescribes customer action. Historical Phase
+0–13 entries remain as history but are explicitly marked superseded where their API or product
+claims could be mistaken for current instructions. Runtime Phases 13B–13C were already
+non-interfering; the remaining code correction removed the selective-route callback and renamed
+the misleading framework-state surface before Phase 14 can publish it.
 
 **Provider and customer control.** Added the credential-free `PowerOtpNextProvider` and
 `usePowerOtp()` hook over the Phase 13B `getSnapshot`/`subscribe` external-store contract.
 Snapshots retain checking/restricted, fail-open/full-access, verified allow/full-access, and
-OTP-required semantics in subscription order across App Router navigation. The fixture applies
-BotBlocker to the whole customer application at its root: it renders normal customer website
-content for full access, returns `null` while access is withheld, and explicitly calls the single
-argument-free `openOtp()` method when OTP is recommended. It adds no checking, access, OTP,
-button, or other customer/POWEROTP placeholder screen; the hosted iframe is the only visible
-POWEROTP challenge content. The prior no-children `PowerOtpNextGate` mount remains compatible.
+OTP-required semantics in subscription order across App Router navigation. The fixture requests
+advisory state for every customer application request but always renders customer children
+untouched. It does not block, hide, replace, or branch customer content and does not call
+`openOtp()` automatically. The provider exposes the single argument-free method so customer code
+can explicitly call it when the customer chooses; no checking, access, OTP, button, or other
+placeholder screen is introduced. The prior no-children `PowerOtpNextGate` mount remains
+compatible.
 
 **Shared authority and secrets.** Next first contact uses bounded initial evidence, the retained
 trusted request context, and the server-only site credential. The returned scoped visitor token
@@ -2064,7 +2098,7 @@ acknowledgement, trusted-proxy rules, and same-origin bridge controls continue t
 shared Node implementation.
 
 **Tests and compatibility.** Added native Proxy state replacement/default tests, App Router
-provider/hook ordered snapshot tests, root-level customer rendering control, an explicit
+provider/hook ordered snapshot tests, state-only fixture non-interference, an explicit
 bodyless `openOtp()` test, local-clearance and active-OTP state propagation, first-contact
 credential/later-token separation, timeout/pending/late allow and late OTP coverage, and
 production bundle credential/token scanning. Customer-owned page, API, Server Action, upload,
@@ -2085,3 +2119,174 @@ fingerprint/IP hash derivation, scoring, production OTP orchestration, Passport/
 behavior, billing, deployment, secrets, DNS, activation, policy publication, or customer-hosted
 CleanDataPage route was added. No migration, seed, environment/server configuration, remote
 mutation, commit, push, or deployment was performed.
+
+## 2026-08-15 — BotBlocker Phase 14: public MCP generator
+
+**Outcome.** Added public, anonymous, read-only, credential-free BotBlocker MCP resources and
+tools to the existing `@powerotp/mcp` package alongside the unrelated OTP-platform MCP content,
+which is untouched and remains fully compatible (`content.test.ts` and its two describe blocks
+still pass unchanged). The new capability set is a documentation/generator layer only: it adds no
+new backend service, credential, account-management action, or repository/dashboard/hosting
+mutation. `apps/web/app/mcp/route.ts` exposes it automatically because it already delegates to
+`createMcpTransport()` in `@powerotp/mcp/mcp-app.js`, which now also calls
+`registerBotBlockerCapabilities()`.
+
+**Resources added** (`powerotp://botblocker/docs/*`): `architecture` (the `allow | otp`
+decision boundary, lifecycle-to-recommendation mapping, shared `@powerotp/gate-node` authority,
+argument-free `openOtp()`, timeout fail-open, active-OTP precedence, and the fixed technical
+exclusion list) and `data-boundary` (site-credential/scoped-visitor-token flow, what the browser
+never receives, MCP's own public/anonymous/read-only/credential-free boundary and prohibited
+actions, customer ownership of SSR/APIs/routes/responses/rendering, and the direct-origin-bypass
+limitation). Both are static content generators over facts already true of shipped Phase
+13B–13D code; neither adds new runtime behavior.
+
+**Tools added:** `list_botblocker_adapters`, `get_botblocker_environment_variables`,
+`get_botblocker_manifest`, `get_botblocker_integration_steps`, `get_botblocker_troubleshooting`,
+`get_botblocker_upgrade_instructions`, and `verify_botblocker_manifest_checksum`. Every tool has
+a strict Zod `inputSchema`, `readOnlyHint: true`/`destructiveHint: false` annotations matching the
+existing OTP tools' convention, and accepts no credential as an argument.
+`get_botblocker_manifest`'s handler additionally parses its own return value through a strict
+`.strict()` Zod `AdapterManifestSchema` before responding, so a future builder-shape regression
+fails loudly instead of silently widening the public contract.
+
+**Manifest generator.** New `apps/mcp/src/botblocker/` module:
+`manifest.ts` (`buildBotBlockerManifest`/`buildAllBotBlockerManifests`), `types.ts`, `schemas.ts`,
+`checksum.ts` (SHA-256 helper), `env.ts` (environment-variable name catalog), `architecture.ts`
+(resource content), `tools.ts` (registration), and one template module per adapter under
+`templates/` (`node-http.ts`, `express.ts`, `nextjs.ts`). Each adapter manifest carries a
+`manifestFormatVersion` (bumped only when the manifest *shape* changes) and a `packageVersion`
+copied from the matching `libraries/gate-*` package.json — `manifest.test.ts` reads that real
+file at test time and fails if a bumped wrapper version is not reflected, preventing a silently
+stale manifest. Every file gets its own `checksumSha256`, and the whole manifest gets one more
+`checksumSha256` over an explicit, fixed-order canonical string (adapter, package@version, format
+version, then every `path:checksum` pair) rather than `JSON.stringify` object-key order, so the
+checksum is reproducible independent of property insertion order.
+
+**Templates match current APIs exactly.** All three templates were written directly from the
+already-shipped, already-tested Phase 13C/13D fixtures/READMEs rather than reinvented: raw Node
+wraps `createPowerOtpRequestListener`/`AdvisoryRequestState` from `@powerotp/gate-node`; Express
+uses `createPowerOtpBotBlocker` mounted before body parsers/static/API routers exactly as
+`libraries/gate-express/README.md` documents, plus `PowerOtpBrowserGate` from
+`@powerotp/gate-express/react`; Next.js reproduces `powerotp.server.ts`, the literal `proxy.ts`
+matcher, both `app/%5Fpowerotp/[...path]/route.ts` and `app/.well-known/powerotp-agent/route.ts`,
+and the `PowerOtpNextProvider`-wrapped `app/layout.tsx` from `libraries/gate-next/fixture` and
+`README.md`. The Next.js matcher literal is a local copy checked against
+`@powerotp/gate-next`'s own exported `POWEROTP_PROXY_MATCHER` constant by a dedicated
+`templates/nextjs.test.ts` drift test rather than imported at runtime, so this documentation
+package never needs `next`/`react` as an actual runtime dependency (only as `devDependencies` for
+the compile-check test below). None of the three services (`requestDecision`, `verifyDecision`,
+`assessBrowser`, `launchChallenge`, `pollChallenge`) are wired to a real backend by any shipped
+wrapper yet, so every generated example's "known limitations" says plainly that traffic observes
+typed-unavailable/fail-open state only until a real service is injected — this is not a Phase 14
+regression, it is accurately describing Phase 13's own already-shipped default.
+
+**Environment variables corrected mid-phase after user review.** The first draft of `env.ts`
+invented `POWEROTP_VERIFICATION_KEY_ID`/`POWEROTP_VERIFICATION_PUBLIC_KEY_SPKI_BASE64` as if they
+were intended customer-facing setup, and entirely missed `docs/POWEROTP_BOTBLOCKER_PLAN.md`'s
+already-specified "OTP integration" section. The user's actual, already-partially-shipped
+credential model is exactly two per-project secrets: a site/project API key and a webhook signing
+secret, both generated once and independently rotatable. Corrected `env.ts` now separates three
+groups instead of one flat list:
+
+- `BOTBLOCKER_ENV_VARS` (required, real, shipped): `POWEROTP_SITE_ID` and
+  `POWEROTP_SITE_CREDENTIAL`. The credential is exactly the value already returned once by the
+  real, shipped `POST /v1/projects/{projectId}/botblocker/rotate-site-credential`
+  (`apps/api/src/botblocker-site-credential-service.ts`, Phase 8) — MCP now points to that real
+  endpoint by name in every adapter's placement steps instead of inventing a dashboard flow.
+- `BOTBLOCKER_PLANNED_ENV_VARS`: `POWEROTP_WEBHOOK_SIGNING_SECRET`, specified in
+  `POWEROTP_BOTBLOCKER_PLAN.md`'s "OTP integration" section (256-bit, per project, shown once,
+  rotatable, verifies the fixed `/_powerotp/webhooks/challenge-status` callback) but not backed
+  by any shipped rotation service or webhook receiver in any adapter yet. Documented as planned,
+  not generated as fake receiver code.
+- `BOTBLOCKER_UNDELIVERED_ENV_VARS` (renamed from an initial, incorrect
+  `BOTBLOCKER_UNRESOLVED_ENV_VARS`): the same Ed25519 `POWEROTP_VERIFICATION_KEY_ID`/
+  `_PUBLIC_KEY_SPKI_BASE64` pair. The first correction round mischaracterized this as possibly
+  unwanted complexity; the user then confirmed it is an intentional, wanted feature — a returning
+  visitor who already received an `allow` gets a signed, long-lived cookie
+  (`libraries/gate-node/src/cookies.ts`'s `verifyClearanceCookie()`, from Phase 3 "Ed25519
+  signed-artifact primitive"), and a later visit's `allow` is granted instantly by checking that
+  cookie's signature entirely on the customer's own server, without waiting on a fresh decision
+  or even reaching PowerOTP (this also keeps working through a PowerOTP outage, matching the
+  already-documented `THREAT_MODEL.md` fail-open-timeout section). An active OTP challenge or a
+  revoked/replaced clearance always takes precedence over this cookie, matching Phase 13C/13D's
+  already-tested active-OTP precedence. The real, narrower, still-open gap: no dashboard/API flow
+  yet hands a customer the specific public value their server needs to check that signature, the
+  way the real `rotate-site-credential` endpoint already hands them the site credential — most
+  naturally an extension of the already-shipped, public `GET /v1/botblocker/policy/{siteId}`,
+  whose current contract (`libraries/contracts/src/botblocker-policy.ts`) carries only a key-*ID*
+  reference, not key bytes. Every adapter's generated `powerotp.server.ts`/`server/powerotp.ts`
+  file still includes the field (it is real, required, and non-optional on the shipped
+  `GateNodeOptions` type, so omitting it would not compile), now with a comment and a
+  `knownLimitations` entry describing it as "required-but-not-yet-deliverable" and pointing at
+  `get_botblocker_environment_variables`'s output for detail. Phase 14 made no runtime code
+  change and did not build the key-delivery mechanism itself.
+
+**Automatic key delivery scheduled as Phase 14A, not left as a flagged runtime anomaly.** The
+user's final correction: not-yet-built simply means "an upcoming phase," and it belongs in the
+main plan on the appropriate phase, with current-phase docs noting the hand-off — not framed as
+an "unavailable"/"open question" oddity in tool output. Added
+`### Phase 14A — Automatic verification-key delivery` to
+`POWEROTP_BOTBLOCKER_DEVELOPMENT_PHASES.md` (between Phase 14 and Phase 15, following the same
+lettered-insertion convention as Phases 13A–13D, so Phases 15–31 keep their numbers): extend the
+already-shipped Phase 7 policy release/`GET /v1/botblocker/policy/{siteId}` to carry the actual
+Ed25519 public key material instead of only a key-*ID* reference, and add a policy-fetch client
+to the shared `@powerotp/gate-node` authority that resolves `verificationKeys` automatically from
+only the public `siteId` — implementing the "Signed Policy Client" that
+`POWEROTP_BOTBLOCKER_PLAN.md` already specified conceptually but that no wrapper ever
+implemented. Cross-referenced Phase 7's own phase description and `PLAN.md`'s "Signed Policy
+Client" section and example snippet to point at Phase 14A. Reworded every Phase 14 MCP touchpoint
+(`env.ts`, `tools.ts`, `architecture.ts`, all three adapter templates, and their tests) from
+"required-but-not-yet-deliverable"/"open architecture question" to a plain, matter-of-fact
+statement: the constructor takes this value directly today, and Phase 14A will resolve it
+automatically later. `BOTBLOCKER_UNDELIVERED_ENV_VARS`'s export name and doc comment were kept
+accurate but their customer-facing description text no longer reads as a discovered problem.
+
+**Tests and results.** New `apps/mcp/src/botblocker/{manifest,typecheck}.test.ts` and
+`templates/nextjs.test.ts` join the existing `content.test.ts`, for 41 total `@powerotp/mcp`
+tests, 0 failures. Coverage includes: strict output-schema validation; byte-for-byte
+reproducibility across independent builds; manifest checksum recomputation; absence of
+credential-like literals (`potp_bb_`, PEM private-key headers, a non-`process.env` literal
+`siteCredential`/`keyId` assignment) and of CleanDataPage/`aisummary`-route scaffolding in every
+generated file; presence of the required environment-variable *names* (never a value); the
+matcher-drift check against `@powerotp/gate-next`; package-version-vs-`package.json` drift;
+absence of a fabricated `/_powerotp/webhooks/challenge-status` receiver in any generated file;
+presence of the unresolved-verification-key and planned-webhook-secret disclosures in every
+adapter's `knownLimitations`; and presence of the real rotation endpoint name in every adapter's
+`placementSteps`.
+`typecheck.test.ts` materializes each manifest's exact files at their exact relative paths under
+a gitignored `apps/mcp/.botblocker-typecheck/` scratch directory and shells out to this
+monorepo's own `node_modules/typescript/bin/tsc` CLI — the classic embeddable
+`ts.createProgram`/`ts.ModuleResolutionKind` compiler API does not exist in the native TypeScript
+7 this repository already depends on, so the test spawns the same `tsc -p ... --noEmit` CLI every
+workspace's own `typecheck` script already uses, rather than a different, less-representative
+mechanism. All three adapters compile cleanly against the real, already-built
+`@powerotp/gate-node`/`gate-express`/`gate-next` declaration files, which also independently
+proves exact file placement and relative-import correctness (a wrong path or ordering would fail
+module resolution, not just type-checking). `server-only` (added as an `apps/mcp` `devDependency`
+purely for this compile check, matching what a real Next.js customer installs) was empirically
+confirmed to need no ambient type declaration for its side-effect-only `import "server-only";` form.
+
+**Verification.** Focused suites: contracts (159 tests), gate-core (39), gate-node (21),
+gate-express (22), gate-next (27 — this suite's own timing-sensitive fail-open/late-decision
+timer tests were independently observed to intermittently fail and pass again on immediate
+re-run twice during this phase, both before and after the credential-model correction; this is
+pre-existing test flakiness in already-shipped Phase 13D code, not a regression from any Phase 14
+change, and is unchanged by this phase), and mcp (41, up from an initial 32 after the
+credential-model correction below). `npm run build -w @powerotp/mcp` and
+`npm run typecheck -w @powerotp/mcp` passed. Full `npm run verify` (every workspace build, lint/
+typecheck, and test, including the `@powerotp/gate-next` production fixture build already
+performed as part of that build step) passed with zero failures across every reported suite, run
+twice (once before and once after the credential-model correction). `npm audit` reported zero
+vulnerabilities both times. Final `git diff --check` passed. A targeted scan of built
+`apps/mcp/dist/*.js` output found no `potp_bb_`, PEM private-key header, or
+CleanDataPage/`aisummary` literal. A repository-wide scan of `apps/web/.next` found `potp_bb_`
+only in pre-existing, unrelated `apps/api` server-only chunks (the site-credential prefix
+constant, not a secret value, and absent from every `apps/web/.next/static` client chunk) — this
+predates Phase 14 and is not part of this phase's generated output.
+
+**Exclusions and operations.** No real RapidAuth/intelligence ingestion, fingerprint/IP hash
+derivation, scoring, production OTP orchestration, Passport/PaidTokenPass behavior, billing,
+deployment, secrets, DNS, activation, policy publication, account management, repository
+mutation, dashboard mutation, or hosting configuration was added or performed through MCP or
+otherwise. No customer-hosted CleanDataPage route was created. No migration, seed, environment/
+server configuration, remote mutation, commit, push, or deployment was performed.

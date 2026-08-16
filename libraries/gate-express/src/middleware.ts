@@ -1,9 +1,9 @@
 import type { IncomingMessage } from "node:http";
 
 import {
+  type AdvisoryRequestState,
   createPowerOtpRequestListener,
   type GateNodeOptions,
-  type ProtectedRequestState,
 } from "@powerotp/gate-node";
 import {
   Router,
@@ -16,7 +16,7 @@ import {
 export type GateExpressOptions = Omit<GateNodeOptions, "handle">;
 
 export interface PowerOtpRequest extends Request {
-  powerOtp?: ProtectedRequestState;
+  powerOtp?: AdvisoryRequestState;
 }
 
 export interface PowerOtpBotBlocker {
@@ -44,9 +44,9 @@ export function createPowerOtpBotBlocker(
 
   const middleware: RequestHandler = (request, response, next) => {
     if (isWebSocketUpgrade(request)) {
-      const state: ProtectedRequestState = {
-        protected: false,
-        access: "excluded",
+      const state: AdvisoryRequestState = {
+        advisory: false,
+        status: "excluded",
       };
       (request as PowerOtpRequest).powerOtp = state;
       response.locals.powerOtp = state;

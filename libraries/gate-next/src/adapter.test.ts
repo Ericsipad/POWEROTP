@@ -3,6 +3,7 @@ import { generateKeyPairSync } from "node:crypto";
 import { test } from "node:test";
 
 import type { RequestContext } from "@powerotp/contracts";
+import { createMemoryGateSessionStore } from "@powerotp/gate-node";
 import { unstable_doesMiddlewareMatch } from "next/experimental/testing/server";
 import { NextRequest } from "next/server";
 
@@ -20,7 +21,7 @@ const verificationKeys = {
   active: { keyId: "key_1234567890123456", publicKey: keyPair.publicKey },
 };
 
-test("native proxy matcher orders protected routes before App Router and excludes owned routes", () => {
+test("native proxy matcher covers application routes and excludes owned routes", () => {
   const config = { matcher: [POWEROTP_PROXY_MATCHER] };
   for (const path of ["/account", "/api/private", "/dashboard/settings"]) {
     assert.equal(
@@ -44,10 +45,9 @@ test("native proxy matcher orders protected routes before App Router and exclude
   }
 });
 
-test("protected pages and APIs continue immediately while pending work is retained", async () => {
+test("application pages and APIs continue immediately while pending work is retained", async () => {
   const pending = new Promise<never>(() => undefined);
   const adapter = createPowerOtpNext(baseOptions({
-    protect: () => true,
     services: { requestDecision: () => pending },
   }));
 
@@ -63,13 +63,13 @@ test("protected pages and APIs continue immediately while pending work is retain
 });
 
 test("Proxy replaces untrusted input with framework-native recommendation state", async () => {
-  const adapter = createPowerOtpNext(baseOptions({ protect: () => true }));
+  const adapter = createPowerOtpNext(baseOptions({}));
   const response = await adapter.proxy(
     request("/account", {
       headers: {
         "x-powerotp-request-state": Buffer.from(JSON.stringify({
-          protected: true,
-          access: "allow",
+          advisory: true,
+          status: "allow",
           recommendation: {
             lifecycle: "observing",
             recommendation: "full_access",
@@ -84,9 +84,9 @@ test("Proxy replaces untrusted input with framework-native recommendation state"
   );
 
   const state = adapter.getRequestState(forwardedHeaders(response));
-  assert.equal(state.protected, true);
-  assert.equal(state.access, "checking");
-  if (state.protected) {
+  assert.equal(state.advisory, true);
+  assert.equal(state.status, "checking");
+  if (state.advisory) {
     assert.equal(state.recommendation.lifecycle, "checking");
     assert.ok(state.sessionId);
   }
@@ -94,7 +94,7 @@ test("Proxy replaces untrusted input with framework-native recommendation state"
   const forwarded = forwardedHeaders(response).get("x-powerotp-request-state");
   assert.ok(forwarded);
   const tampered = `${forwarded.slice(0, -1)}${forwarded.endsWith("A") ? "B" : "A"}`;
-  assert.equal(adapter.getRequestState({ get: () => tampered }).access, "unavailable");
+  assert.equal(adapter.getRequestState({ get: () => tampered }).status, "unavailable");
 });
 
 test("missing or malformed framework state has a typed unavailable default", () => {
@@ -102,12 +102,12 @@ test("missing or malformed framework state has a typed unavailable default", () 
   for (const value of [
     null,
     "not-base64-json",
-    Buffer.from(JSON.stringify({ protected: false, access: "excluded" })).toString("base64url"),
+    Buffer.from(JSON.stringify({ advisory: false, status: "excluded" })).toString("base64url"),
   ]) {
     const state = adapter.getRequestState({ get: () => value });
     assert.deepEqual(state, {
-      protected: true,
-      access: "unavailable",
+      advisory: true,
+      status: "unavailable",
       recommendation: {
         lifecycle: "unavailable",
         recommendation: "full_access",
@@ -126,7 +126,6 @@ test("dependency rejection and synchronous throws remain optimistic", async () =
     },
   ]) {
     const adapter = createPowerOtpNext(baseOptions({
-      protect: () => true,
       services: { requestDecision },
     }));
     const response = await adapter.proxy(request("/private"), event([]));
@@ -135,13 +134,7 @@ test("dependency rejection and synchronous throws remain optimistic", async () =
 });
 
 test("infrastructure, framework assets, health, and OPTIONS are excluded", async () => {
-  let protectCalls = 0;
-  const adapter = createPowerOtpNext(baseOptions({
-    protect() {
-      protectCalls += 1;
-      return true;
-    },
-  }));
+  const adapter = createPowerOtpNext(baseOptions({}));
   for (const path of [
     "/_next/static/app.js",
     "/assets/logo.svg",
@@ -157,11 +150,10 @@ test("infrastructure, framework assets, health, and OPTIONS are excluded", async
     headers: { connection: "keep-alive, Upgrade", upgrade: "websocket" },
   }), event([]));
   assert.equal(websocket.headers.get("set-cookie"), null);
-  assert.equal(protectCalls, 0);
 });
 
-test("protected uploads and streams are never consumed by Proxy", async () => {
-  const adapter = createPowerOtpNext(baseOptions({ protect: () => true }));
+test("application uploads and streams are never consumed by Proxy", async () => {
+  const adapter = createPowerOtpNext(baseOptions({}));
   const upload = request("/api/upload", {
     method: "POST",
     headers: { "content-type": "application/octet-stream" },
@@ -173,7 +165,7 @@ test("protected uploads and streams are never consumed by Proxy", async () => {
 });
 
 test("pages, APIs, Server Actions, streams, and errors remain customer-owned", async () => {
-  const adapter = createPowerOtpNext(baseOptions({ protect: () => true }));
+  const adapter = createPowerOtpNext(baseOptions({}));
   const cases: Array<[string, RequestInit | undefined, string | undefined]> = [
     ["/account", undefined, undefined],
     ["/api/private", { method: "POST", body: "{\"customer\":true}" }, "{\"customer\":true}"],
@@ -199,31 +191,24 @@ test("pages, APIs, Server Actions, streams, and errors remain customer-owned", a
 });
 
 test("direct address is authoritative and spoofed forwarded headers are ignored", async () => {
-  const contexts: RequestContext[] = [];
+  const store = createMemoryGateSessionStore();
   const adapter = createPowerOtpNext(baseOptions({
-    protect(context) {
-      contexts.push(context);
-      return true;
-    },
+    sessionStore: store,
     resolveDirectAddress: () => "203.0.113.8",
   }));
-  await adapter.proxy(
+  const response = await adapter.proxy(
     request("/private", {
       headers: { "x-forwarded-for": "198.51.100.5", "x-real-ip": "198.51.100.6" },
     }),
     event([]),
   );
-  await waitFor(() => contexts.length === 1);
-  assert.equal(contexts[0]?.clientIp, "203.0.113.8");
+  assert.equal((await storedContext(adapter, response, store))?.clientIp, "203.0.113.8");
 });
 
 test("forwarded IP requires explicit peer, header, position, and count", async () => {
-  let context: RequestContext | undefined;
+  const store = createMemoryGateSessionStore();
   const adapter = createPowerOtpNext(baseOptions({
-    protect(value) {
-      context = value;
-      return true;
-    },
+    sessionStore: store,
     resolveDirectAddress: () => "203.0.113.8",
     trustedProxy: {
       header: "x-forwarded-for",
@@ -232,11 +217,11 @@ test("forwarded IP requires explicit peer, header, position, and count", async (
       expectedProxyCount: 2,
     },
   }));
-  await adapter.proxy(
+  const response = await adapter.proxy(
     request("/private", { headers: { "x-forwarded-for": "198.51.100.1, 198.51.100.2" } }),
     event([]),
   );
-  await waitFor(() => context !== undefined);
+  const context = await storedContext(adapter, response, store);
   assert.equal(context?.clientIp, "198.51.100.1");
 });
 
@@ -299,7 +284,6 @@ function baseOptions(overrides: Partial<GateNextOptions>): GateNextOptions {
     siteCredential,
     verificationKeys,
     decisionTimeoutMs: 50,
-    protect: () => false,
     ...overrides,
   };
 }
@@ -324,19 +308,13 @@ function forwardedHeaders(response: Response) {
   };
 }
 
-function unavailable() {
-  return {
-    status: "unavailable" as const,
-    reason: "not_implemented" as const,
-    message: "This service is not available",
-    retryable: false,
-  };
-}
-
-async function waitFor(condition: () => boolean): Promise<void> {
-  const deadline = Date.now() + 1_000;
-  while (!condition()) {
-    if (Date.now() >= deadline) throw new Error("Timed out waiting for condition");
-    await new Promise((resolve) => setTimeout(resolve, 1));
-  }
+async function storedContext(
+  adapter: ReturnType<typeof createPowerOtpNext>,
+  response: Response,
+  store: ReturnType<typeof createMemoryGateSessionStore>,
+): Promise<RequestContext | undefined> {
+  const state = adapter.getRequestState(forwardedHeaders(response));
+  assert.equal(state.advisory, true);
+  if (!state.advisory || !state.sessionId) return undefined;
+  return (await store.get(state.sessionId))?.requestContext;
 }

@@ -8,19 +8,20 @@ high-level architecture/deployment changes repeated in [`AS_BUILT.md`](AS_BUILT.
 ## End goal
 
 BotBlocker is a customer-installed browser/request integration for React, Node,
-TypeScript, and later other platforms. It is an additive, plugin-directed,
-customer-enforced integration: middleware gathers trusted request data, communicates with
+TypeScript, and later other platforms. It is an additive, state-publishing integration:
+middleware gathers trusted request data, communicates with
 POWEROTP using the customer's server-only site credential for initial session creation and
 narrow server-held visitor tokens thereafter, and attaches recommended state; the browser SDK
-publishes updates; installed customer code enforces them in its own rendering/access logic.
-The recommended integration defers protected UI while POWEROTP checks first-party clearance and
-Passport proofs (human challenge-installed or purchased agent/PaidTokenPass-backed), gathers
+publishes updates and never acts on customer content. Customer code alone decides whether and
+how to use that state; supported integrations do not enforce it. POWEROTP checks first-party
+clearance and Passport proofs (human challenge-installed or purchased
+agent/PaidTokenPass-backed), gathers
 approved initial browser evidence, combines it with trusted server IP/context, and asks POWEROTP
 for one of exactly two decisions:
 
 - `allow`: recommend normal access and continuously observe.
-- `otp`: recommend closing access and permit customer code to call the single argument-free
-  `gate.openOtp()` API.
+- `otp`: publish an OTP recommendation and expose the single argument-free `gate.openOtp()` API
+  for explicit customer use.
 
 The first behavior report is sent after five seconds. Further reports are sent every
 30 seconds and when a partial interval ends because of navigation, page hide, or exit.
@@ -41,11 +42,15 @@ the server-selected hosted iframe. The empty same-origin opener request uses the
 visitor gate-session cookie; the customer server resolves trusted site/session state and
 forwards the narrow server-held token minted during the site-credential-authenticated first
 contact. Session/site IDs identify records but authorize nothing by themselves.
+This BotBlocker opener is separate from ordinary signup, password-recovery, and other
+customer-initiated OTP API flows, whose customer request/configuration determines their own
+verification content.
 
 Website-facing recommendations are derived lifecycle state: `checking` means
-restricted/withheld; verified `allow`, timeout fail-open, or unavailable fail-open means full
-access; verified `otp` means restricted plus call OTP; authoritative OTP success means full
-access. These are plugin instructions, not extra backend decision outcomes.
+the `restricted` label; verified `allow`, timeout fail-open, or unavailable fail-open means
+`full_access`; verified `otp` means `otp_required`; authoritative OTP success means
+`full_access`. These are advisory labels, not extra backend decisions or rendering/access
+effects.
 
 POWEROTP internally correlates pseudonymous fraud/security evidence across protected
 sites, while each customer can see only visitors and observations from its own projects.
@@ -146,7 +151,9 @@ approved variable TTL retention before real collection; never seed fake data.
 
 Add immutable `policyReleases` and `GET /v1/botblocker/policy/{siteId}` with signatures,
 ETag, compatibility, key set, timeout, sensor version, activation/expiry, last-known-
-good handling, and rollback protection. No active release means `policy_unavailable`.
+good handling, and rollback protection. No active release means `policy_unavailable`. The
+key set here is a key-*ID* reference only; Phase 14A adds the actual key material and the
+adapter-side client that consumes it.
 
 ### Phase 8 — Complete central API surface
 
@@ -216,8 +223,9 @@ of secrets in bundles. Do not create a customer-hosted CleanDataPage route.
 
 Correct the Phase 0–13 product specification before generating public integrations. POWEROTP
 middleware/SDK gathers evidence and controls recommended state through the plugin protocol;
-installed customer code is expected to enforce it because POWEROTP cannot rewrite customer
-code. Define timeout as fail-open lifecycle state rather than a fabricated `allow`, define the
+installed customer code alone decides whether and how to act, and supported integration code
+must never enforce, suppress, or branch customer content. Define timeout as fail-open lifecycle
+state rather than a fabricated `allow`, define the
 single argument-free OTP opener with server-selected iframe content, preserve historical
 as-built entries, and schedule 13B–13D without changing runtime behavior or contracts.
 
@@ -229,7 +237,7 @@ freeze/iframe effects; opening OTP must require an explicit customer call and se
 site/session decision. The browser call has an empty body and relies on the HttpOnly same-origin
 gate session; it never accepts an API key or caller-supplied ID. Snapshots map
 lifecycle/decisions to restricted, full-access, or OTP-required recommendations for customer
-enforcement. Preserve pending timeout work, 5-second/30-second sensing, revisions, polling,
+consumption without customer-content effects. Preserve pending timeout work, 5-second/30-second sensing, revisions, polling,
 acknowledgement, and typed unavailable defaults.
 
 ### Phase 13C — Shared Node and Express advisory adapters
@@ -238,15 +246,18 @@ Make gate-node the single authority for local proof verification, trusted reques
 server-to-server credential use, visitor sessions, pending decisions, and verified
 recommendation state while leaving the customer handler/response in control. Add bounded
 initial-evidence bridging, store the opaque scoped token returned by first contact only on the
-server, and expose framework-native state for customer enforcement. Later per-visitor calls
+server, and expose framework-native state for customer-owned use. State is attached to every
+customer application request except fixed technical exclusions; no selective-route callback or
+enforcement is part of the wrapper. Later per-visitor calls
 forward that token without resending the site credential. Keep Express thin and prove no
 route/body/stream/DOM interference.
 
 ### Phase 13D — Next.js advisory adapter and cross-wrapper conformance
 
 Expose trusted recommendation/session state through native Node-runtime Proxy and an additive
-App Router provider/hook without rewrites or rendering control. Demonstrate
-customer-controlled conditional rendering and explicit `openOtp()` in the fixture. Verify
+App Router provider/hook without rewrites or rendering control. The fixture must leave customer
+content untouched and prove that state publication causes no rendering branch or automatic
+`openOtp()` call; explicit argument-free `openOtp()` remains separately tested. Verify
 cross-wrapper non-interference, client-bundle credential absence, and all inherited security
 boundaries. Phase 14 is blocked until 13D passes.
 
@@ -256,6 +267,30 @@ Add BotBlocker architecture/data resources and integration/config/troubleshootin
 Generate separate versioned/checksummed `node-http`, `express`, and `nextjs` source
 manifests with exact placement, env names, dashboard steps, tests, exclusions, readiness,
 and upgrades. MCP remains public, anonymous, read-only, and credential-free.
+
+### Phase 14A — Automatic verification-key delivery
+
+The already-shipped raw Node/Express/Next wrappers require a constructor-supplied Ed25519
+`verificationKeys` value so a returning visitor who already received an `allow` can be granted
+it again instantly from a signed, long-lived cookie, entirely on the customer's own server,
+without waiting on a fresh decision or a PowerOTP round-trip (see
+[`libraries/gate-node/src/cookies.ts`](../libraries/gate-node/src/cookies.ts)). This is the same
+"Signed Policy Client" the plan already describes — Phase 7 built the signed policy release and
+its `GET /v1/botblocker/policy/{siteId}` endpoint, but that endpoint's key set today is a key-*ID*
+reference only (`PolicyKeyReferenceSchema`), and no wrapper fetches it. Phase 14A closes that gap:
+
+- Extend the Phase 7 policy release contract and stored release to carry the active/previous
+  Ed25519 public key material itself (SPKI DER, base64), not only a key ID, reusing the existing
+  active/previous overlap and revocation shape from `@powerotp/botblocker-signing`.
+- Add a policy-fetch client to the shared `@powerotp/gate-node` authority that resolves
+  `verificationKeys` from `GET /v1/botblocker/policy/{siteId}` using only the public `siteId`,
+  with the existing last-known-good caching and signed-rollback-rejection rules from the
+  "Signed Policy Client" section of `POWEROTP_BOTBLOCKER_PLAN.md`.
+- Once this ships, `siteId`/`siteCredential` become the only two values a customer configures;
+  `verificationKeys` stops being a constructor argument the customer supplies directly. Update
+  Phase 14's MCP templates and environment-variable catalog in the same phase that this ships.
+- No change to the `allow | otp` decision boundary, the site-credential/scoped-visitor-token
+  separation, or any other Phase 13B–13D behavior.
 
 ### Phase 15 — Real intelligence/event ingestion
 

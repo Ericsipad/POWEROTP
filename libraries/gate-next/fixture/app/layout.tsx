@@ -3,11 +3,10 @@ import { headers } from "next/headers";
 import type { ReactNode } from "react";
 
 import { powerOtp } from "../powerotp.server";
-import { PowerOtpCustomerRoot } from "./powerotp-root";
 
 export default async function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
   const requestState = powerOtp.getRequestState(await headers());
-  const initialSnapshot = requestState.protected
+  const initialSnapshot = requestState.advisory
     ? requestState.recommendation
     : undefined;
 
@@ -18,7 +17,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
           sensorVersion="next-fixture-v1"
           initialSnapshot={initialSnapshot}
         >
-          <PowerOtpCustomerRoot>{children}</PowerOtpCustomerRoot>
+          {children}
         </PowerOtpNextProvider>
       </body>
     </html>

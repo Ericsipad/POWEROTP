@@ -1,7 +1,7 @@
 # PowerOTP BotBlocker Development Plan
 
-Last updated: 2026-08-15 (clarified broad fingerprint collection and callback-first OTP status;
-execution remains governed by
+Last updated: 2026-08-15 (locked the state-publication-only integration boundary, broad
+fingerprint collection, and callback-first OTP status; execution remains governed by
 [`POWEROTP_BOTBLOCKER_DEVELOPMENT_PHASES.md`](POWEROTP_BOTBLOCKER_DEVELOPMENT_PHASES.md))
 
 Execution is split into small, dependency-ordered fresh-session phases in
@@ -16,21 +16,22 @@ fraud-intelligence plugin installed additively in a customer's own website or re
 The server adapter gathers trusted request data, communicates server-to-server with POWEROTP
 using the customer's server-only site credential for initial session creation and narrow
 server-held tokens thereafter, and publishes the resulting recommended website state through
-the browser SDK. The customer
-application remains the rendering/access enforcement point, but a supported integration is
-expected to honor those instructions. POWEROTP never rewrites the customer's application code.
+the browser SDK. That publication is the complete integration boundary: POWEROTP does not
+enforce the recommendation and does not require, assume, or verify any customer response to it.
+Customer code alone decides whether and how to use the state. POWEROTP never rewrites the
+customer's application code.
 
-The recommended customer integration mounts the credential-free browser state provider before
-its protected UI. While the provider reports `checking`, customer code may choose to defer its
-own protected render/data fetch. The access fast path is ordered: first verify a site-specific
+The customer mounts the credential-free browser state provider once at its application root so
+its own code can read current state. The provider never blocks, hides, replaces, branches, or
+renders customer content. The assessment fast path is ordered: first verify a site-specific
 return clearance locally; otherwise discover and validate an installed POWEROTP Passport with
 POWEROTP and mint a pairwise assertion for this site; only when neither proof is valid does the
 adapter combine approved initial browser evidence with trusted IP/request context for RapidAuth.
 POWEROTP returns exactly one of two decisions:
 
 - `allow`: recommend normal access and continuously observe.
-- `otp`: recommend that customer code close access and call the single argument-free
-  `gate.openOtp()` API.
+- `otp`: report an OTP recommendation and make the single argument-free `gate.openOtp()` API
+  available for customer code to call explicitly if it chooses.
 
 The customer chooses a decision timeout between 50 and 2,000 ms, 200 ms recommended. If the
 timeout or a RapidAuth failure occurs first, the SDK publishes a fail-open access
@@ -38,12 +39,11 @@ recommendation. That lifecycle transition is not a fabricated backend `allow`: t
 decision continues, and a verified late `otp` still replaces the current recommendation. A
 blacklist match produces `otp`, never permanent denial.
 
-**Customer-control limitation, stated plainly:** POWEROTP cannot guarantee that customer
-content was withheld or that an instruction was followed because the customer controls the
-enforcement code. The supported plugin contract maps `checking` to restricted/withheld access,
-verified `allow` or fail-open to full access, and verified `otp` to restricted access plus the
-single OTP call. Customers must structure their own SSR, data fetching, routing, and client
-rendering to honor that mapping. POWEROTP cannot retract bytes the customer already delivered.
+**State-only boundary, stated plainly:** POWEROTP publishes a recommendation and nothing more.
+The adapter/provider never blocks a handler, suppresses SSR, changes a route, alters a response,
+branches customer rendering, or calls `openOtp()` automatically. Labels such as `restricted`,
+`full_access`, and `otp_required` describe the recommendation only; they are not UI modes that
+POWEROTP applies. Customer code may use or ignore the state under its own policy.
 
 The existing OTP platform is the recovery and confidence mechanism: BotBlocker's `otp`
 decision authorizes the same hosted challenge/iframe surface. Customer code makes one
@@ -55,6 +55,10 @@ the customer adapter stores server-side. The empty same-origin opener request ca
 HttpOnly local gate-session cookie; the adapter resolves its server session and forwards only
 that scoped token to POWEROTP. POWEROTP maps the token's gate session to the internal
 user-intelligence record. Neither the session ID nor public site ID is authorization.
+This BotBlocker opener is separate from ordinary customer-initiated OTP API flows such as
+signup or password recovery. Those APIs use their own customer request/configuration; they do
+not turn BotBlocker recommendations into customer-authored screens or caller-selected
+BotBlocker iframe content.
 BotBlocker's evaluation combines fast signed-clearance checks, local IP intelligence, browser
 consistency, decoy interactions, request velocity, and continuous post-load behavior.
 Ambiguous or high-risk traffic receives an OTP recommendation rather than permanent denial,
@@ -65,8 +69,8 @@ and a previous `allow` or clearance may be revised to `otp`.
 - The Gate Adapter runs in the customer's own request path, gathers trusted data, performs
   initial RapidAuth/session creation with the server-only site credential, uses narrow
   server-held visitor tokens for later calls, and attaches the recommended state. It never
-  blocks, rewrites, replaces, or consumes the customer's response itself; installed customer
-  plugin code enforces the recommendation.
+  blocks, rewrites, replaces, or consumes the customer's response itself. The installed
+  provider reports state only; no generated or supported integration enforces it.
 - A fresh signed site clearance is verified locally with a target of approximately 1 ms.
 - A new-visitor RapidAuth decision targets less than 50 ms added latency from a nearby warm
   edge; this is a target, not a universal network guarantee, and it is independent of the
@@ -75,10 +79,11 @@ and a previous `allow` or clearance may be revised to `otp`.
   "block" outcome. `checking`, fail-open, and unavailable are lifecycle states, not fabricated
   decisions.
 - Website-facing recommendations are derived state, not additional decisions:
-  - `checking` recommends restricted/withheld access.
-  - verified `allow`, timeout fail-open, or unavailable fail-open recommends full access.
-  - verified `otp` recommends restricted access and calling `gate.openOtp()`.
-  - authoritative OTP success recommends full access.
+  - `checking` publishes the `restricted` recommendation label.
+  - verified `allow`, timeout fail-open, or unavailable fail-open publishes `full_access`.
+  - verified `otp` publishes `otp_required` and exposes explicit `gate.openOtp()`.
+  - authoritative OTP success publishes `full_access`.
+  These labels never cause POWEROTP code to alter customer content or access.
 - Every visitor is reassessed continuously, not just once: an initial browser/behavior report
   five seconds after load, recurring reports every 30 seconds, and partial reports on route
   navigation, page hide, close, or site exit. Every report is saved to the visitor's session
@@ -95,9 +100,10 @@ and a previous `allow` or clearance may be revised to `otp`.
   trails), and honeypot activations. Raw keystrokes, passwords, emails, DOM snapshots, page
   content, and arbitrary CSS selectors are never collected.
 - PowerOTP owns risk weights, thresholds, threat feeds, challenge logic, and sensor cadence.
-- Customers select protected routes, purchased OTP methods, optional PowerOTP-hosted
-  CleanDataPages for agent access, the decision timeout (50–2,000 ms, 200 ms default), and
-  emergency bypass behavior.
+- Advisory state is attached to every customer application request except fixed owned,
+  infrastructure, static, health, `OPTIONS`, and WebSocket exclusions. Customers select
+  purchased OTP methods, optional POWEROTP-hosted CleanDataPages for agent access, the decision
+  timeout (50–2,000 ms, 200 ms default), and emergency behavior in their own code.
 - Customers cannot choose the OTP method/content at iframe-open time. The single
   `gate.openOtp()` call accepts no method, policy, or challenge-content arguments; POWEROTP
   resolves the session's configured method server-side.
@@ -133,9 +139,9 @@ and a previous `allow` or clearance may be revised to `otp`.
 
 ## System flow
 
-POWEROTP controls the recommended website state through an additive plugin protocol. The
-customer's installed code is the enforcement point: it is expected to honor that state, but
-POWEROTP cannot technically force compliance or alter customer code/content by itself.
+POWEROTP publishes recommended website state through an additive plugin protocol. Publication
+is the end of POWEROTP's authority over the customer application: customer code alone decides
+whether and how to act, and the supported integration never enforces a response.
 
 ```mermaid
 flowchart LR
@@ -169,7 +175,7 @@ continues the visitor gate session, collects trusted request/IP context, communi
 POWEROTP using the customer's server-only site credential for first contact and scoped
 server-held tokens thereafter, attaches a recommendation snapshot to framework-native request
 state, and lets the customer handler/response continue untouched. Customer plugin code is
-expected to enforce the snapshot in its own SSR, routes, APIs, and rendering.
+free to consume or ignore the snapshot under customer-owned policy.
 
 - Verifies PowerOTP Ed25519-signed clearances and signed policy locally.
 - Extracts client IP only from platform-approved trusted proxy headers.
@@ -197,8 +203,8 @@ integration when a wrapper changes:
   share — see [Phase 1](POWEROTP_BOTBLOCKER_DEVELOPMENT_PHASES.md#phase-1--base-protocol-contracts).
 
 Reference TypeScript/Node/React installation (Express shown; the raw Node HTTP and Next.js
-wrappers expose the same `siteId`/`siteCredential`/timeout/`protect` options over their own
-idiomatic APIs):
+wrappers expose the same `siteId`/`siteCredential`/timeout options over their own idiomatic
+APIs):
 
 ```typescript
 import express from "express";
@@ -209,10 +215,8 @@ const botBlocker = createPowerOtpBotBlocker({
   siteId: process.env.POWEROTP_SITE_ID!,
   siteCredential: process.env.POWEROTP_SITE_CREDENTIAL!,
   audience: "https://customer.example",
-  verificationKeys,
+  verificationKeys, // from the Signed Policy Client below; Phase 14A automates this
   decisionTimeoutMs: 200, // 50-2000, 200 recommended
-  protect: ({ path, method }) =>
-    method !== "OPTIONS" && !path.startsWith("/.well-known/health"),
 });
 
 app.use(botBlocker.middleware());
@@ -223,8 +227,9 @@ app.get("/{*path}", renderReactApplication);
 
 The middleware must precede static, SSR, and API handlers so it can attach trusted request
 state and own `/_powerotp/*` bridge routes. It does not block those handlers, consume customer
-bodies, or rewrite customer responses. React integrations receive an additive provider/hook;
-the customer chooses where to mount it and how its state affects rendering.
+bodies, or rewrite customer responses. Fixed technical exclusions are adapter-owned; there is
+no selective-route enforcement callback. React integrations receive an additive provider/hook
+that reports state without affecting rendering.
 
 ### Signed Policy Client
 
@@ -233,6 +238,12 @@ The installed adapter remains stable while centrally controlled behavior arrives
 - Policy fields include version, activation, expiration, site audience, protocol compatibility, risk weights, challenge mapping, edge endpoints, sensor version, verification keys, dataset versions, and revocation-filter metadata.
 - The adapter verifies Ed25519 signatures and schema before activation.
 - It caches a last-known-good policy and rejects unauthorized rollback.
+- Verification keys arrive through this same signed policy fetch, resolved from only the public
+  `siteId` — not typed in by the customer. Phase 7 shipped the signed release and endpoint with a
+  key-*ID* reference only; Phase 14A
+  (see [`POWEROTP_BOTBLOCKER_DEVELOPMENT_PHASES.md`](POWEROTP_BOTBLOCKER_DEVELOPMENT_PHASES.md#phase-14a--automatic-verification-key-delivery))
+  adds the real key material to the release and the adapter-side fetch client that consumes it,
+  after which `verificationKeys` stops being a constructor value a customer supplies directly.
 - The only visitor-facing decision values are `allow` and `otp`; policy fields such as
   `agent_access` eligibility or browser-check cadence configure *how* PowerOTP arrives at that
   decision, they never add a third outcome.
@@ -336,9 +347,9 @@ Passport/user-intelligence record when present, and project-scoped customer visi
 ### Browser State SDK, OTP Opener, and Runtime Sensor
 
 The credential-free browser SDK publishes current state and recommendation changes without
-changing the customer's DOM itself. The supported customer integration uses that state to
-place its own protected UI into restricted/withheld, full-access, or OTP-required mode.
-When state is `otp`, customer code may call the one argument-free `gate.openOtp()` API.
+changing the customer's DOM itself. It does not place customer UI into any mode or prescribe a
+rendering branch. Customer code alone decides whether and how to use the state. When state is
+`otp`, customer code may explicitly call the one argument-free `gate.openOtp()` API.
 POWEROTP then validates the site/session decision server-side and returns short-lived metadata
 for the server-selected hosted iframe. The customer cannot select the OTP method or iframe
 content in that call. Session continuity comes from the same-origin HttpOnly cookie, not a
@@ -542,9 +553,8 @@ capability:
   apply.
 
 All three must handle trusted proxy IPs, CORS, health routes, callbacks, streaming, uploads,
-WebSockets, SSR, static files, and protected APIs explicitly. All three expose the same
-plugin-directed state, timeout, and `allow | otp` recommendation behavior; customer integration
-code performs enforcement.
+WebSockets, SSR, static files, and APIs explicitly. All three expose the same advisory state,
+timeout, and `allow | otp` recommendation behavior without enforcing customer action.
 
 ### Lovable
 
@@ -552,11 +562,14 @@ Use Lovable's advanced “Domain uses Cloudflare or a similar proxy” mode with
 
 - Public MCP explains how to locate the Lovable origin and deploy the reviewed Worker template.
 - The customer or their AI performs deployment and stores PowerOTP credentials in Worker secrets.
-- The Worker gates locally, calls RapidAuth when needed, and forwards only approved requests to Lovable.
-- Cloudflare HTMLRewriter inserts the sensor only into eligible HTML.
+- The Worker gathers trusted context, calls RapidAuth when needed, and forwards customer
+  requests untouched with bounded advisory state.
+- Customer-owned Lovable code mounts the credential-free provider/sensor explicitly; the Worker
+  does not inject or rewrite HTML.
 - Platform verification, certificates, health, callbacks, assets, and configured APIs receive explicit handling.
 - PowerOTP does not relay the customer's page content.
-- Without a supported edge proxy, Lovable receives only a clearly labeled soft/action-protection script.
+- Without a supported edge proxy, Lovable receives only credential-free advisory browser state;
+  POWEROTP still does not enforce customer behavior.
 
 ### Later adapters
 
@@ -633,7 +646,7 @@ decision, score, or approval. The exact request/response shapes are defined in
 - Apply separate retention and decay to IP, network, device, session, account, and Passport evidence.
 - Perform privacy/legal review before cross-site reputation launch.
 - See [`THREAT_MODEL.md`](THREAT_MODEL.md#botblocker-threat-model) for the full BotBlocker
-  threat model, including the plugin-instruction/customer-enforcement boundary, API-key
+  threat model, including the state-publication/customer-control boundary, API-key
   separation, and cross-project data-access controls.
 
 ## Development phases

@@ -6,12 +6,12 @@ export {
 } from "./adapter.js";
 export { withPowerOtpFrameSource } from "./csp.js";
 export type {
+  AdvisoryRequestState,
   GateNodeEvent,
   GateNodeLimits,
   GateNodeServices,
   GateSession,
   GateSessionStore,
-  ProtectedRequestState,
   TrustedProxyConfig,
 } from "@powerotp/gate-node";
 

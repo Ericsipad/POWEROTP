@@ -35,7 +35,7 @@ afterEach(async () => {
   );
 });
 
-test("minimal React fixture serves protected markup and excluded assets", async () => {
+test("minimal React fixture serves customer markup and excluded assets", async () => {
   const app = createGateExpressFixture({
     siteId,
     audience,

@@ -8,6 +8,7 @@ import {
 import { CreateVerificationSchema, VerificationTypeSchema } from "@powerotp/contracts";
 import { z } from "zod";
 
+import { registerBotBlockerCapabilities } from "./botblocker/tools.js";
 import {
   buildExample,
   buildModalSessionExample,
@@ -143,6 +144,8 @@ export function createMcpApp() {
       content: [{ type: "text", text: buildModalSessionExample(language) }],
     }),
   );
+
+  registerBotBlockerCapabilities(mcp);
 
   mcp.registerTool(
     "validate_request_shape",

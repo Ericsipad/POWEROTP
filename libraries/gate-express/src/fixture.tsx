@@ -35,7 +35,6 @@ export function createGateExpressFixture(options: {
   const gate = createPowerOtpBotBlocker({
     ...options,
     cookieSecure: false,
-    protect: ({ path }) => path === "/" || path.startsWith("/api/"),
   });
 
   app.use(gate.middleware());

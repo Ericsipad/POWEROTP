@@ -29,7 +29,6 @@ test("signed clearance is local, bound, and cannot override active OTP", async (
   let decisionCalls = 0;
   const adapter = createPowerOtpNext(baseOptions({
     sessionStore: store,
-    protect: () => true,
     services: {
       requestDecision() {
         decisionCalls += 1;
@@ -62,7 +61,7 @@ test("signed clearance is local, bound, and cannot override active OTP", async (
     event([]),
   );
   assert.equal(decisionCalls, 0);
-  assert.equal(adapter.getRequestState(forwardedHeaders(cleared)).access, "clearance");
+  assert.equal(adapter.getRequestState(forwardedHeaders(cleared)).status, "clearance");
 
   const session = await store.get(gateSessionId);
   assert.ok(session);
@@ -82,12 +81,11 @@ test("signed clearance is local, bound, and cannot override active OTP", async (
   );
   await Promise.all(conflictWaits);
   assert.equal(decisionCalls, 0);
-  assert.equal(adapter.getRequestState(forwardedHeaders(conflicted)).access, "otp");
+  assert.equal(adapter.getRequestState(forwardedHeaders(conflicted)).status, "otp");
 });
 
 test("late allow issues clearance only after decision and clearance verification", async () => {
   const adapter = createPowerOtpNext(baseOptions({
-    protect: () => true,
     services: {
       requestDecision: async (_context, session) => {
         const now = Date.now();
@@ -140,7 +138,6 @@ test("timeout publishes fail-open while pending work can publish a late allow", 
   });
   const adapter = createPowerOtpNext(baseOptions({
     decisionTimeoutMs: 50,
-    protect: () => true,
     services: {
       requestDecision(_request, session) {
         decisionSession = session;
@@ -161,8 +158,8 @@ test("timeout publishes fail-open while pending work can publish a late allow", 
     event([]),
   );
   const failOpen = adapter.getRequestState(forwardedHeaders(timedOut));
-  assert.equal(failOpen.access, "fail_open");
-  if (failOpen.protected) assert.equal(failOpen.recommendation.decisionPending, true);
+  assert.equal(failOpen.status, "fail_open");
+  if (failOpen.advisory) assert.equal(failOpen.recommendation.decisionPending, true);
 
   resolveDecision({
     status: "decision",
@@ -177,8 +174,8 @@ test("timeout publishes fail-open while pending work can publish a late allow", 
     event([]),
   );
   const allowed = adapter.getRequestState(forwardedHeaders(late));
-  assert.equal(allowed.access, "allow");
-  if (allowed.protected) {
+  assert.equal(allowed.status, "allow");
+  if (allowed.advisory) {
     assert.equal(allowed.recommendation.lifecycle, "observing");
     assert.equal(allowed.recommendation.decisionPending, false);
   }
@@ -190,7 +187,6 @@ test("first contact uses the credential and later calls use only the server-held
   let firstPath: string | undefined;
   let laterToken: string | undefined;
   const adapter = createPowerOtpNext(baseOptions({
-    protect: () => true,
     services: {
       requestDecision(request, session) {
         requestCalls += 1;
@@ -262,7 +258,6 @@ test("late OTP persists across polling failure until authoritative acknowledgeme
     resolveDecision = resolve;
   });
   const adapter = createPowerOtpNext(baseOptions({
-    protect: () => true,
     services: {
       requestDecision(_context, session) {
         decisionSession = session;
@@ -296,7 +291,7 @@ test("late OTP persists across polling failure until authoritative acknowledgeme
     request("/private", { headers: { cookie: gateCookie } }),
     event([]),
   )));
-  assert.equal(failOpen.access, "fail_open");
+  assert.equal(failOpen.status, "fail_open");
   resolveDecision({
     status: "decision",
     visitorToken,
@@ -313,8 +308,8 @@ test("late OTP persists across polling failure until authoritative acknowledgeme
     request("/private", { headers: { cookie: gateCookie } }),
     event([]),
   )));
-  assert.equal(otpState.access, "otp");
-  if (otpState.protected) assert.equal(otpState.recommendation.lifecycle, "otp_required");
+  assert.equal(otpState.status, "otp");
+  if (otpState.advisory) assert.equal(otpState.recommendation.lifecycle, "otp_required");
   const opened = await adapter.route(emptyPostBridgeRequest(
     "/_powerotp/challenge/open",
     gateCookie,
@@ -360,7 +355,6 @@ function baseOptions(overrides: Partial<GateNextOptions>): GateNextOptions {
     siteCredential,
     verificationKeys,
     decisionTimeoutMs: 50,
-    protect: () => false,
     ...overrides,
   };
 }

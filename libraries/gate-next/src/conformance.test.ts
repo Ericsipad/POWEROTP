@@ -65,7 +65,6 @@ function options() {
     audience,
     siteCredential,
     verificationKeys,
-    protect: ({ path }: { path: string }) => path === "/private",
   };
 }
 

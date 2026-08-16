@@ -151,26 +151,27 @@ until the Phase 27 Cloudflare Worker takeover; the takeover must preserve the or
 authentication/audience semantics. Operator traffic crosses a distinct, authenticated
 `/v1/control/botblocker/*` boundary and must never be authorized by a runtime site credential.
 
-### Plugin instruction and customer-enforcement boundary
+### State-publication and customer-control boundary
 
 POWEROTP controls recommended website state through an additive plugin protocol. Its adapters
 collect approved evidence, communicate server-to-server using the customer site's credential
-and visitor gate session, and publish state. Installed customer code is expected to enforce the
-instruction, but POWEROTP itself cannot rewrite customer routes, suppress responses, or freeze
-customer DOM. This is a trust boundary, not merely a packaging choice:
+and visitor gate session, and publish state. Publication is the end of POWEROTP's control over
+the customer application. Supported integration code does not enforce the recommendation and
+cannot rewrite customer routes, suppress responses, branch rendering, or freeze customer DOM.
+This is a trust boundary, not merely a packaging choice:
 
-- A customer that wants pre-content gating must deliberately defer its own protected SSR,
-  data fetches, routes, and client rendering while POWEROTP reports `checking`.
-- POWEROTP cannot technically guarantee that customer enforcement code followed `allow`/`otp`,
-  and cannot retract content the customer already delivered. Product/security claims must
-  never imply otherwise.
-- Recommendation mapping is fixed: checking means restricted/withheld; verified allow or
-  fail-open means full access; verified OTP means restricted plus call OTP; authoritative OTP
-  success means full access. These states do not add a third backend decision.
+- Customer code may independently use or ignore advisory state under its own policy. That
+  optional customer behavior is not part of the POWEROTP adapter/provider.
+- POWEROTP does not verify what customer code did and cannot retract content the customer
+  delivered. Product/security claims must never imply enforcement.
+- Recommendation labels are fixed: checking publishes `restricted`; verified allow or fail-open
+  publishes `full_access`; verified OTP publishes `otp_required`; authoritative OTP success
+  publishes `full_access`. These labels cause no content/access effect and do not add a third
+  backend decision.
 - The 50–2,000 ms setting publishes fail-open access state on timeout/network failure. It is a
   responsiveness/availability rule, not a signed backend `allow`; pending work continues.
-- A verified late `otp` updates advisory state. Customer code chooses whether to close access
-  and call the single argument-free `gate.openOtp()` API.
+- A verified late `otp` updates advisory state. Customer code chooses whether to do anything,
+  including whether to call the single argument-free `gate.openOtp()` API.
 - Phase 13B removes the former automatic page lock. A verified `otp` changes advisory state
   only; page-lock/iframe effects, sensor pause, and polling begin only after explicit
   `gate.openOtp()` invocation. Phase 13C attaches the same closed recommendation snapshots to
@@ -202,6 +203,9 @@ customer DOM. This is a trust boundary, not merely a packaging choice:
 - `gate.openOtp()` accepts no method, policy, or content selection and never accepts a site
   credential. The server derives the iframe launch from the authenticated site/session's
   authoritative `otp` decision.
+- This BotBlocker opener is not the ordinary customer OTP API used for signup, password
+  recovery, or other customer-initiated verification. Those flows have separate authorization
+  and customer request/configuration; neither flow supplies customer-authored BotBlocker UI.
 - The browser sends an empty same-origin opener request. Its HttpOnly gate-session cookie binds
   the visitor; the customer server resolves trusted site/session state and forwards the
   server-held token minted during site-credential-authenticated first contact. A gate-session
@@ -338,10 +342,9 @@ customer DOM. This is a trust boundary, not merely a packaging choice:
   than fabricated allow.
 - The root Next.js provider uses the Phase 13B `getSnapshot`/`subscribe` contract and survives
   App Router navigation. It does not rewrite, redirect, buffer, inject, suppress rendering, or
-  open an iframe. The whole-site fixture's customer root renders ordinary customer content only
-  for full access, otherwise returns `null`, and explicitly invokes argument-free `openOtp()` for
-  an OTP recommendation. It creates no placeholder screen or customer-authored OTP content; the
-  server-selected hosted iframe is the only visible POWEROTP challenge UI.
+  open an iframe. The fixture requests advisory state for the whole customer application but
+  always renders customer content untouched. The provider only reports state and exposes
+  argument-free `openOtp()`; customer code alone decides whether to act on either.
 
 ### Direct-origin bypass
 
@@ -354,8 +357,8 @@ customer DOM. This is a trust boundary, not merely a packaging choice:
   installation output must state it plainly and recommend the customer restrict direct origin
   access at their own network/CDN layer.
 - Later Cloudflare-edge/customer-owned-Worker adapters improve request-path coverage but do not
-  change the plugin-instruction/customer-enforcement boundary unless a customer independently
-  configures its own edge enforcement.
+  change the state-publication/customer-control boundary. Any customer-owned edge behavior is
+  independent customer policy, not POWEROTP enforcement.
 
 ### Cross-project data access
 
@@ -416,5 +419,33 @@ it is added, and a field that cannot be justified as one of the "Allowed" rows m
 This mirrors the existing rule that PowerOTP's OTP platform never logs answers, tokens, or
 secrets (see [Enumeration and privacy](#enumeration-and-privacy) and
 [Challenge disclosure or manipulation](#challenge-disclosure-or-manipulation) above).
+
+### Public MCP generator
+
+Phase 14 implements the `apps/mcp` BotBlocker resources/tools referenced in
+[`POWEROTP_BOTBLOCKER_PLAN.md`](POWEROTP_BOTBLOCKER_PLAN.md#public-mcp-instruction-system) and
+in the ["MCP abuse"](#mcp-abuse) control above, which already required MCP to stay anonymous,
+read-only, and rate-limited/separately deployable.
+
+- Every BotBlocker MCP tool accepts a strict Zod-validated input (an adapter enum and, for one
+  verification tool, a caller-supplied checksum string) and never a credential, token, project
+  ID, or account identifier. No tool reads a database, a customer's account, or another
+  customer's data — there is nothing for it to read; the generator only assembles static,
+  versioned template content and computed checksums.
+- Generated `node-http`/`express`/`nextjs` file content references only environment-variable
+  *names* (`POWEROTP_SITE_ID`, `POWEROTP_SITE_CREDENTIAL`,
+  `POWEROTP_VERIFICATION_KEY_ID`/`_PUBLIC_KEY_SPKI_BASE64`, and their optional previous-key
+  rotation counterparts) through `process.env.*` reads. `manifest.test.ts` asserts no file
+  contains a literal credential-shaped value, a PEM private-key header, or a customer-hosted
+  CleanDataPage/`aisummary` route, and that the three adapters' manifests are distinct and
+  independently checksummed.
+- The generator performs no account management, deployment, repository mutation, dashboard
+  mutation, or hosting configuration; it returns text and JSON for the caller's own AI/developer
+  to apply. It cannot install anything, run anything on the caller's infrastructure, or
+  authenticate as anyone.
+- Because self-service dashboard issuance of a BotBlocker site credential and verification key
+  pair does not exist yet (Phase 5 deliberately created none), the generator's own environment-
+  variable guidance states that plainly rather than describing an unbuilt provisioning flow —
+  MCP output must never claim a capability the rest of the product has not shipped.
 
 This document is an engineering threat model, not legal advice.

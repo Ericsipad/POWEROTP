@@ -120,22 +120,22 @@ export type GateNodeEvent =
   | { type: "invalid_request"; route: "bridge" | "application" }
   | { type: "request_error"; route: "bridge" | "application" };
 
-export type ProtectedRequestState =
+export type AdvisoryRequestState =
   | {
-      protected: false;
-      access: "excluded";
+      advisory: false;
+      status: "excluded";
     }
   | {
-      protected: true;
-      access: "checking" | "clearance" | "fail_open" | "allow" | "otp" | "unavailable";
+      advisory: true;
+      status: "checking" | "clearance" | "fail_open" | "allow" | "otp" | "unavailable";
       sessionId?: string;
       recommendation: GateRecommendationSnapshot;
     };
 
-export type ProtectedRouteHandler = (
+export type AdvisoryRouteHandler = (
   request: IncomingMessage,
   response: ServerResponse,
-  state: ProtectedRequestState,
+  state: AdvisoryRequestState,
 ) => void | Promise<void>;
 
 export interface GateNodeOptions {
@@ -143,8 +143,7 @@ export interface GateNodeOptions {
   siteCredential: string;
   audience: string;
   verificationKeys: BotBlockerVerificationKeySet;
-  protect(context: RequestContext): boolean;
-  handle: ProtectedRouteHandler;
+  handle: AdvisoryRouteHandler;
   services?: Partial<GateNodeServices>;
   decisionTimeoutMs?: number;
   trustedProxy?: TrustedProxyConfig;

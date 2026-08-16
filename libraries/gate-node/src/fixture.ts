@@ -13,13 +13,12 @@ export function createGateNodeFixture(options: {
   return createPowerOtpServer({
     ...options,
     cookieSecure: false,
-    protect: ({ path }) => path === "/" || path.startsWith("/api/"),
     handle(_request, response, state) {
       if (response.headersSent) return;
       const body = JSON.stringify({
         fixture: "gate-node",
-        protected: state.protected,
-        access: state.access,
+        advisory: state.advisory,
+        status: state.status,
       });
       response.writeHead(200, {
         "content-type": "application/json; charset=utf-8",

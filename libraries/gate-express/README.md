@@ -5,7 +5,7 @@ Express 5 middleware for the shared POWEROTP BotBlocker gate protocol.
 ## Ordering
 
 Create the gate with server-only configuration and mount it at the application root
-before body parsers, static files, SSR, protected APIs, and React handlers:
+before body parsers, static files, SSR, APIs, and React handlers:
 
 ```ts
 const gate = createPowerOtpBotBlocker({
@@ -13,7 +13,6 @@ const gate = createPowerOtpBotBlocker({
   siteCredential: process.env.POWEROTP_SITE_CREDENTIAL!,
   audience: "https://customer.example",
   verificationKeys,
-  protect: ({ path }) => path === "/" || path.startsWith("/api/"),
 });
 
 app.use(gate.middleware());
@@ -30,19 +29,20 @@ The early mount is required because the gate owns `/_powerotp/*` JSON bodies and
 
 Use `PowerOtpBrowserGate` from `@powerotp/gate-express/react` in the React root.
 It contains no site credential and obtains its sequence and restored OTP state from
-the same-origin server bridge.
+the same-origin server bridge. It reports state and runs the approved sensor; it never
+changes customer rendering or calls `openOtp()` automatically.
 
 ## Request behavior
 
 - Application responses continue immediately. A pending, rejected, or throwing
   decision service does not delay or cancel customer work.
-- Health, infrastructure, framework-static, asset, discovery, bridge, and `OPTIONS`
-  requests are always excluded before the customer `protect` callback.
+- Advisory state is attached to every customer application request. Health, infrastructure,
+  framework-static, asset, discovery, bridge, `OPTIONS`, and WebSocket requests are fixed
+  technical exclusions; there is no selective-route callback.
 - Application JSON, multipart uploads, request streams, response streams, and
   compressed responses are passed through without body consumption or response
-  rewriting. The React root helper supplies browser integration where HTML injection
-  would be unsafe.
-- WebSocket upgrades are not gated. Normal Node `upgrade` events bypass Express;
+  rewriting. The React root helper supplies state and sensing without HTML injection.
+- WebSocket upgrades receive no advisory state. Normal Node `upgrade` events bypass Express;
   upgrade-shaped requests that reach the router are explicitly passed through.
 - Express error middleware remains authoritative for downstream errors. After headers
   are sent it must delegate or destroy the response rather than write a second body.
@@ -63,6 +63,7 @@ must inject a bounded shared `GateSessionStore` that preserves active OTP sessio
 CleanDataPage discovery may reference POWEROTP-hosted HTTPS metadata only; this package
 does not create customer CleanDataPage routes.
 
-This application-layer middleware protects only requests that reach this Express process.
+This application-layer middleware can publish state only for requests that reach this Express process.
 Deployments behind a CDN or load balancer must independently restrict direct-origin and
-alternate-path access; BotBlocker cannot gate traffic that bypasses the application.
+alternate-path access; BotBlocker cannot observe or publish state for traffic that bypasses the
+application.

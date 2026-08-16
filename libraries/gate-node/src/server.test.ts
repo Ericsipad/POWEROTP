@@ -32,14 +32,8 @@ afterEach(async () => {
   );
 });
 
-test("infrastructure, health, and static routes cannot be protected", async () => {
-  let protectCalls = 0;
-  const { origin } = await start({
-    protect() {
-      protectCalls += 1;
-      return true;
-    },
-  });
+test("infrastructure, health, and static routes receive excluded state", async () => {
+  const { origin } = await start();
   for (const path of [
     "/health",
     "/.well-known/health/live",
@@ -48,23 +42,20 @@ test("infrastructure, health, and static routes cannot be protected", async () =
   ]) {
     const response = await fetch(`${origin}${path}`);
     assert.equal(response.status, 200);
-    assert.equal((await response.json()).access, "excluded");
+    assert.equal((await response.json()).status, "excluded");
   }
-  assert.equal(protectCalls, 0);
   const api = await fetch(`${origin}/api/data.json`);
-  assert.equal((await api.json()).access, "checking");
-  assert.equal(protectCalls, 1);
+  assert.equal((await api.json()).status, "checking");
 });
 
 test("raw Node leaves application routes, request bodies, and response streams untouched", async () => {
   const { origin } = await start({
-    protect: () => true,
     async handle(request, response, state) {
       const chunks: Buffer[] = [];
       for await (const chunk of request) {
         chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
       }
-      response.write(`${request.url}|${state.access}|`);
+      response.write(`${request.url}|${state.status}|`);
       setTimeout(() => response.end(Buffer.concat(chunks)), 10);
     },
   });
@@ -87,7 +78,6 @@ test("timeout fails open and leaves the decision pending", async () => {
   });
   const { origin } = await start({
     decisionTimeoutMs: 50,
-    protect: () => true,
     services: {
       requestDecision(_request, session) {
         currentSession = session;
@@ -103,7 +93,7 @@ test("timeout fails open and leaves the decision pending", async () => {
       setTimeout(() => reject(new Error("Application response waited for decision timeout")), 250),
     ),
   ]);
-  assert.equal((await first.json()).access, "checking");
+  assert.equal((await first.json()).status, "checking");
   const cookie = sessionCookie(first);
   await submitInitialEvidence(origin, cookie);
   const deliveredPromise = fetch(`${origin}/_powerotp/decision`, {
@@ -114,7 +104,7 @@ test("timeout fails open and leaves the decision pending", async () => {
   await new Promise((resolve) => setTimeout(resolve, 75));
   const timedOut = await fetch(`${origin}/private`, { headers: { cookie } });
   const timedOutState = await timedOut.json();
-  assert.equal(timedOutState.access, "fail_open");
+  assert.equal(timedOutState.status, "fail_open");
   assert.equal(timedOutState.recommendation.decisionPending, true);
   await waitFor(() => currentSession !== undefined);
   resolveDecision({
@@ -133,7 +123,7 @@ test("timeout fails open and leaves the decision pending", async () => {
   assert.equal(verified.status, 200);
   const late = await fetch(`${origin}/private`, { headers: { cookie } });
   const lateState = await late.json();
-  assert.equal(lateState.access, "allow");
+  assert.equal(lateState.status, "allow");
   assert.equal(lateState.recommendation.lifecycle, "observing");
   assert.equal(lateState.recommendation.decisionPending, false);
 });
@@ -154,7 +144,6 @@ test("late OTP replaces fail-open and cannot be overwritten by timeout or cleara
   });
   let currentSession: Readonly<GateSession> | undefined;
   const { origin } = await start({
-    protect: () => true,
     decisionTimeoutMs: 50,
     services: {
       requestDecision(_request, session) {
@@ -175,7 +164,7 @@ test("late OTP replaces fail-open and cannot be overwritten by timeout or cleara
   await waitFor(() => currentSession !== undefined);
   await new Promise((resolve) => setTimeout(resolve, 75));
   assert.equal(
-    (await (await fetch(`${origin}/private`, { headers: { cookie } })).json()).access,
+    (await (await fetch(`${origin}/private`, { headers: { cookie } })).json()).status,
     "fail_open",
   );
   resolveDecision({
@@ -221,14 +210,13 @@ test("late OTP replaces fail-open and cannot be overwritten by timeout or cleara
     },
   });
   const body = await state.json();
-  assert.equal(body.access, "otp");
+  assert.equal(body.status, "otp");
   assert.equal(body.recommendation.lifecycle, "otp_required");
   assert.equal(body.recommendation.decision, "otp");
 });
 
 test("locally verifies and issues a hardened signed clearance cookie", async () => {
   const { origin } = await start({
-    protect: () => true,
     services: {
       async requestDecision(_context, session) {
         const candidate = decision("allow", session);
@@ -258,7 +246,7 @@ test("locally verifies and issues a hardened signed clearance cookie", async () 
   });
 
   const page = await fetch(`${origin}/private`);
-  assert.equal((await page.json()).access, "checking");
+  assert.equal((await page.json()).status, "checking");
   await submitInitialEvidence(origin, sessionCookie(page));
   const response = await fetch(`${origin}/_powerotp/decision`, {
     method: "POST",
@@ -275,7 +263,7 @@ test("locally verifies and issues a hardened signed clearance cookie", async () 
     },
   });
   const clearedState = await cleared.json();
-  assert.equal(clearedState.access, "clearance");
+  assert.equal(clearedState.status, "clearance");
   assert.equal(clearedState.recommendation.lifecycle, "observing");
   assert.equal(clearedState.recommendation.decision, "allow");
   assert.ok(!JSON.stringify(await fetchJson(`${origin}/.well-known/powerotp-agent`)).includes("potp_bb_"));
@@ -283,7 +271,6 @@ test("locally verifies and issues a hardened signed clearance cookie", async () 
 
 test("decision bridge validates through the verifier and restores trusted ordering", async () => {
   const { origin } = await start({
-    protect: () => true,
     services: {
       requestDecision: async (_context, session) => ({
         status: "decision",
@@ -326,7 +313,6 @@ test("first contact uses bounded evidence and credential, later calls use only t
   let initialRoute: string | undefined;
   let laterToken: string | undefined;
   const { origin } = await start({
-    protect: () => true,
     services: {
       requestDecision(request, session) {
         requestCalls += 1;
@@ -427,7 +413,6 @@ test("first contact uses bounded evidence and credential, later calls use only t
 test("authoritative verification retains OTP state until browser acknowledgement", async () => {
   let launchFails = true;
   const { origin } = await start({
-    protect: () => true,
     services: {
       requestDecision: async (_context, session) => ({
         status: "decision",
@@ -543,7 +528,7 @@ test("discovery is strict and never creates a customer CleanDataPage route", asy
     },
   });
   const absent = await fetch(`${origin}/powerotp/aisummary`);
-  assert.equal((await absent.json()).access, "excluded");
+  assert.equal((await absent.json()).status, "checking");
 });
 
 test("same-origin bridge rejects cross-origin browser requests before sessions", async () => {
@@ -602,7 +587,6 @@ test("bridge bodies are bounded and unbacked services are typed unavailable", as
 
 test("malformed unavailable responses cannot disclose server credentials", async () => {
   const { origin } = await start({
-    protect: () => true,
     services: {
       requestDecision: async () => ({
         status: "unavailable",
@@ -644,7 +628,6 @@ test("trusted proxy configuration cannot trust all callers", () => {
           trustedRemoteAddresses: ["*"],
           select: "last",
         },
-        protect: () => false,
         handle() {},
       }),
     /explicit IP addresses/,
@@ -680,7 +663,6 @@ test("bounded session store never evicts an active OTP challenge", async () => {
 test("synchronous first-contact failure preserves immediate customer delivery", async () => {
   const { origin } = await start({
     decisionTimeoutMs: 2_000,
-    protect: () => true,
     services: {
       requestDecision() {
         throw new Error("unavailable");
@@ -693,7 +675,7 @@ test("synchronous first-contact failure preserves immediate customer delivery", 
       setTimeout(() => reject(new Error("Application response was delayed")), 250),
     ),
   ]);
-  assert.equal((await response.json()).access, "checking");
+  assert.equal((await response.json()).status, "checking");
   const cookie = sessionCookie(response);
   await submitInitialEvidence(origin, cookie);
   const failed = await fetch(`${origin}/_powerotp/decision`, {
@@ -704,12 +686,11 @@ test("synchronous first-contact failure preserves immediate customer delivery", 
   assert.equal(failed.status, 503);
   assert.equal((await failed.json()).status, "unavailable");
   const state = await fetch(`${origin}/private`, { headers: { cookie } });
-  assert.equal((await state.json()).access, "unavailable");
+  assert.equal((await state.json()).status, "unavailable");
 });
 
 test("an OTP result can never issue its paired clearance", async () => {
   const { origin } = await start({
-    protect: () => true,
     services: {
       async requestDecision(_context, session) {
         return {
@@ -757,7 +738,6 @@ test("an OTP result can never issue its paired clearance", async () => {
 test("an active OTP challenge overrides an earlier valid clearance", async () => {
   const store = createMemoryGateSessionStore();
   const { origin } = await start({
-    protect: () => true,
     sessionStore: store,
   });
   const first = await fetch(`${origin}/private`);
@@ -794,7 +774,7 @@ test("an active OTP challenge overrides an earlier valid clearance", async () =>
       cookie: `${gateCookie}; powerotp_access=${encoded}`,
     },
   });
-  assert.equal((await response.json()).access, "checking");
+  assert.equal((await response.json()).status, "checking");
 });
 
 test("minimal raw Node fixture runs without fabricated decisions", async () => {
@@ -810,8 +790,8 @@ test("minimal raw Node fixture runs without fabricated decisions", async () => {
   const response = await fetch(`http://127.0.0.1:${address.port}/`);
   assert.deepEqual(await response.json(), {
     fixture: "gate-node",
-    protected: true,
-    access: "checking",
+    advisory: true,
+    status: "checking",
   });
 });
 
@@ -822,7 +802,6 @@ async function start(overrides: Partial<GateNodeOptions> = {}) {
     siteCredential,
     verificationKeys,
     decisionTimeoutMs: 50,
-    protect: () => false,
     handle(_request, response, state) {
       const body = JSON.stringify(state);
       response.writeHead(200, { "content-type": "application/json" });

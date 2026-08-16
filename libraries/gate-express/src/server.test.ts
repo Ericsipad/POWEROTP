@@ -10,6 +10,7 @@ import { afterEach, test } from "node:test";
 import { createGzip } from "node:zlib";
 
 import type { RequestContext } from "@powerotp/contracts";
+import { createMemoryGateSessionStore } from "@powerotp/gate-node";
 import express, {
   type ErrorRequestHandler,
   type Express,
@@ -49,9 +50,9 @@ afterEach(async () => {
 test("middleware runs before static, SSR, API, and React handlers", async () => {
   const root = await mkdtemp(join(tmpdir(), "powerotp-express-"));
   temporaryDirectories.push(root);
-  await writeFile(join(root, "protected.txt"), "protected static");
+  await writeFile(join(root, "customer.txt"), "customer static");
   const { origin } = await start(
-    { protect: () => true },
+    {},
     (app) => {
       app.use("/files", express.static(root, { setHeaders: addGateStateHeader }));
       app.get("/ssr", stateHandler("ssr"));
@@ -61,26 +62,20 @@ test("middleware runs before static, SSR, API, and React handlers", async () => 
   );
 
   for (const [path, body] of [
-    ["/files/protected.txt", "protected static"],
+    ["/files/customer.txt", "customer static"],
     ["/ssr", "ssr"],
     ["/api/data", "api"],
     ["/", "react"],
   ]) {
     const response = await fetch(`${origin}${path}`);
-    assert.equal(response.headers.get("x-powerotp-access"), "checking");
+    assert.equal(response.headers.get("x-powerotp-status"), "checking");
     assert.equal(await response.text(), body);
   }
 });
 
 test("health, static, infrastructure, and OPTIONS paths are non-overridable exclusions", async () => {
-  let protectCalls = 0;
   const { origin } = await start(
-    {
-      protect() {
-        protectCalls += 1;
-        return true;
-      },
-    },
+    {},
     (app) => app.use(stateJsonHandler),
   );
 
@@ -92,32 +87,25 @@ test("health, static, infrastructure, and OPTIONS paths are non-overridable excl
     "/static/app.css",
   ]) {
     const response = await fetch(`${origin}${path}`);
-    assert.equal((await response.json()).access, "excluded");
+    assert.equal((await response.json()).status, "excluded");
   }
   const options = await fetch(`${origin}/private`, { method: "OPTIONS" });
-  assert.equal((await options.json()).access, "excluded");
-  assert.equal(protectCalls, 0);
+  assert.equal((await options.json()).status, "excluded");
 });
 
 test("direct socket IP is authoritative and spoofed forwarding headers are ignored", async () => {
-  const contexts: RequestContext[] = [];
+  const store = createMemoryGateSessionStore();
   const { origin } = await start(
-    {
-      protect(context) {
-        contexts.push(context);
-        return true;
-      },
-    },
+    { sessionStore: store },
     (app) => app.use(stateJsonHandler),
   );
-  await fetch(`${origin}/private`, {
+  const response = await fetch(`${origin}/private`, {
     headers: {
       "x-forwarded-for": "198.51.100.10",
       "x-real-ip": "198.51.100.11",
     },
   });
-  await waitFor(() => contexts.length === 1);
-  assert.equal(contexts[0]?.clientIp, "127.0.0.1");
+  assert.equal((await storedContext(response, store))?.clientIp, "127.0.0.1");
 });
 
 test("trusted proxy header, count, and first/last selection are explicit", async () => {
@@ -126,13 +114,10 @@ test("trusted proxy header, count, and first/last selection are explicit", async
     ["x-forwarded-for", "last", 2, "198.51.100.1, 198.51.100.2", "198.51.100.2"],
     ["x-real-ip", "first", 1, "198.51.100.3", "198.51.100.3"],
   ] as const) {
-    let context: RequestContext | undefined;
+    const store = createMemoryGateSessionStore();
     const { origin, server } = await start(
       {
-        protect(value) {
-          context = value;
-          return true;
-        },
+        sessionStore: store,
         trustedProxy: {
           header,
           select,
@@ -142,8 +127,8 @@ test("trusted proxy header, count, and first/last selection are explicit", async
       },
       (app) => app.use(stateJsonHandler),
     );
-    await fetch(`${origin}/private`, { headers: { [header]: value } });
-    await waitFor(() => context !== undefined);
+    const response = await fetch(`${origin}/private`, { headers: { [header]: value } });
+    const context = await storedContext(response, store);
     assert.equal(context?.clientIp, expected);
     await closeServer(server);
   }
@@ -151,13 +136,10 @@ test("trusted proxy header, count, and first/last selection are explicit", async
 
 test("proxy count mismatch and untrusted proxy forwarding are never accepted", async () => {
   for (const trustedRemoteAddresses of [["127.0.0.1"], ["203.0.113.10"]]) {
-    let context: RequestContext | undefined;
+    const store = createMemoryGateSessionStore();
     const { origin, server } = await start(
       {
-        protect(value) {
-          context = value;
-          return true;
-        },
+        sessionStore: store,
         trustedProxy: {
           header: "x-forwarded-for",
           select: "first",
@@ -167,10 +149,10 @@ test("proxy count mismatch and untrusted proxy forwarding are never accepted", a
       },
       (app) => app.use(stateJsonHandler),
     );
-    await fetch(`${origin}/private`, {
+    const response = await fetch(`${origin}/private`, {
       headers: { "x-forwarded-for": "198.51.100.50" },
     });
-    await waitFor(() => context !== undefined);
+    const context = await storedContext(response, store);
     assert.equal(
       context?.clientIp,
       trustedRemoteAddresses[0] === "127.0.0.1" ? undefined : "127.0.0.1",
@@ -190,7 +172,6 @@ test("customer handlers continue before pending or failing first-contact service
   for (const requestDecision of failures) {
     const { origin, server } = await start(
       {
-        protect: () => true,
         decisionTimeoutMs: 2_000,
         services: { requestDecision },
       },
@@ -202,19 +183,19 @@ test("customer handlers continue before pending or failing first-contact service
         setTimeout(() => reject(new Error("Express response was delayed")), 250),
       ),
     ]);
-    assert.equal((await response.json()).access, "checking");
+    assert.equal((await response.json()).status, "checking");
     await closeServer(server);
   }
 });
 
 test("JSON and multipart uploads pass through without body consumption", async () => {
   const { origin } = await start(
-    { protect: () => true },
+    {},
     (app) => {
       app.post("/upload", express.raw({ type: "*/*", limit: "1mb" }), (request, response) => {
         response.json({
           bytes: Buffer.isBuffer(request.body) ? request.body.length : -1,
-          access: (request as PowerOtpRequest).powerOtp?.access,
+          status: (request as PowerOtpRequest).powerOtp?.status,
         });
       });
     },
@@ -224,7 +205,7 @@ test("JSON and multipart uploads pass through without body consumption", async (
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ private: "customer body" }),
   });
-  assert.deepEqual(await json.json(), { bytes: 27, access: "checking" });
+  assert.deepEqual(await json.json(), { bytes: 27, status: "checking" });
 
   const boundary = "powerotp-test-boundary";
   const multipartBody =
@@ -238,14 +219,13 @@ test("JSON and multipart uploads pass through without body consumption", async (
   });
   assert.deepEqual(await multipart.json(), {
     bytes: Buffer.byteLength(multipartBody),
-    access: "checking",
+    status: "checking",
   });
 });
 
 test("streaming and compressed responses are not buffered or rewritten", async () => {
   const { origin } = await start(
     {
-      protect: () => true,
       services: { requestDecision: () => new Promise<never>(() => undefined) },
     },
     (app) => {
@@ -286,7 +266,7 @@ test("downstream errors before and after headers remain Express-owned", async ()
     next();
   };
   const { origin } = await start(
-    { protect: () => true },
+    {},
     (app) => {
       app.get("/before", () => {
         throw new Error("before headers");
@@ -306,15 +286,9 @@ test("downstream errors before and after headers remain Express-owned", async ()
   assert.equal(sawAfterHeaders, true);
 });
 
-test("WebSocket upgrades bypass Express gate interception", async () => {
-  let protectCalls = 0;
+test("WebSocket upgrades bypass Express advisory interception", async () => {
   const app = express();
-  const gate = createPowerOtpBotBlocker(baseOptions({
-    protect() {
-      protectCalls += 1;
-      return true;
-    },
-  }));
+  const gate = createPowerOtpBotBlocker(baseOptions({}));
   app.use(gate.middleware());
   const server = createServer(app);
   servers.push(server);
@@ -327,12 +301,11 @@ test("WebSocket upgrades bypass Express gate interception", async () => {
   const port = Number(new URL(origin).port);
   const response = await websocketHandshake(port);
   assert.match(response, /^HTTP\/1\.1 101 Switching Protocols/);
-  assert.equal(protectCalls, 0);
 });
 
 test("router API provides the same root-mounted protocol behavior", async () => {
   const app = express();
-  const gate = createPowerOtpBotBlocker(baseOptions({ protect: () => true }));
+  const gate = createPowerOtpBotBlocker(baseOptions({}));
   app.use(gate.router());
   app.use(stateJsonHandler);
   const server = createServer(app);
@@ -340,7 +313,7 @@ test("router API provides the same root-mounted protocol behavior", async () => 
   const origin = await listen(server);
   const response = await fetch(`${origin}/private`);
   const state = await response.json();
-  assert.equal(state.access, "checking");
+  assert.equal(state.status, "checking");
   assert.equal(state.recommendation.lifecycle, "checking");
   assert.equal(state.recommendation.recommendation, "restricted");
 });
@@ -367,7 +340,6 @@ function baseOptions(
     siteCredential,
     verificationKeys,
     decisionTimeoutMs: 50,
-    protect: () => false,
     ...overrides,
   };
 }
@@ -375,8 +347,8 @@ function baseOptions(
 function stateHandler(body: string) {
   return (request: Request, response: Response) => {
     response.setHeader(
-      "x-powerotp-access",
-      (request as PowerOtpRequest).powerOtp?.access ?? "missing",
+      "x-powerotp-status",
+      (request as PowerOtpRequest).powerOtp?.status ?? "missing",
     );
     response.send(body);
   };
@@ -384,7 +356,7 @@ function stateHandler(body: string) {
 
 function addGateStateHeader(response: Response): void {
   const request = response.req as PowerOtpRequest;
-  response.setHeader("x-powerotp-access", request.powerOtp?.access ?? "missing");
+  response.setHeader("x-powerotp-status", request.powerOtp?.status ?? "missing");
 }
 
 function stateJsonHandler(request: Request, response: Response): void {
@@ -410,6 +382,18 @@ async function closeServer(server: Server): Promise<void> {
   const index = servers.indexOf(server);
   if (index >= 0) servers.splice(index, 1);
   await new Promise<void>((resolve) => server.close(() => resolve()));
+}
+
+async function storedContext(
+  response: globalThis.Response,
+  store: ReturnType<typeof createMemoryGateSessionStore>,
+): Promise<RequestContext | undefined> {
+  const cookie = response.headers
+    .getSetCookie()
+    .find((value) => value.startsWith("powerotp_gate="));
+  assert.ok(cookie);
+  const sessionId = cookie.slice(cookie.indexOf("=") + 1, cookie.indexOf(";"));
+  return (await store.get(sessionId))?.requestContext;
 }
 
 async function firstResponseChunk(url: string): Promise<string> {
@@ -443,12 +427,4 @@ async function websocketHandshake(port: number): Promise<string> {
     socket.on("end", () => resolve(value));
     socket.on("error", reject);
   });
-}
-
-async function waitFor(condition: () => boolean): Promise<void> {
-  const deadline = Date.now() + 1_000;
-  while (!condition()) {
-    if (Date.now() >= deadline) throw new Error("Timed out waiting for condition");
-    await new Promise((resolve) => setTimeout(resolve, 1));
-  }
 }
