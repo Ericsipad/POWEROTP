@@ -23,17 +23,31 @@ umask 027
 readonly ROOT=/opt/powerotp
 ARCHIVE="$(mktemp /tmp/potp-deploy.XXXXXXXX.tar.gz)"
 readonly ARCHIVE
-trap 'rm -f "$ARCHIVE"' EXIT
+STAGE="$(mktemp -d /tmp/potp-release.XXXXXXXX)"
+readonly STAGE
+trap 'rm -f "$ARCHIVE"; rm -rf "$STAGE"' EXIT
 
 cat > "$ARCHIVE"
 
 # Reject anything that is not a readable gzip tarball before touching $ROOT.
 tar -tzf "$ARCHIVE" > /dev/null
 
-tar -xzf "$ARCHIVE" --no-same-owner -C "$ROOT"
-cd "$ROOT"
+# Build in a fresh tree so files removed or moved in Git can never survive
+# from an older release and create duplicate npm workspaces.
+tar -xzf "$ARCHIVE" --no-same-owner -C "$STAGE"
+cd "$STAGE"
 npm ci
 npm run build -w @powerotp/contracts -w @powerotp/telephony-agent
+
+# Replace the release only after the fresh tree builds successfully. The
+# running Node process keeps its loaded code until the restart below.
+shopt -s dotglob nullglob
+existing=("$ROOT"/*)
+if ((${#existing[@]} > 0)); then
+  rm -rf -- "${existing[@]}"
+fi
+shopt -u dotglob nullglob
+cp -a "$STAGE"/. "$ROOT"/
 
 sudo -n /usr/bin/systemctl restart powerotp-agent
 sleep 2
