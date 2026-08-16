@@ -1,8 +1,18 @@
 import { RiskEventsRequestSchema } from "@powerotp/contracts";
 
 import { apiRoute } from "@/lib/api-route";
-import { unavailableRuntimeMutation } from "@/lib/botblocker-http";
+import { runtimeMutation } from "@/lib/botblocker-http";
 
 export const POST = apiRoute((request) =>
-  unavailableRuntimeMutation(request, RiskEventsRequestSchema, "risk-events"),
+  runtimeMutation(
+    request,
+    RiskEventsRequestSchema,
+    "risk-events",
+    async (body, site, context) => {
+      await context.botBlockerIngestion.ingestRiskEvents(
+        site,
+        body.payload.batch,
+      );
+    },
+  ),
 );

@@ -64,6 +64,64 @@ describe("BrowserEvidenceSchema", () => {
     assert.equal(BrowserEvidenceSchema.safeParse(validEvidence()).success, true);
   });
 
+  it("accepts bounded page timing, normalized clicks, and aggregate pointer heatmaps", () => {
+    const result = BrowserEvidenceSchema.safeParse({
+      ...validEvidence(),
+      clicks: [{
+        category: "form_submit",
+        powerOtpId: "checkout-submit",
+        position: { xRatio: 0.25, yRatio: 0.75 },
+      }],
+      pageView: {
+        pageId: "checkout",
+        pageName: "Checkout",
+        durationMs: 5_000,
+        activeDurationMs: 4_800,
+        documentWidth: 1_440,
+        documentHeight: 3_200,
+        pointerHeatmap: {
+          gridSize: 32,
+          bins: [{ column: 8, row: 24, sampleCount: 10, dwellMs: 900 }],
+        },
+        navigationTargetPath: "/confirmation",
+      },
+    });
+    assert.equal(result.success, true);
+  });
+
+  it("rejects raw or contradictory heatmap analytics", () => {
+    const pageView = {
+      durationMs: 1_000,
+      activeDurationMs: 1_001,
+      documentWidth: 100,
+      documentHeight: 100,
+      pointerHeatmap: {
+        gridSize: 32,
+        bins: [
+          { column: 1, row: 1, sampleCount: 1, dwellMs: 10 },
+          { column: 1, row: 1, sampleCount: 1, dwellMs: 10 },
+        ],
+      },
+    };
+    assert.equal(
+      BrowserEvidenceSchema.safeParse({
+        ...validEvidence(),
+        pageView,
+      }).success,
+      false,
+    );
+    assert.equal(
+      BrowserEvidenceSchema.safeParse({
+        ...validEvidence(),
+        clicks: [{
+          category: "button",
+          position: { xRatio: 12, yRatio: 40 },
+        }],
+      }).success,
+      false,
+    );
+  });
+
   it("rejects a route path carrying a query string", () => {
     const result = BrowserEvidenceSchema.safeParse({
       ...validEvidence(),

@@ -48,6 +48,12 @@ const ProductionConfigSchema = z.object({
    * an unexpected host. Both remain optional while BotBlocker is inactive.
    */
   BOTBLOCKER_SITE_CREDENTIAL_HASH_SECRET: z.string().min(32).optional(),
+  /**
+   * Independent keyed-lookup domain for pseudonymous BotBlocker browser
+   * environment and trusted-IP hashes. Raw IPs and caller-supplied
+   * fingerprint hashes are never persisted.
+   */
+  BOTBLOCKER_INTELLIGENCE_HASH_SECRET: z.string().min(32).optional(),
   BOTBLOCKER_RUNTIME_ORIGIN: z
     .string()
     .url()

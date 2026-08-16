@@ -37,7 +37,7 @@ export const BotBlockerProtocolVersionSchema = z.literal(BOTBLOCKER_PROTOCOL_VER
  * (e.g. telling apart "older contracts build, still wire-compatible" from
  * a genuine protocol break); it never gates acceptance by itself.
  */
-export const BOTBLOCKER_CONTRACT_VERSION = "2026-08-15";
+export const BOTBLOCKER_CONTRACT_VERSION = "2026-08-15.1";
 export const BotBlockerContractVersionSchema = z.literal(BOTBLOCKER_CONTRACT_VERSION);
 
 // ---------------------------------------------------------------------------
@@ -145,17 +145,88 @@ export const clickElementCategories = [
 export const ClickElementCategorySchema = z.enum(clickElementCategories);
 
 /**
- * One sanitized click observation — never the clicked text, a form value,
- * or an arbitrary CSS selector. `powerOtpId` is populated only when the
- * clicked element carries the customer's own explicit `data-powerotp-id`
- * attribute (see `docs/THREAT_MODEL.md`'s sanitized-telemetry table).
+ * One sanitized click observation with an optional document-normalized
+ * position for project heatmaps — never the clicked text, a form value,
+ * raw pixel coordinate, or arbitrary CSS selector. `powerOtpId` is
+ * populated only when the clicked element carries the customer's own
+ * explicit `data-powerotp-id` attribute.
  */
 export const ClickObservationSchema = z
   .object({
     category: ClickElementCategorySchema,
     powerOtpId: z.string().min(1).max(200).optional(),
+    position: z
+      .object({
+        xRatio: z.number().min(0).max(1),
+        yRatio: z.number().min(0).max(1),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
+
+export const POINTER_HEATMAP_GRID_SIZE = 32;
+export const PointerHeatmapBinSchema = z
+  .object({
+    column: z.number().int().min(0).max(POINTER_HEATMAP_GRID_SIZE - 1),
+    row: z.number().int().min(0).max(POINTER_HEATMAP_GRID_SIZE - 1),
+    sampleCount: z.number().int().positive(),
+    dwellMs: z.number().int().nonnegative(),
+  })
+  .strict();
+
+/**
+ * Bounded session/page analytics for customer heatmaps and navigation
+ * reporting. Pointer movement is aggregated into sparse fixed-grid bins in
+ * the browser; no chronological coordinate trail is transmitted.
+ * `pageId`/`pageName` come only from explicit customer-authored
+ * data-powerotp-page-* attributes, never scraped page text or document.title.
+ */
+export const PageViewEvidenceSchema = z
+  .object({
+    pageId: z.string().min(1).max(200).regex(/^[A-Za-z0-9._:-]+$/).optional(),
+    pageName: z
+      .string()
+      .min(1)
+      .max(200)
+      .regex(/^[^\u0000-\u001f\u007f]+$/)
+      .optional(),
+    durationMs: z.number().int().nonnegative().max(86_400_000),
+    activeDurationMs: z.number().int().nonnegative().max(86_400_000),
+    documentWidth: z.number().int().positive().max(1_000_000),
+    documentHeight: z.number().int().positive().max(1_000_000),
+    pointerHeatmap: z
+      .object({
+        gridSize: z.literal(POINTER_HEATMAP_GRID_SIZE),
+        bins: z.array(PointerHeatmapBinSchema).max(
+          POINTER_HEATMAP_GRID_SIZE * POINTER_HEATMAP_GRID_SIZE,
+        ),
+      })
+      .strict()
+      .superRefine((heatmap, context) => {
+        const occupied = new Set<string>();
+        for (const [index, bin] of heatmap.bins.entries()) {
+          const key = `${bin.column}:${bin.row}`;
+          if (occupied.has(key)) {
+            context.addIssue({
+              code: "custom",
+              message: "Pointer heatmap bins must be unique",
+              path: ["bins", index],
+            });
+          }
+          occupied.add(key);
+        }
+      }),
+    navigationTargetPath: SanitizedRoutePathSchema.optional(),
+  })
+  .strict()
+  .refine(
+    (pageView) => pageView.activeDurationMs <= pageView.durationMs,
+    {
+      message: "activeDurationMs cannot exceed durationMs",
+      path: ["activeDurationMs"],
+    },
+  );
 
 /**
  * Aggregate straight-line/"directness" signal between clicks, never a raw
@@ -232,6 +303,8 @@ export const BrowserEvidenceSchema = z
     honeypotActivations: z.array(HoneypotActivationSchema).max(50),
     // Optional for protocol-v1 compatibility; the Phase 10 sensor always emits it.
     environment: BrowserEnvironmentEvidenceSchema.optional(),
+    // Optional for protocol-v1 compatibility; corrected Phase 15 sensors emit it.
+    pageView: PageViewEvidenceSchema.optional(),
   })
   .strict();
 
@@ -435,6 +508,8 @@ export type SanitizedRoutePath = z.infer<typeof SanitizedRoutePathSchema>;
 export type RequestContext = z.infer<typeof RequestContextSchema>;
 export type ClickElementCategory = z.infer<typeof ClickElementCategorySchema>;
 export type ClickObservation = z.infer<typeof ClickObservationSchema>;
+export type PointerHeatmapBin = z.infer<typeof PointerHeatmapBinSchema>;
+export type PageViewEvidence = z.infer<typeof PageViewEvidenceSchema>;
 export type MouseDirectness = z.infer<typeof MouseDirectnessSchema>;
 export type ScrollBehavior = z.infer<typeof ScrollBehaviorSchema>;
 export type HoneypotActivation = z.infer<typeof HoneypotActivationSchema>;

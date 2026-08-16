@@ -89,6 +89,13 @@ describe("Phase 6 BotBlocker persistence contracts", () => {
     };
 
     assert.equal(UserIntelligenceRecordSchema.safeParse(intelligence).success, true);
+    assert.equal(
+      UserIntelligenceRecordSchema.safeParse({
+        ...intelligence,
+        passportUserId: "pus_passport_123456",
+      }).success,
+      true,
+    );
   });
 
   it("rejects browser-supplied scores and prohibited telemetry", () => {
@@ -135,6 +142,7 @@ describe("Phase 6 BotBlocker persistence contracts", () => {
       reportSequence: 0,
       eventIndex: 0 as const,
       recordType: "behavior_report" as const,
+      pageUrl: "https://customer.example/products",
       occurredAt: now,
       createdAt: now,
       updatedAt: now,
@@ -156,6 +164,13 @@ describe("Phase 6 BotBlocker persistence contracts", () => {
       BehaviorReportEventRecordSchema.safeParse({
         ...record,
         reportSequence: 1,
+      }).success,
+      false,
+    );
+    assert.equal(
+      BehaviorReportEventRecordSchema.safeParse({
+        ...record,
+        pageUrl: "https://customer.example/products?secret=value",
       }).success,
       false,
     );

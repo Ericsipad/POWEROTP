@@ -26,9 +26,11 @@ for one of exactly two decisions:
 The first behavior report is sent after five seconds. Further reports are sent every
 30 seconds and when a partial interval ends because of navigation, page hide, or exit.
 Reports contain sanitized route paths (no query or fragment), element categories and
-explicit `data-powerotp-id` values (never clicked text or form values), mouse-directness
-metrics between clicks (never coordinate trails), scroll smoothness/speed aggregates,
-and honeypot activations. Every report is saved to the visitor session and may revise a
+explicit `data-powerotp-id` values, document-normalized click points, bounded 32×32 pointer
+heatmap bins, explicit page ID/name, page active/total time, and navigation targets (never
+clicked text, form values, query strings, or chronological pointer trails), plus
+mouse-directness, scroll smoothness/speed aggregates, and honeypot activations. Every report is
+saved to the visitor session and may revise a
 previous `allow` or valid clearance to `otp`.
 
 The customer chooses a decision timeout from 50 through 2,000 ms; 200 ms is the
@@ -54,6 +56,12 @@ effects.
 
 POWEROTP internally correlates pseudonymous fraud/security evidence across protected
 sites, while each customer can see only visitors and observations from its own projects.
+Each `userIntelligence` profile is the continuing behavior/risk record and may remain anonymous
+or later become associated through an authoritative `identityBindings` record. Supabase
+Enterprise holds user identity/account PII; MongoDB intelligence holds only an opaque/keyed
+internal reference. Every accepted report updates the session/profile, later scoring
+recalculates on that update, and an authoritative risk change may revise the recommendation to
+`otp` and suspend identity-bound Passport/paid-access fast paths until recovery.
 The customer's API key remains server-only. POWEROTP never receives customer page
 content, raw keystrokes, form values, raw pointer trails, or URL query strings.
 
@@ -297,8 +305,9 @@ reference only (`PolicyKeyReferenceSchema`), and no wrapper fetches it. Phase 14
 
 Implement browser assessment and risk-event ingestion with idempotency, ordering,
 server-derived fingerprints, project scoping, retention, visitor-session reports, and
-project-only querying. Store sanitized route/click and aggregate behavior evidence; do
-not score yet.
+project-only querying. Store sanitized route/click evidence, normalized click points,
+client-aggregated pointer heatmap bins, explicit page metadata, page active/total time,
+navigation transitions, and aggregate behavior evidence; do not score yet.
 
 ### Phase 16 — Rapid allowlist/blacklist
 
@@ -309,9 +318,11 @@ admin audit, lookup, and signed snapshots. Allowlist maps to `allow`; blacklist 
 ### Phase 17 — Proprietary scoring
 
 After the user supplies exact weights, decay, closest-match, confidence, and threshold
-rules, score initial and every later behavior report deterministically. Store model/input
+rules, aggregate every initial/later behavior report into its `userIntelligence` profile and
+recalculate that profile deterministically on every accepted update. Store model/input
 versions and evaluate VPN, mobile, CGNAT, IPv6, privacy-browser, headless, datacenter,
-and residential-proxy cases. Split before editing if model design exceeds one session.
+and residential-proxy cases. Browser/middleware observations are inputs, never decision
+authority. Split before editing if model design exceeds one session.
 
 ### Phase 18 — Customer risk/OTP policy
 
@@ -334,24 +345,32 @@ JavaScript.
 
 Persist every complete/partial report, rerun scoring, return monotonic signed decision
 revisions, and reject stale responses. Any score reaching the customer's OTP threshold
-publishes an `otp` recommendation. Customer code may then call `openOtp()`; POWEROTP never
+publishes an `otp` recommendation at any point in the session. For identity-bound intelligence,
+the same authoritative update may suspend Passport/PaidTokenPass fast access pending the
+server-defined OTP/recovery flow. Customer code may then call `openOtp()`; POWEROTP never
 changes customer UI automatically. Pause page sensing only after the customer explicitly opens
-OTP and resume a fresh interval after authoritative success. Clearance never disables
-reassessment.
+OTP and resume a fresh interval after authoritative success. Clearance and Passport state never
+disable reassessment.
 
 ### Phase 21 — Passport cryptographic/storage foundation
 
 Finalize the shared install-once Passport envelope with explicit `human | agent` credential
-class, legally separated identity/entitlement storage, consent/audit, device or
-proof-of-possession public keys, top-level assertion flow, and pairwise site assertions. Test
-class separation, unlinkability, revocation, expiry, device loss, and replay.
+class, consent/audit, device or proof-of-possession public keys, top-level assertion flow, and
+pairwise site assertions. Make Supabase Enterprise the authoritative ISO 27001-scoped account/
+identity store for email, password/authentication hashes, verified attributes, and other PII.
+Add MongoDB `identityBindings` that associate project-scoped `userIntelligence` profiles with
+only an opaque/keyed internal user reference after authoritative account/Passport/entitlement
+verification; never copy PII or expose a network-global user ID to customers. Test store
+separation, class separation, unlinkability, binding authorization, revocation, expiry, device
+loss, and replay.
 
 ### Phase 22 — Human Passport lifecycle
 
 After a person completes a challenge, offer explicit installation of a persistent Human
 Passport. Implement registration, assertion, pause, revoke, delete, recovery, renewal, the
 cross-site `allow` fast path, continuous observation, and required notices without exposing
-cross-site history.
+cross-site history. Identity-bound risk updates may suspend the Passport fast path immediately;
+only authoritative OTP/recovery may restore it.
 
 ### Phase 23 — Agent Passport and PaidTokenPass entitlement ledger
 
@@ -359,7 +378,9 @@ Implement the purchased, browser/runtime-installed Agent Passport backed by the 
 ledger: proof-of-possession credentials, one-time/all-sites scope, quota, expiry, revocation,
 idempotent consumption, refund/reversal model, versioned owner terms, cross-site `allow`, and
 continuous observation. Keep its internal authority and claims cryptographically separate from
-Human Passport so an agent can never impersonate a verified person.
+Human Passport so an agent can never impersonate a verified person. Identity-bound risk updates
+may suspend paid-agent fast access without erasing ledger/audit history; restoration requires
+the authoritative recovery policy.
 
 ### Phase 24 — Agent Passport purchase and installation
 

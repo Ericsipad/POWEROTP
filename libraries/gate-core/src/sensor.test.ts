@@ -99,6 +99,11 @@ describe("continuous browser sensor cadence", () => {
     const { window, document } = browser();
     const timers = new Timers();
     const reports: BehaviorReport[] = [];
+    document.documentElement.setAttribute("data-powerotp-page-id", "start");
+    document.documentElement.setAttribute(
+      "data-powerotp-page-name",
+      "Getting started",
+    );
     const sensor = createContinuousBrowserSensor({
       window,
       document,
@@ -128,6 +133,9 @@ describe("continuous browser sensor cadence", () => {
       [["initial", 4], ["recurring", 5]],
     );
     assert.equal(reports[0]?.evidence.routePath, "/start");
+    assert.equal(reports[0]?.evidence.pageView?.pageId, "start");
+    assert.equal(reports[0]?.evidence.pageView?.pageName, "Getting started");
+    assert.equal(reports[0]?.evidence.pageView?.pointerHeatmap.gridSize, 32);
     assert.equal(JSON.stringify(reports).includes("secret=query"), false);
     sensor.dispose();
   });
@@ -175,6 +183,10 @@ describe("continuous browser sensor cadence", () => {
       [["navigation", "/start"], ["hide", "/next"], ["exit", "/next"]],
     );
     assert.equal(JSON.stringify(reports).includes("credential=secret"), false);
+    assert.equal(
+      reports[0]?.evidence.pageView?.navigationTargetPath,
+      "/next",
+    );
     assert.equal(sensor.isObserving(), false);
     sensor.dispose();
   });

@@ -114,7 +114,8 @@ risk engine, and only unknown visitors are billable.
 ## 2. Data classes and legal roles
 
 This is the core of the plan. Three data classes, three legal postures, three stores. They
-must never be joinable in a single system.
+must never be broadly joinable or copied into one store. The sole permitted connection is the
+purpose-limited pseudonymous `identityBindings` join described below.
 
 | Data class | Contents | Our role | Lawful basis | Store |
 | --- | --- | --- | --- | --- |
@@ -171,19 +172,32 @@ to lose a regulatory argument. A DPIA asks what the purpose is, and internal doc
 discoverable in litigation, so the labels need to be accurate everywhere — not just in the
 public notice.
 
-### Store separation and the join key
+### Store separation and the identity binding
 
 We need to detect passport takeover — a human passing the gate and handing the session to a
-bot — which requires linking risk signals to a verified user. That link is the one place the
-three classes touch, and it must be built so that neither store alone is sensitive.
+bot — which requires linking risk signals to a verified user. `userIntelligence` remains the
+visitor's primary behavior/risk profile and may have no assigned user while anonymous. Once
+POWEROTP authoritatively identifies an account through verified email/login, Passport, or paid
+agent ownership, it creates an `identityBindings` record associating that profile with an
+opaque/keyed internal identity reference. That binding is the one place the data classes touch,
+and it must be built so that neither store alone is sensitive.
 
-- MongoDB holds risk signals keyed **only** by `HMAC(pepper, user_id)`. No names, no contact
-  details, no document data, no raw `user_id`.
+- MongoDB holds risk signals and `userIntelligence`; `identityBindings` contains only
+  `userIntelligenceId` plus `HMAC(pepper, supabase_user_id)` (or an equivalently opaque internal
+  reference). No names, contact details, document data, password/authentication hashes, or raw
+  Supabase user ID are stored there.
 - The pepper lives in AWS KMS, never in either database. A full Mongo dump is pseudonymous
   and cannot be re-identified.
-- Supabase holds identity PII, envelope-encrypted per record with AEAD associated data
+- Supabase Enterprise is the authoritative account/identity system of record and holds identity
+  PII, envelope-encrypted per record with AEAD associated data
   binding each record to `tenant_id | record_id | schema_version`, so ciphertext cannot be
   moved between users by anyone with write access.
+- Browser telemetry, customer-supplied IDs, and possession of a gate-session ID can never create
+  or change an identity binding. Only authoritative account/Passport/entitlement verification
+  may do so, and binding changes are audited.
+- Every accepted behavior report updates the gate session and its `userIntelligence` profile.
+  Later scoring recalculates on each update; an identity-bound risk change can trigger `otp` and
+  suspend Passport/PaidTokenPass fast access until authoritative recovery succeeds.
 - We store the **verified date of birth**, encrypted — not a boolean. Booleans expire wrong
   (a visitor verified at 17 becomes 18) and cannot serve clients who need 13, 16, or 21
   thresholds. One encrypted field derives every threshold.
@@ -212,7 +226,8 @@ Two related corrections to the "we hold almost no PII" framing:
 
 - **We hold PII regardless.** The OTP requires a phone number or email address, and the
   passport account needs an identifier. That is personal data, it is unavoidable, and it is why
-  the Supabase Team plan is required before real users arrive.
+  the identity system must move to Supabase Enterprise before real user PII enters the
+  production/ISO 27001 scope.
 - **Controller liability does not transfer to the storer.** We direct the collection, so we are
   in scope for BIPA and Article 9 regardless of whose disk the image sat on — and Didit's terms
   push the consent obligation and the indemnity back onto us explicitly.
@@ -683,13 +698,15 @@ assurance affordable for a segment that cannot buy it at $0.53 per visitor with 
 | Unlimited | 10 | $99 | $990 |
 | **Total** | **510** | ARPU $17.14 | **$8,740/mo — ~$105k ARR** |
 
-That is a healthy self-serve business against a lean cost base (Supabase Team $599, Atlas,
-hosting, insurance — roughly $1,200–1,500/month fixed), leaving around $7,300/month of gross
-margin before variable costs. At $17 average revenue per account it is strictly product-led:
-no sales calls, and customer acquisition cost must stay under roughly $50 to work.
+That is a healthy self-serve business against the pre-enterprise development cost base. The
+production identity/ISO 27001 architecture requires Supabase Enterprise, whose contract price
+must be obtained before relying on this margin calculation; it must not be silently modeled as
+the old Team-plan amount. At $17 average revenue per account the product remains strictly
+product-led, so customer acquisition cost must stay under roughly $50 to work.
 
-It also cannot fund a $11,400/month certification stack — see below. And it imposes two
-non-negotiable guardrails, because every tier is flat while two of our costs are metered:
+It also cannot fund the known ~$10,800/month certification/insurance subtotal plus an
+unpriced Supabase Enterprise contract — see below. And it imposes two non-negotiable
+guardrails, because every tier is flat while two of our costs are metered:
 
 **1. Age originations are never included in a flat plan.** A $20/month client running 5,000 age
 verifications costs $1,500 at $0.30. Age is always metered on top, at every tier, without
@@ -709,7 +726,7 @@ free to serve — plus an allowance of the parts that are not.
 
 | Line | Cost | Note |
 | --- | --- | --- |
-| Supabase Team | $599/mo | Required before any real user PII lands — SOC 2 and ISO 27001 are Team-and-above only |
+| Supabase Enterprise | Contract quote required | Required before real user PII enters the production/ISO 27001 scope; authoritative account/identity store |
 | Supabase HIPAA add-on | **$0 — do not buy yet** | ~$350/mo. Age and identity data is not PHI; only needed if a health vertical client requires a BAA. Saves ~$4,200/yr. See caveats below |
 | MongoDB Atlas | existing | Risk signals only |
 | AWS KMS | ~$1/key/mo + $0.03/10k requests | Envelope keys and the pseudonym pepper |
@@ -745,20 +762,21 @@ non-compliant configuration on the same infrastructure, that infrastructure is e
 the SOC 2 scope (and fails the audit) or requires genuinely separate infrastructure at double
 the cost. There is no half-compliant posture.
 
-The compliance stack is also a fixed cost, not a per-client one. Once Team, SOC 2, ISO 27566-1,
-and insurance are in place, every client benefits at zero marginal cost — so the honest
+The compliance stack is also a fixed cost, not a per-client one. Once Supabase Enterprise,
+SOC 2, ISO 27566-1, and insurance are in place, every client benefits at zero marginal cost — so the honest
 question is how many subscribers fund the stack:
 
 | Line | Monthly equivalent |
 | --- | --- |
-| Supabase Team | $599 |
+| Supabase Enterprise | Contract quote required |
 | SOC 2 Type II (audit + tooling + pen test, ~$70k/yr) | ~$5,800 |
 | ISO 27566-1 via ACCS (estimate, quote required) | ~$2,500 |
 | Cyber and E&O with biometric coverage (estimate) | ~$2,500 |
-| **Total** | **~$11,400** |
+| **Known subtotal before Supabase Enterprise** | **~$10,800 plus the Enterprise quote** |
 
-Against a $105k ARR target book, that stack is more than the entire business. So it is deferred,
-and the sequencing is deliberate:
+Against a $105k ARR target book, that stack may consume the entire business after the Enterprise
+quote is included. Certification purchasing is therefore deferred, but the production identity
+store requirement is not replaced with a lower plan once real PII enters scope.
 
 **Design to the controls now; buy the attestations when a client demands them.** Building to SOC 2
 and HIPAA-grade controls from the start is genuinely cheap — encryption, least privilege, audit
@@ -779,9 +797,9 @@ PII"; let the compliance posture be the reassurance rather than the pitch. Certi
 belongs in the phase where an enterprise client with a questionnaire is on the table.
 
 The interim data line is real user data, not first revenue: build and test on Supabase Free or
-Pro with **no real user data**, and move to Team the moment real PII lands. A compliance period
-cannot be made retroactive — data stored on a non-attested plan sits outside any later audit
-window and is uninsured for that stretch.
+Pro with **no real user data**, and move to Enterprise before real PII enters production. A
+compliance period cannot be made retroactive — data stored outside the approved enterprise
+environment sits outside any later audit window and is uninsured for that stretch.
 
 ---
 

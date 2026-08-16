@@ -3,6 +3,7 @@ import {
   BotBlockerRuntimeError,
   BotBlockerSiteCredentialError,
 } from "@powerotp/api/botblocker-errors.js";
+import type { AuthenticatedBotBlockerSite } from "@powerotp/api/botblocker-site-credential-service.js";
 import type {
   BotBlockerErrorCode,
   BotBlockerRuntimeRequestEnvelope,
@@ -17,19 +18,44 @@ import {
 } from "./botblocker-responses";
 import { enforceRateLimit } from "./rate-limit";
 import { getServerContext } from "./server-context";
+import type { ServerContext } from "./server-context";
 
 export { botBlockerError, botBlockerUnavailable } from "./botblocker-responses";
 
-export async function unavailableRuntimeMutation(
+export async function unavailableRuntimeMutation<
+  T extends BotBlockerRuntimeRequestEnvelope,
+>(
   request: NextRequest,
-  schema: ZodType,
+  schema: ZodType<T>,
   operation: string,
+  expectedChallengeId?: string,
+): Promise<NextResponse> {
+  return runtimeMutation(
+    request,
+    schema,
+    operation,
+    undefined,
+    expectedChallengeId,
+  );
+}
+
+export async function runtimeMutation<
+  T extends BotBlockerRuntimeRequestEnvelope,
+>(
+  request: NextRequest,
+  schema: ZodType<T>,
+  operation: string,
+  handle?: (
+    body: T,
+    site: AuthenticatedBotBlockerSite,
+    context: ServerContext,
+  ) => Promise<void>,
   expectedChallengeId?: string,
 ): Promise<NextResponse> {
   const body = await request.json();
   const parsed = schema.safeParse(body);
   if (!parsed.success) return botBlockerError("invalid_request", 400);
-  const envelope = parsed.data as BotBlockerRuntimeRequestEnvelope;
+  const envelope = parsed.data;
   if (
     expectedChallengeId &&
     (!isRecord(envelope.payload) ||
@@ -37,7 +63,8 @@ export async function unavailableRuntimeMutation(
   ) {
     return botBlockerError("invalid_request", 400);
   }
-  const { botBlockerRuntimeSecurity, dataStores } = await getServerContext();
+  const context = await getServerContext();
+  const { botBlockerRuntimeSecurity, dataStores } = context;
   try {
     await enforceRateLimit(
       dataStores.rateLimitStore,
@@ -61,6 +88,7 @@ export async function unavailableRuntimeMutation(
       600,
       60,
     );
+    await handle?.(parsed.data, site, context);
     return botBlockerUnavailable("not_implemented", false);
   } catch (error) {
     return mapBotBlockerRuntimeError(error);

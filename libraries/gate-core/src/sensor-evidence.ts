@@ -2,6 +2,7 @@ import {
   BROWSER_ENVIRONMENT_EVIDENCE_VERSION,
   BrowserEnvironmentEvidenceSchema,
   BrowserEvidenceSchema,
+  POINTER_HEATMAP_GRID_SIZE,
   browserAutomationIndicators,
   type BrowserAutomationIndicator,
   type BrowserEvidence,
@@ -12,6 +13,7 @@ const MAX_ROUTE_LENGTH = 2_048;
 const MAX_CLICKS = 200;
 const MAX_HONEYPOTS = 50;
 const HIGH_SPEED_SCROLL_PX_PER_MS = 3;
+const MAX_POINTER_DWELL_STEP_MS = 250;
 const SAFE_EXPLICIT_ID = /^[A-Za-z0-9._:-]{1,200}$/;
 
 interface Point {
@@ -19,17 +21,49 @@ interface Point {
   y: number;
 }
 
+interface PageDimensions {
+  width: number;
+  height: number;
+}
+
+interface PageMetadata {
+  pageId?: string;
+  pageName?: string;
+  navigationTargetPath?: string;
+}
+
+type PointerHeatmap = Map<
+  string,
+  { column: number; row: number; sampleCount: number; dwellMs: number }
+>;
+
 export interface SensorEvidenceAccumulator {
-  recordPointer(point: Point, trusted: boolean): void;
-  recordClick(point: Point, target: EventTarget | null, trusted: boolean): void;
+  recordPointer(
+    point: Point,
+    dimensions: PageDimensions,
+    at: number,
+    trusted: boolean,
+  ): void;
+  recordClick(
+    point: Point,
+    dimensions: PageDimensions,
+    target: EventTarget | null,
+    trusted: boolean,
+  ): void;
   recordScroll(position: number, at: number, trusted: boolean): void;
-  snapshot(routePath: string): BrowserEvidence;
+  snapshot(
+    routePath: string,
+    dimensions: PageDimensions,
+    metadata?: PageMetadata,
+    at?: number,
+  ): BrowserEvidence;
   reset(): void;
 }
 
 export interface SensorEvidenceOptions {
   sensorVersion: string;
   webdriver: boolean;
+  now?: () => number;
 }
 
 export function sanitizeRoutePath(value: unknown): string {
@@ -48,6 +82,7 @@ export function sanitizeRoutePath(value: unknown): string {
 export function createSensorEvidenceAccumulator(
   options: SensorEvidenceOptions,
 ): SensorEvidenceAccumulator {
+  const now = options.now ?? Date.now;
   const environment = BrowserEnvironmentEvidenceSchema.parse({
     evidenceVersion: BROWSER_ENVIRONMENT_EVIDENCE_VERSION,
     sensorVersion: options.sensorVersion,
@@ -65,6 +100,11 @@ export function createSensorEvidenceAccumulator(
   let smoothnessTotal = 0;
   let smoothnessSamples = 0;
   let highSpeedEventCount = 0;
+  let intervalStartedAt = now();
+  let pointerHeatmap: PointerHeatmap = new Map();
+  let previousPointerBin:
+    | { key: string; at: number }
+    | undefined;
 
   const mark = (indicator: BrowserAutomationIndicator) => indicators.add(indicator);
 
@@ -80,6 +120,9 @@ export function createSensorEvidenceAccumulator(
     smoothnessTotal = 0;
     smoothnessSamples = 0;
     highSpeedEventCount = 0;
+    intervalStartedAt = now();
+    pointerHeatmap = new Map();
+    previousPointerBin = undefined;
     indicators.clear();
     if (options.webdriver) mark("webdriver");
   };
@@ -87,14 +130,27 @@ export function createSensorEvidenceAccumulator(
   reset();
 
   return {
-    recordPointer(point, trusted) {
+    recordPointer(point, dimensions, at, trusted) {
       if (!trusted) mark("untrusted_pointer");
-      if (!isFinitePoint(point) || !segmentStart || !previousPoint) return;
+      if (!isFinitePoint(point)) return;
+      const bin = heatmapBin(point, dimensions);
+      if (bin) {
+        addPointerDwell(pointerHeatmap, previousPointerBin, at);
+        const current = pointerHeatmap.get(bin.key);
+        pointerHeatmap.set(bin.key, {
+          column: bin.column,
+          row: bin.row,
+          sampleCount: (current?.sampleCount ?? 0) + 1,
+          dwellMs: current?.dwellMs ?? 0,
+        });
+        previousPointerBin = { key: bin.key, at };
+      }
+      if (!segmentStart || !previousPoint) return;
       pathDistance += distance(previousPoint, point);
       previousPoint = point;
     },
 
-    recordClick(point, target, trusted) {
+    recordClick(point, dimensions, target, trusted) {
       if (!trusted) mark("untrusted_click");
       if (isFinitePoint(point)) {
         if (segmentStart && previousPoint) {
@@ -110,7 +166,13 @@ export function createSensorEvidenceAccumulator(
       }
 
       const observation = observeClickTarget(target);
-      if (clicks.length < MAX_CLICKS) clicks.push(observation.click);
+      if (clicks.length < MAX_CLICKS) {
+        const position = normalizedPosition(point, dimensions);
+        clicks.push({
+          ...observation.click,
+          ...(position ? { position } : {}),
+        });
+      }
       if (observation.honeypotId && honeypotIds.length < MAX_HONEYPOTS) {
         honeypotIds.push(observation.honeypotId);
       }
@@ -136,10 +198,17 @@ export function createSensorEvidenceAccumulator(
       previousScroll = { position, at, speed };
     },
 
-    snapshot(routePath) {
+    snapshot(routePath, dimensions, metadata = {}, at = now()) {
+      addPointerDwell(pointerHeatmap, previousPointerBin, at);
+      if (previousPointerBin) {
+        previousPointerBin = { ...previousPointerBin, at };
+      }
       const automationIndicators = browserAutomationIndicators.filter((indicator) =>
         indicators.has(indicator),
       );
+      const durationMs = boundedDuration(at - intervalStartedAt);
+      const pageId = safeExplicitId(metadata.pageId);
+      const pageName = safePageName(metadata.pageName);
       return BrowserEvidenceSchema.parse({
         routePath: sanitizeRoutePath(routePath),
         clicks,
@@ -158,6 +227,32 @@ export function createSensorEvidenceAccumulator(
           evidenceVersion: BROWSER_ENVIRONMENT_EVIDENCE_VERSION,
           sensorVersion: environment.sensorVersion,
           automationIndicators,
+        },
+        pageView: {
+          ...(pageId ? { pageId } : {}),
+          ...(pageName ? { pageName } : {}),
+          durationMs,
+          activeDurationMs: durationMs,
+          documentWidth: boundedDimension(dimensions.width),
+          documentHeight: boundedDimension(dimensions.height),
+          pointerHeatmap: {
+            gridSize: POINTER_HEATMAP_GRID_SIZE,
+            bins: [...pointerHeatmap.values()]
+              .sort((left, right) =>
+                left.row - right.row || left.column - right.column
+              )
+              .map((bin) => ({
+                ...bin,
+                dwellMs: Math.round(bin.dwellMs),
+              })),
+          },
+          ...(metadata.navigationTargetPath
+            ? {
+                navigationTargetPath: sanitizeRoutePath(
+                  metadata.navigationTargetPath,
+                ),
+              }
+            : {}),
         },
       });
     },
@@ -206,6 +301,68 @@ function asElement(target: EventTarget | null): Element | undefined {
 
 function safeExplicitId(value: string | null | undefined): string | undefined {
   return value && SAFE_EXPLICIT_ID.test(value) ? value : undefined;
+}
+
+function safePageName(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  const normalized = value.trim();
+  return normalized &&
+      normalized.length <= 200 &&
+      !/[\u0000-\u001f\u007f]/.test(normalized)
+    ? normalized
+    : undefined;
+}
+
+function normalizedPosition(
+  point: Point,
+  dimensions: PageDimensions,
+): { xRatio: number; yRatio: number } | undefined {
+  if (!isFinitePoint(point)) return undefined;
+  const width = boundedDimension(dimensions.width);
+  const height = boundedDimension(dimensions.height);
+  return {
+    xRatio: round(clamp(point.x / width)),
+    yRatio: round(clamp(point.y / height)),
+  };
+}
+
+function heatmapBin(
+  point: Point,
+  dimensions: PageDimensions,
+): { key: string; column: number; row: number } | undefined {
+  const position = normalizedPosition(point, dimensions);
+  if (!position) return undefined;
+  const column = Math.min(
+    POINTER_HEATMAP_GRID_SIZE - 1,
+    Math.floor(position.xRatio * POINTER_HEATMAP_GRID_SIZE),
+  );
+  const row = Math.min(
+    POINTER_HEATMAP_GRID_SIZE - 1,
+    Math.floor(position.yRatio * POINTER_HEATMAP_GRID_SIZE),
+  );
+  return { key: `${column}:${row}`, column, row };
+}
+
+function addPointerDwell(
+  heatmap: PointerHeatmap,
+  previous: { key: string; at: number } | undefined,
+  at: number,
+): void {
+  if (!previous || !Number.isFinite(at)) return;
+  const bin = heatmap.get(previous.key);
+  if (!bin) return;
+  const elapsed = Math.max(0, Math.min(MAX_POINTER_DWELL_STEP_MS, at - previous.at));
+  bin.dwellMs += elapsed;
+}
+
+function boundedDimension(value: number): number {
+  if (!Number.isFinite(value)) return 1;
+  return Math.max(1, Math.min(1_000_000, Math.round(value)));
+}
+
+function boundedDuration(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(86_400_000, Math.round(value)));
 }
 
 function isFinitePoint(point: Point): boolean {

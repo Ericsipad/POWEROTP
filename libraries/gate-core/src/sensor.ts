@@ -60,6 +60,7 @@ export function createContinuousBrowserSensor(
   const evidence = createSensorEvidenceAccumulator({
     sensorVersion: options.sensorVersion,
     webdriver: options.window.navigator.webdriver === true,
+    now,
   });
   let routePath = sanitizeRoutePath(options.window.location.pathname);
   let nextSequence = startingSequence;
@@ -101,6 +102,7 @@ export function createContinuousBrowserSensor(
   const emit = (
     trigger: "initial" | "recurring" | "partial",
     reason?: PartialBehaviorReportReason,
+    navigationTargetPath?: string,
   ) => {
     if (nextSequence === Number.MAX_SAFE_INTEGER) {
       sensor.pause();
@@ -117,7 +119,15 @@ export function createContinuousBrowserSensor(
         sequence,
         issuedAt: Math.max(1, Math.floor(now())),
       },
-      evidence: evidence.snapshot(routePath),
+      evidence: evidence.snapshot(
+        routePath,
+        pageDimensions(options.document),
+        {
+          ...pageMetadata(options.document),
+          ...(navigationTargetPath ? { navigationTargetPath } : {}),
+        },
+        now(),
+      ),
     });
     send(report, generation);
     evidence.reset();
@@ -147,16 +157,20 @@ export function createContinuousBrowserSensor(
     }, delay);
   };
 
-  const closePartial = (reason: PartialBehaviorReportReason) => {
+  const closePartial = (
+    reason: PartialBehaviorReportReason,
+    navigationTargetPath?: string,
+  ) => {
     if (!active || hidden || disposed) return;
     clearScheduled();
-    emit("partial", reason);
+    emit("partial", reason, navigationTargetPath);
   };
 
   const recordNavigation = (pathname = options.window.location.pathname) => {
     if (!active || hidden || disposed) return;
-    closePartial("navigation");
-    routePath = sanitizeRoutePath(pathname);
+    const nextRoutePath = sanitizeRoutePath(pathname);
+    closePartial("navigation", nextRoutePath);
+    routePath = nextRoutePath;
     evidence.reset();
     scheduleNext();
   };
@@ -165,7 +179,9 @@ export function createContinuousBrowserSensor(
     if (!active || hidden) return;
     const pointer = event as PointerEvent;
     evidence.recordPointer(
-      { x: pointer.clientX, y: pointer.clientY },
+      pagePoint(pointer, options.window),
+      pageDimensions(options.document),
+      now(),
       pointer.isTrusted,
     );
   };
@@ -173,7 +189,8 @@ export function createContinuousBrowserSensor(
     if (!active || hidden) return;
     const mouse = event as MouseEvent;
     evidence.recordClick(
-      { x: mouse.clientX, y: mouse.clientY },
+      pagePoint(mouse, options.window),
+      pageDimensions(options.document),
       event.target,
       mouse.isTrusted,
     );
@@ -280,4 +297,53 @@ export function createContinuousBrowserSensor(
   const patchedPushState = history.pushState;
   const patchedReplaceState = history.replaceState;
   return sensor;
+}
+
+function pagePoint(
+  event: MouseEvent | PointerEvent,
+  window: Window,
+): { x: number; y: number } {
+  return {
+    x: Number.isFinite(event.pageX) ? event.pageX : event.clientX + window.scrollX,
+    y: Number.isFinite(event.pageY) ? event.pageY : event.clientY + window.scrollY,
+  };
+}
+
+function pageDimensions(document: Document): { width: number; height: number } {
+  const root = document.documentElement;
+  const body = document.body;
+  return {
+    width: Math.max(
+      1,
+      root?.scrollWidth ?? 0,
+      root?.clientWidth ?? 0,
+      body?.scrollWidth ?? 0,
+      body?.clientWidth ?? 0,
+    ),
+    height: Math.max(
+      1,
+      root?.scrollHeight ?? 0,
+      root?.clientHeight ?? 0,
+      body?.scrollHeight ?? 0,
+      body?.clientHeight ?? 0,
+    ),
+  };
+}
+
+function pageMetadata(document: Document): {
+  pageId?: string;
+  pageName?: string;
+} {
+  const root = document.documentElement;
+  const body = document.body;
+  const pageId = root?.getAttribute("data-powerotp-page-id") ??
+    body?.getAttribute("data-powerotp-page-id") ??
+    undefined;
+  const pageName = root?.getAttribute("data-powerotp-page-name") ??
+    body?.getAttribute("data-powerotp-page-name") ??
+    undefined;
+  return {
+    ...(pageId ? { pageId } : {}),
+    ...(pageName ? { pageName } : {}),
+  };
 }

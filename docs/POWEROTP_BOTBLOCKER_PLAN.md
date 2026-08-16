@@ -87,18 +87,26 @@ and a previous `allow` or clearance may be revised to `otp`.
 - Every visitor is reassessed continuously, not just once: an initial browser/behavior report
   five seconds after load, recurring reports every 30 seconds, and partial reports on route
   navigation, page hide, close, or site exit. Every report is saved to the visitor's session
-  and reruns scoring; any of these may revise a prior `allow` or valid clearance to `otp`.
+  and aggregated into its `userIntelligence` profile before scoring is rerun. Any update may
+  revise a prior `allow` or valid clearance to `otp`. If the profile is identity-bound, the
+  same authoritative risk change may suspend its Passport or paid-agent fast path until the
+  server-defined OTP/recovery requirement succeeds; browser middleware reports evidence but
+  never authors that decision.
 - When customer code calls `gate.openOtp()`, monitoring pauses while the iframe is open and
   resumes in a fresh interval only after authoritative OTP success.
 - Customer traffic stays on the customer's hosting platform. PowerOTP receives decision
   metadata, challenge traffic, summarized/sanitized risk events, and optional agent-access
   traffic — never the customer's page content.
 - Collected behavior evidence is sanitized at the source: route path without query string or
-  fragment, click element category and an explicit `data-powerotp-id` only (never clicked
-  text or form values), mouse-directness/straight-line metrics between clicks (never
-  coordinate trails), scroll smoothness and high-speed aggregate metrics (never raw scroll
-  trails), and honeypot activations. Raw keystrokes, passwords, emails, DOM snapshots, page
-  content, and arbitrary CSS selectors are never collected.
+  fragment; explicit page ID/name; page active/total time and navigation targets; click element
+  category, explicit `data-powerotp-id`, and normalized page position (never clicked text,
+  form values, or raw pixel coordinates); sparse client-aggregated 32×32 pointer heatmap bins
+  and mouse-directness metrics (never chronological pointer trails); scroll smoothness and
+  high-speed aggregates (never raw scroll trails); and honeypot activations. Raw keystrokes,
+  passwords, emails, DOM snapshots, page content, automatically scraped document titles, and
+  arbitrary CSS selectors are never collected. The backend derives an absolute query-free page
+  URL from the authenticated audience plus sanitized route so a later customer heatmap viewer
+  can open the page and render an aggregate overlay.
 - PowerOTP owns risk weights, thresholds, threat feeds, challenge logic, and sensor cadence.
 - Advisory state is attached to every customer application request except fixed owned,
   infrastructure, static, health, `OPTIONS`, and WebSocket exclusions. Customers select
@@ -115,6 +123,19 @@ and a previous `allow` or clearance may be revised to `otp`.
   resulting short-lived gate-session token authorizes only that visitor's approved
   launch/status operations, is site/session/audience-bound and revocable, and remains
   server-side. It is sufficient for `openOtp()` without resending the broader site credential.
+- Every visit has its own gate-session ID and every project-scoped profile has a
+  server-generated user-intelligence ID. That intelligence profile is the visitor's continuing
+  behavior/risk record whether it is still anonymous or later associated with a POWEROTP user.
+  An authoritative account identification (for example verified email login, Human Passport,
+  or Agent Passport/PaidTokenPass ownership) creates an internal `identityBindings` association
+  rather than trusting a browser-supplied identity. The binding lets behavior intelligence
+  govern that user's Passport/paid-access risk state while keeping the externally exposed
+  project visitor ID pseudonymous.
+- Supabase Enterprise is the intended ISO 27001-scoped system of record for user account and
+  identity data. Email, password/authentication hashes, verified attributes, and other PII live
+  there; MongoDB stores BotBlocker intelligence plus only an opaque/keyed internal identity
+  reference in `identityBindings`, never those account fields or a customer-visible global user
+  ID.
 - No single weak IP, browser, behavioral, or decoy signal is treated as certain proof.
 - Elevated risk surfaces OTP; it does not create an unrecoverable permanent denial.
 - OTP proves access to a phone channel, not legal identity.
@@ -271,12 +292,17 @@ Add durable, decaying entities instead of one global bad-IP flag:
 - `siteSessions`
 - `deviceReputations`
 - `networkReputations`
-- `identityBindings`
+- `identityBindings` (authoritative association from one or more project-scoped
+  `userIntelligence` profiles to an opaque/keyed internal user reference)
 - `riskEvents`
 - `policyReleases`
 - `agentEntitlements`
 
-Valkey handles short windows, rate limits, deduplication, challenge state, and event queues. MongoDB remains durable storage. Identity binding is explicit and customer-supplied; the browser sensor never scrapes email, password, or form values.
+Valkey handles short windows, rate limits, deduplication, challenge state, and event queues.
+MongoDB remains durable risk/intelligence storage. Supabase Enterprise is the authoritative
+account/identity store. POWEROTP creates an identity binding only after authoritative account,
+Passport, or paid-entitlement verification; neither a customer ownership claim nor browser
+telemetry can create it. The browser sensor never scrapes email, password, or form values.
 
 ### Tokens and cookies
 

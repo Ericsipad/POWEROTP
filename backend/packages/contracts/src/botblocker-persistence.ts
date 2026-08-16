@@ -83,11 +83,17 @@ export const GateSessionRecordSchema = ScopedRecordSchema.extend({
 
 export const UserIntelligenceRecordSchema = ScopedRecordSchema.extend({
   userIntelligenceId: OpaqueIdSchema,
+  /** Internal authoritative Passport account reference, populated only
+   * after server-side Passport verification. Never browser supplied. */
+  passportUserId: OpaqueIdSchema.optional(),
   fingerprintHash: ServerFingerprintHashSchema,
   ipObservations: z.array(IpObservationSchema),
   latestEvidence: BrowserEvidenceSchema.optional(),
   gateSessionCount: z.number().int().nonnegative(),
   behaviorReportCount: z.number().int().nonnegative(),
+  pageViewCount: z.number().int().nonnegative().optional(),
+  totalPageDurationMs: z.number().int().nonnegative().optional(),
+  totalActiveDurationMs: z.number().int().nonnegative().optional(),
   firstObservedAt: z.string().datetime(),
   lastObservedAt: z.string().datetime(),
 })
@@ -115,6 +121,7 @@ const RiskEventRecordBaseSchema = ScopedRecordSchema.extend({
 export const BehaviorReportEventRecordSchema = RiskEventRecordBaseSchema.extend({
   recordType: z.literal("behavior_report"),
   eventIndex: z.literal(0),
+  pageUrl: z.string().url().max(2_048),
   report: BehaviorReportSchema,
 })
   .strict()
@@ -128,6 +135,24 @@ export const BehaviorReportEventRecordSchema = RiskEventRecordBaseSchema.extend(
         message: "Behavior report sequence must match its scoped persistence record",
         path: ["report", "sequence"],
       });
+    }
+    try {
+      const pageUrl = new URL(record.pageUrl);
+      if (
+        pageUrl.username ||
+        pageUrl.password ||
+        pageUrl.search ||
+        pageUrl.hash ||
+        pageUrl.pathname !== record.report.evidence.routePath
+      ) {
+        context.addIssue({
+          code: "custom",
+          message: "pageUrl must be the authenticated origin plus sanitized report path",
+          path: ["pageUrl"],
+        });
+      }
+    } catch {
+      // The URL schema above reports malformed values.
     }
     if (Date.parse(record.retentionExpiresAt) <= Date.parse(record.occurredAt)) {
       context.addIssue({

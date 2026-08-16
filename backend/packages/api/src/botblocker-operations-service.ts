@@ -38,6 +38,7 @@ export class BotBlockerOperationsService {
     private readonly config: Pick<
       ProductionConfig,
       | "BOTBLOCKER_ED25519_ACTIVE_KEY_ID"
+      | "BOTBLOCKER_INTELLIGENCE_HASH_SECRET"
       | "BOTBLOCKER_SITE_CREDENTIAL_HASH_SECRET"
       | "BOTBLOCKER_RUNTIME_ORIGIN"
     >,
@@ -71,6 +72,9 @@ export class BotBlockerOperationsService {
         siteId: visitor.siteId,
         gateSessionCount: visitor.gateSessionCount,
         behaviorReportCount: visitor.behaviorReportCount,
+        pageViewCount: visitor.pageViewCount ?? 0,
+        totalPageDurationMs: visitor.totalPageDurationMs ?? 0,
+        totalActiveDurationMs: visitor.totalActiveDurationMs ?? 0,
         firstObservedAt: visitor.firstObservedAt.toISOString(),
         lastObservedAt: visitor.lastObservedAt.toISOString(),
       })),
@@ -141,10 +145,16 @@ export class BotBlockerOperationsService {
     const policySigning = Boolean(
       this.config.BOTBLOCKER_ED25519_ACTIVE_KEY_ID,
     );
+    const intelligenceIngestion = Boolean(
+      this.config.BOTBLOCKER_INTELLIGENCE_HASH_SECRET,
+    );
     const checkedAt = new Date().toISOString();
     const states = {
       mongodb_valkey: dependencies ? "healthy" : "unavailable",
       credential_authentication: credentialAuthentication
+        ? "healthy"
+        : "unavailable",
+      intelligence_ingestion: intelligenceIngestion
         ? "healthy"
         : "unavailable",
       policy_signing: policySigning ? "healthy" : "unavailable",

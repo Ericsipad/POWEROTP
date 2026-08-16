@@ -1,12 +1,19 @@
 import { BrowserAssessmentRequestSchema } from "@powerotp/contracts";
 
 import { apiRoute } from "@/lib/api-route";
-import { unavailableRuntimeMutation } from "@/lib/botblocker-http";
+import { runtimeMutation } from "@/lib/botblocker-http";
 
 export const POST = apiRoute((request) =>
-  unavailableRuntimeMutation(
+  runtimeMutation(
     request,
     BrowserAssessmentRequestSchema,
     "browser-assessment",
+    async (body, site, context) => {
+      await context.botBlockerIngestion.ingestBrowserAssessment(
+        site,
+        body.payload.report,
+        body.audience,
+      );
+    },
   ),
 );

@@ -33,6 +33,9 @@ export const CustomerVisitorSchema = z
     latestDecision: BotBlockerDecisionOutcomeSchema.optional(),
     gateSessionCount: z.number().int().nonnegative(),
     behaviorReportCount: z.number().int().nonnegative(),
+    pageViewCount: z.number().int().nonnegative(),
+    totalPageDurationMs: z.number().int().nonnegative(),
+    totalActiveDurationMs: z.number().int().nonnegative(),
     firstObservedAt: z.string().datetime(),
     lastObservedAt: z.string().datetime(),
   })

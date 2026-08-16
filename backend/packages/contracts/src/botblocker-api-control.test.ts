@@ -20,6 +20,9 @@ describe("customer visitor contracts", () => {
     latestDecision: "allow",
     gateSessionCount: 2,
     behaviorReportCount: 4,
+    pageViewCount: 4,
+    totalPageDurationMs: 95_000,
+    totalActiveDurationMs: 81_000,
     firstObservedAt: NOW,
     lastObservedAt: "2026-08-13T00:01:00.000Z",
   };
@@ -35,6 +38,7 @@ describe("customer visitor contracts", () => {
       "projectId",
       "ipHash",
       "fingerprintHash",
+      "passportUserId",
       "rawEvents",
       "score",
       "weights",

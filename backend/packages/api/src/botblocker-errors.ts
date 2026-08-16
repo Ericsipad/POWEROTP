@@ -17,7 +17,9 @@ export class BotBlockerRuntimeError extends Error {
       | "audience_mismatch"
       | "expired"
       | "invalid_signature"
+      | "invalid_request"
       | "replay_detected"
+      | "stale_sequence"
       | "idempotency_key_required"
       | "idempotency_key_conflict"
       | "dependency_unavailable",

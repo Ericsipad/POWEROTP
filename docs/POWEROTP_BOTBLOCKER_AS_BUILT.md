@@ -21,9 +21,9 @@ BotBlocker is **not active for any real customer**. Phases 1–8 provide strict 
 API contracts, an independent Ed25519 trust domain, disabled project/site configuration,
 durable scoped persistence boundaries, immutable signed policy publication/delivery, and the
 complete authenticated central HTTP surface. Runtime site credentials use an independent
-hashed credential domain and every later-phase runtime capability returns a typed unavailable
-response rather than a fabricated decision, score, challenge result, Passport result, paid
-entitlement, or visitor.
+hashed credential domain. Phase 15 makes browser-assessment and risk-event ingestion real while
+the response remains typed unavailable for unimplemented decision/scoring work rather than
+fabricating a decision, score, challenge result, Passport result, or paid entitlement.
 
 Phases 9–13 add the framework-neutral browser gate and continuous sanitized sensor plus raw
 Node HTTP, Express 5, and Next.js 16 App Router wrappers. The wrappers verify signed clearances
@@ -31,9 +31,15 @@ locally, keep site credentials server-only, expose bounded same-origin bridge ro
 default every unbacked central capability to typed unavailable. The framework packages add
 credential-free React root helpers without rewriting application streams or uploads; the
 Next.js wrapper also provides native Node-runtime Proxy handling and App Router/discovery
-handlers. There is still no real intelligence ingestion, matching, scoring, OTP orchestration,
+handlers. Phase 15 adds transactional, project-scoped visitor sessions, 30-day
+fingerprint-plus-IP matching, immutable sanitized behavior reports/risk events, server-keyed
+lookup hashes, strict sequence/idempotency handling, and the approved 548-day retention
+behavior. Its corrected analytics contract also retains normalized click positions, bounded
+32×32 pointer-density/dwell bins, explicit page ID/name, active/total page time, navigation
+targets, and a server-derived query-free page URL for future project heatmap and navigation
+reports. There is still no scoring, rapid allowlist/blacklist decisioning, OTP orchestration,
 Passport/PaidTokenPass implementation, billing/metering, production BotBlocker key, policy
-release, credential, deployment, or traffic activation.
+release, deployment, or traffic activation.
 
 The Phase 13 correction establishes a strict state-publication boundary. Middleware uses the
 site credential for first session contact and narrow server-held visitor tokens thereafter,
@@ -2296,3 +2302,129 @@ deployment, secrets, DNS, activation, policy publication, account management, re
 mutation, dashboard mutation, or hosting configuration was added or performed through MCP or
 otherwise. No customer-hosted CleanDataPage route was created. No migration, seed, environment/
 server configuration, remote mutation, commit, push, or deployment was performed.
+
+## 2026-08-15 — BotBlocker Phase 15: real intelligence/event ingestion
+
+**Outcome.** Implemented the authoritative MongoDB writer used by the existing
+`POST /v1/botblocker/browser-assessment` and `POST /v1/botblocker/risk-events` central API
+routes. Both routes retain the Phase 8 site-credential authentication, exact
+runtime-origin/site/audience binding, Valkey idempotency/nonce claims, and IP/site rate limits.
+After successful ingestion they still return the strict typed-unavailable response because
+Phase 15 does not invent a score or decision; real `allow | otp` decisioning remains Phase
+16/17/20. RapidAuth, challenge/OTP, Passport, PaidTokenPass, billing, and policy publication
+remain unchanged.
+
+**Production modules.**
+
+- `backend/packages/contracts/src/botblocker.ts` adds document-normalized click positions and a
+  strict optional `pageView` envelope: explicit page ID/name, interval active/total duration,
+  document dimensions, sparse unique 32×32 pointer bins, and sanitized navigation target.
+  `botblocker-persistence.ts` adds the server-derived page URL and an internal-only optional
+  `passportUserId` reference for a later authoritative Passport binding; email/password fields
+  are not part of intelligence storage.
+- `libraries/gate-core/src/{sensor,sensor-evidence}.ts` now collects those analytics per
+  five-second/30-second/partial interval. Pointer events are reduced in-browser to bounded bins;
+  raw chronological movement is never emitted. Page labels come only from explicit
+  `data-powerotp-page-id`/`data-powerotp-page-name` attributes, never `document.title` or DOM
+  text.
+- `backend/packages/api/src/botblocker-ingestion-service.ts` revalidates the strict behavior
+  report/risk-event contracts, derives lookup hashes, opens a first report's visitor session,
+  rejects future-dated/stale/cross-project input, and maps persistence failures to stable
+  BotBlocker errors.
+- `backend/packages/api/src/botblocker-session-persistence.ts` transactionally matches or creates
+  project-scoped user intelligence and creates its gate session. Matching is limited to the
+  approved preceding 30 days and requires both the server-derived fingerprint and keyed IP
+  observation; an IP alone is never identity. A report without trusted IP context creates a
+  separate profile rather than making a weak fingerprint-only merge.
+- `backend/packages/api/src/botblocker-ingestion-persistence.ts` transactionally advances one
+  strictly monotonic sequence stream per scoped gate session, writes immutable normalized
+  behavior/risk-event rows, treats an exact replay as a duplicate, rejects a conflicting/equal/
+  older sequence, and updates only the matching intelligence aggregate.
+- `backend/packages/api/src/config.ts` adds the optional independent server-only
+  `BOTBLOCKER_INTELLIGENCE_HASH_SECRET`. Ingestion fails with typed dependency-unavailable when
+  it is absent; no fallback, unkeyed hash, or reused credential secret exists.
+- `backend/apps/server/lib/{server-context,botblocker-http}.ts` constructs the real ingestion
+  dependency and adds a shared authenticated mutation callback without duplicating Phase 8
+  security. The browser-assessment and risk-events route handlers invoke it.
+- `backend/packages/api/src/botblocker-intelligence-persistence.ts` exports its existing scope
+  type for the new writer. `botblocker-operations-service.ts` reports
+  `intelligence_ingestion` health from the independent secret.
+
+**Data derivation, minimization, and retention.** Fingerprint and trusted-IP lookup values are
+lowercase HMAC-SHA-256 hex derived only on the server. The fingerprint input is the already
+strict sanitized evidence object; raw/browser-supplied fingerprint hashes are rejected. IP
+input is accepted only by the server-side session seam, normalized, keyed, and never stored raw.
+These hashes apply only to identity/network lookup keys, not generic page analytics; they are
+computed once per relevant observation and queried through the existing indexes.
+The durable writer accepts path-without-query/fragment; explicit page ID/name; page timing and
+dimensions; click category/explicit `data-powerotp-id` plus normalized position; bounded
+pointer-grid/mouse/scroll aggregates; honeypots; and fixed environment indicators. It derives
+`pageUrl` from the authenticated audience origin plus sanitized route path, enabling a later
+project heatmap viewer to open the page without trusting a browser-supplied URL. It stores no
+query/fragment, clicked text, form value, raw absolute coordinate, chronological pointer trail,
+document title, DOM/page content, email, or password.
+Session/intelligence expiries refresh from server observation time; immutable report/event
+expiries remain anchored to their occurrence time. All use the approved 548-day TTL schedule,
+and matching uses the existing 30-day cutoff.
+
+**Project scope and query behavior.** Authentication supplies customer/project/site scope; no
+report claims ownership. Session lookup/creation, sequence advancement, event insert, aggregate
+update, visitor listing, and report/event listing include the complete scope. A session ID from
+another project neither authorizes access nor creates a replacement. Existing customer visitor
+queries now include page-view count and total/active page-time aggregates while remaining
+purpose-limited project summaries; stored sanitized reports
+remain available through scoped persistence and the existing audited operator decision trace,
+without exposing hashes or cross-tenant evidence.
+
+**Tests.** Added `botblocker-ingestion-service.test.ts`,
+`botblocker-ingestion-persistence.test.ts`, and `botblocker-session-persistence.test.ts`, and
+updated configuration/health tests. Coverage includes exact replay idempotency, stale and
+cross-project rejection, shared behavior/risk sequence ordering, strict prohibited-field
+rejection before storage, deterministic keyed hash derivation/IP normalization, no IP-only
+identity match, missing-secret typed unavailability, 30-day matching, and 548-day
+session/intelligence/event retention. Corrective analytics tests additionally cover normalized
+clicks, bounded/unique heatmap bins, pointer dwell aggregation, explicit page labels,
+active/total timing, sanitized navigation targets, server-derived query-free page URLs,
+project visitor timing aggregates, and exclusion of raw trails/content/authentication data.
+Focused results after the correction: `@powerotp/contracts` 161 tests,
+`@powerotp/gate-core` 40, and `@powerotp/gate-node` 21 passed; final API/backend/full-suite
+counts are recorded by the closing verification below.
+Full root `npm run verify` then passed every backend, frontend, library, application, and
+integration build/lint/test with zero failures. `npm audit` at the root, backend, and frontend
+lockfile boundaries each reported zero vulnerabilities. Final `git diff --check` passed.
+
+**Documentation and controls.** Updated `THREAT_MODEL.md` with the implemented ingestion,
+derivation, scope, idempotency/order, and retention controls. Updated only control-matrix rows
+whose evidence changed (CC4, CC6.7, PI1, C1.1, A.5.15, A.5.34, and A.8.16); no control was
+prematurely marked implemented. Phase 14 MCP content remains unchanged: its statement that
+generated wrappers have no injected real `GateNodeServices` client is still true even though
+the central ingestion routes now have real writers.
+
+**Exclusions and operations.** No score, decision, rapid allowlist/blacklist, production OTP
+orchestration, Passport/PaidTokenPass behavior, billing, deployment, DNS, secret value, policy
+release, activation, customer-hosted CleanDataPage, fake development/production record, or
+remote mutation was added or performed. No `.env` file was read or changed. No migration or
+seed is required; existing startup index creation already owns the four BotBlocker collections.
+The future heatmap overlay viewer/dashboard itself was not built in this ingestion phase. No
+commit or push was performed.
+
+**Post-phase architecture clarification (future work, not Phase 15 behavior).** The
+`passportUserId` persistence-contract placeholder records that an intelligence profile may
+eventually become associated with a user; Phase 15 does not populate it. The authoritative
+future design will implement that association through dedicated MongoDB `identityBindings`
+records so `userIntelligence` remains the primary behavior/risk profile while identity linkage
+stays internal and auditable. Phase 21 must replace/retire the unpopulated direct placeholder
+rather than write a raw Supabase user ID into intelligence. Supabase Enterprise will be the
+ISO 27001-scoped account/identity
+system of record for email, password/authentication hashes, verified attributes, and other PII;
+MongoDB will retain intelligence plus only an opaque/keyed internal identity reference, never
+those account fields or a customer-visible global user ID.
+
+After scoring and Passport phases ship, every accepted session report will aggregate into its
+`userIntelligence` profile and trigger server-side score recalculation. A changed score may
+produce a newer signed `otp` recommendation at any time and suspend identity-bound Human
+Passport or paid-agent fast access until authoritative recovery succeeds. Browser middleware
+continues to observe and aggregate evidence only; it does not author scores, decisions, or
+credential suspensions. These rules were added to the plan, threat model, and future phase
+instructions to prevent later sessions from reviving the earlier ambiguous identity/scoring
+interpretation.

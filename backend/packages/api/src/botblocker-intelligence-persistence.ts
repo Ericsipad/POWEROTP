@@ -19,7 +19,7 @@ export const createUserIntelligenceId = () => createId("bui");
 export const createRiskEventId = () => createId("bre");
 export const createBotBlockerChallengeId = () => createId("bbc");
 
-interface BotBlockerScope {
+export interface BotBlockerScope {
   customerId: string;
   projectId: string;
   siteId: string;
@@ -52,6 +52,9 @@ export interface IpObservation {
 
 export interface UserIntelligenceDocument extends BotBlockerScope {
   _id: string;
+  /** Internal authoritative Passport account reference. This remains absent
+   * until a later Passport phase verifies and binds a real Passport user. */
+  passportUserId?: string;
   /** Non-unique, server-derived lookup evidence. Phase 15 owns derivation
    * and matching; Phase 6 only fixes the durable, project-scoped boundary. */
   fingerprintHash: string;
@@ -59,6 +62,9 @@ export interface UserIntelligenceDocument extends BotBlockerScope {
   latestEvidence?: BrowserEvidence;
   gateSessionCount: number;
   behaviorReportCount: number;
+  pageViewCount?: number;
+  totalPageDurationMs?: number;
+  totalActiveDurationMs?: number;
   firstObservedAt: Date;
   lastObservedAt: Date;
   createdAt: Date;
@@ -81,6 +87,8 @@ interface RiskEventDocumentBase extends BotBlockerScope {
 export interface BehaviorReportEventDocument extends RiskEventDocumentBase {
   recordType: "behavior_report";
   eventIndex: 0;
+  /** Derived from the authenticated request audience plus sanitized path. */
+  pageUrl: string;
   report: BehaviorReport;
 }
 

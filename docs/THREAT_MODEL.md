@@ -130,8 +130,9 @@ in [`POWEROTP_BOTBLOCKER_AS_BUILT.md`](POWEROTP_BOTBLOCKER_AS_BUILT.md) says so.
 - Sanitized browser/behavior telemetry, derived risk signals, and scoring model inputs.
 - Cross-project fraud/security intelligence and each customer's own project-scoped visitor
   data.
-- Passport identity records, per-client pairwise pseudonyms, and the internal pepper/derivation
-  key that produces them (see
+- Supabase Enterprise account/Passport identity records, MongoDB `identityBindings`, per-client
+  pairwise pseudonyms, and the internal pepper/derivation key that links an intelligence profile
+  to an opaque internal identity reference (see
   [`PASSPORT_BUSINESS_AND_LEGAL_PLAN.md`](PASSPORT_BUSINESS_AND_LEGAL_PLAN.md)).
 - Customer-authored CleanDataPage content/configuration, short-lived viewing tokens,
   PaidTokenPass exchanges, and Ad Revenue accounting evidence.
@@ -252,6 +253,16 @@ This is a trust boundary, not merely a packaging choice:
   privilege change (e.g. anonymous visitor to Passport holder) without a fresh signed
   assertion; this prevents an attacker from fixating a pre-verification session ID and
   inheriting a later-verified visitor's clearance.
+- `userIntelligence` remains the behavior/risk profile before and after identification. Only an
+  authoritative verified account/Passport/paid-entitlement flow may create or change its
+  `identityBindings` association; browser telemetry and customer-supplied user IDs cannot.
+  MongoDB receives only an opaque/keyed identity reference, while email, password/
+  authentication hashes, verified attributes, and other identity PII remain in Supabase
+  Enterprise.
+- Every accepted session report may update the intelligence profile and, once scoring exists,
+  rerun its authoritative score. A threshold change may issue a newer signed `otp` decision and
+  suspend identity-bound Passport/PaidTokenPass fast access. A browser or middleware-generated
+  suspicion is evidence only and can never freeze credentials or author a decision by itself.
 - `openOtp()` never accepts a caller-supplied session ID. Duplicate/malformed cookies fail
   validation, and the server-side session lookup plus scoped token claims must agree on
   site/session/audience before POWEROTP reads the related user-intelligence record.
@@ -379,6 +390,11 @@ This is a trust boundary, not merely a packaging choice:
   Phase 15/16 ship.
 - No API ever accepts a caller-supplied `projectId` without verifying the authenticated
   caller's ownership of that project first.
+- Phase 15's ingestion scope is taken from the authenticated site credential, never from a
+  report-level ownership claim. Session lookup, sequence advancement, immutable event writes,
+  intelligence updates, visitor lists, and report/event lists all include
+  `customerId`/`projectId`/`siteId`; reuse of another project's gate-session ID is rejected
+  without creating or returning that project's record.
 
 ### CleanDataPage access, content, and revenue integrity
 
@@ -411,9 +427,10 @@ visitor's browser:
 
 | Allowed | Prohibited |
 | --- | --- |
-| Route path, query string and fragment stripped | Full URL with query string/fragment |
-| Click element category and explicit `data-powerotp-id` | Clicked text, form values, arbitrary CSS selectors |
-| Mouse directness/straight-line metrics between clicks | Raw mouse coordinate trails |
+| Route path plus a server-derived absolute page URL, always with query string and fragment stripped | Full URL with query string/fragment |
+| Explicit `data-powerotp-page-id`/`data-powerotp-page-name`, interval duration and visible/active duration, document dimensions, and sanitized navigation target path | Automatically scraped document title, DOM text/content, history state, query parameters |
+| Click element category, explicit `data-powerotp-id`, and document-normalized `xRatio`/`yRatio` | Clicked text, form values, arbitrary CSS selectors, raw absolute pixel coordinates |
+| Mouse directness/straight-line metrics plus sparse client-aggregated 32×32 pointer bins (`sampleCount`, bounded `dwellMs`) | Chronological/raw mouse coordinate trails or every pointer event |
 | Scroll smoothness / high-speed aggregate metrics | Raw scroll trails |
 | Honeypot/decoy activations | — |
 | Versioned sensor metadata and fixed-enum `webdriver`/untrusted-event indicators | Raw user-agent strings, plugin/font inventories, arbitrary browser-property scans, raw event details |
@@ -424,6 +441,31 @@ it is added, and a field that cannot be justified as one of the "Allowed" rows m
 This mirrors the existing rule that PowerOTP's OTP platform never logs answers, tokens, or
 secrets (see [Enumeration and privacy](#enumeration-and-privacy) and
 [Challenge disclosure or manipulation](#challenge-disclosure-or-manipulation) above).
+
+The Phase 15 analytics correction deliberately keeps enough bounded evidence for project-owned
+click/pointer heatmaps, page-time charts, and navigation-flow reports. It aggregates pointer
+movement in the browser before transmission and retains normalized click points, so the
+backend can generate an overlay for a current page without storing a replayable cursor trail.
+The future viewer opens the server-derived `audience origin + sanitized routePath` URL; it never
+uses a browser-supplied full URL or query string. Page labels are opt-in customer-authored
+`data-powerotp-page-*` attributes, not scraped content.
+
+Phase 15 applies the same strict schemas again at the authoritative ingestion service before
+opening a session or writing an event. MongoDB transactions bind each immutable report/event to
+the authenticated customer/project/site and gate session, advance only a strictly newer
+per-session sequence, and return an exact replay as an idempotent duplicate rather than writing
+it twice. A conflicting or older sequence is rejected. Event TTLs remain anchored to the
+reported occurrence time, while session/intelligence TTLs refresh from the server receipt time,
+using the approved 548-day retention and 30-day matching window.
+
+Fingerprint and IP lookup values are HMAC-SHA-256 values derived only on the server under the
+independent `BOTBLOCKER_INTELLIGENCE_HASH_SECRET`; raw IP addresses and browser-supplied
+fingerprint hashes are not durable inputs or fields. Fingerprint material is the already-strict
+sanitized evidence object. A recent profile match requires both the derived fingerprint and a
+matching keyed IP observation within the same customer/project/site and 30-day window; a
+repeated IP alone never establishes visitor identity. When trusted IP context is unavailable,
+the session is still retained without an IP hash and is not merged into an earlier profile on
+fingerprint evidence alone.
 
 ### Public MCP generator
 

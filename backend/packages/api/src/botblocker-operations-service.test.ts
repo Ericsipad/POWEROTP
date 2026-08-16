@@ -51,6 +51,9 @@ function fixture() {
         ipObservations: [{ ipHash: "b".repeat(64) }],
         gateSessionCount: 2,
         behaviorReportCount: 4,
+        pageViewCount: 4,
+        totalPageDurationMs: 95_000,
+        totalActiveDurationMs: 81_000,
         firstObservedAt: now,
         lastObservedAt: now,
       },
@@ -82,6 +85,7 @@ function fixture() {
     async () => true,
     {
       BOTBLOCKER_ED25519_ACTIVE_KEY_ID: "key_active",
+      BOTBLOCKER_INTELLIGENCE_HASH_SECRET: "i".repeat(32),
       BOTBLOCKER_SITE_CREDENTIAL_HASH_SECRET: "h".repeat(32),
       BOTBLOCKER_RUNTIME_ORIGIN: "https://verify.powerotp.com",
     },
@@ -99,6 +103,7 @@ describe("BotBlockerOperationsService", () => {
     );
     assert.equal(response.visitors.length, 1);
     assert.equal(response.visitors[0]?.visitorId, "bui_1234567890123456");
+    assert.equal(response.visitors[0]?.totalActiveDurationMs, 81_000);
     assert.equal("fingerprintHash" in response.visitors[0]!, false);
     assert.equal("ipObservations" in response.visitors[0]!, false);
     await assert.rejects(
