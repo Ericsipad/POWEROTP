@@ -617,17 +617,27 @@ and fingerprint data. `https://api.powerotp.com` owns authoritative full-history
 data and is the fallback rapid-check origin when the Worker is unavailable. Operator-only
 routes use the separately authenticated `/v1/control/botblocker/*` namespace on the backend.
 
-- `POST /v1/botblocker/rapid-auth`
-- `POST /v1/botblocker/browser-assessment`
-- `POST /v1/botblocker/risk-events`
-- `POST /v1/botblocker/challenges`
-- `GET /v1/botblocker/challenges/{challengeId}`
-- `POST /v1/botblocker/challenges/{challengeId}/complete`
+Every site-credential-authenticated runtime route below requires a project-scoped `webhookId`
+path segment, generated automatically the moment a project is created (see "Project-scoped
+webhook endpoint" below). A request whose `webhookId` does not resolve to a real, currently
+provisioned site is rejected with a bare 404 before any body parsing or credential check runs —
+this is a routing-level defense against anonymous traffic scanning a fixed, unscoped global URL,
+not a replacement for the Bearer site credential, which remains the actual authentication
+boundary. `GET /v1/botblocker/policy/{siteId}` is intentionally exempt: it is a public,
+anonymous, cacheable read with no credential to protect, and already uses the low-privilege
+public `siteId` for the same routing purpose.
+
+- `POST /v1/botblocker/rapid-auth/{webhookId}`
+- `POST /v1/botblocker/browser-assessment/{webhookId}`
+- `POST /v1/botblocker/risk-events/{webhookId}`
+- `POST /v1/botblocker/challenges/{webhookId}`
+- `GET /v1/botblocker/challenges/{webhookId}/{challengeId}`
+- `POST /v1/botblocker/challenges/{webhookId}/{challengeId}/complete`
 - `GET /v1/botblocker/policy/{siteId}`
-- `POST /v1/botblocker/passports/register`
-- `POST /v1/botblocker/passports/assert`
-- `POST /v1/botblocker/paid-passes/assert`
-- `POST /v1/botblocker/agent/entitlements`
+- `POST /v1/botblocker/passports/register/{webhookId}`
+- `POST /v1/botblocker/passports/assert/{webhookId}`
+- `POST /v1/botblocker/paid-passes/assert/{webhookId}`
+- `POST /v1/botblocker/agent/entitlements/{webhookId}`
 - `GET/POST /v1/projects/{projectId}/clean-data-pages`
 - `GET/PATCH /v1/projects/{projectId}/clean-data-pages/{cleanDataPageId}`
 - `POST /v1/clean-data-pages/{cleanDataPageId}/access-tokens` (free issuance or paid
@@ -648,6 +658,29 @@ implementation returns an explicit typed `*_unavailable` response — never a fa
 decision, score, or approval. The exact request/response shapes are defined in
 [Phase 1](POWEROTP_BOTBLOCKER_DEVELOPMENT_PHASES.md#phase-1--base-protocol-contracts) and
 [Phase 2](POWEROTP_BOTBLOCKER_DEVELOPMENT_PHASES.md#phase-2--decision-challenge-and-proof-contracts).
+
+### Project-scoped webhook endpoint
+
+Every runtime call that originates from actual website visitor traffic — reports, risk events,
+the initial RapidAuth contact, and OTP challenge create/poll/complete — must reach POWEROTP
+through the project's own scoped webhook URL, never a fixed, shared, unscoped path. A dashboard
+API call the customer's own backend makes directly (project configuration, credential rotation,
+visitor listing) is a different traffic class and stays protected by the existing customer
+session/CSRF/project-ownership boundary instead.
+
+- `webhookId` is generated automatically the moment a project is created — never something a
+  customer requests, and never left to be lazily created on first dashboard visit.
+- `webhookId` is distinct from `siteId`: `siteId` is the site's internal identity and may be
+  rotated independently; `webhookId` exists purely as a routing/rejection key so the server can
+  drop a request whose URL does not correspond to a real, currently provisioned project before
+  running any credential check or parsing any body. Both remain low-privilege values — neither
+  authorizes anything by itself, and the Bearer site credential remains the actual authentication
+  boundary for every mutation.
+- Because the platform's advisory model is fail-open by design (a decision timeout or unreachable
+  backend never blocks the customer's site), an attacker who can cheaply flood a fixed global
+  runtime URL gains a cheap way to degrade or bypass BotBlocker for every customer at once. Site
+  scoping does not replace rate limiting, credential verification, or idempotency; it removes the
+  ability to hit real logic at all without first discovering a specific project's own URL.
 
 ## Failure and security rules
 

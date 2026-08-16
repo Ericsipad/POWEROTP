@@ -75,6 +75,22 @@ export const DecisionTimeoutMsSchema = z
 export const SiteIdSchema = z.string().min(16).max(64);
 
 /**
+ * The opaque, project-scoped URL segment every server-to-server BotBlocker
+ * runtime route (rapid-auth, browser-assessment, risk-events, challenges,
+ * passports, paid-passes, agent entitlements) requires in its path, e.g.
+ * `POST /v1/botblocker/browser-assessment/{webhookId}`. It is distinct from
+ * `SiteIdSchema`: `siteId` identifies the site for internal binding and may
+ * be rotated independently, while `webhookId` exists solely so the server
+ * can reject a request whose path does not resolve to a real, currently
+ * provisioned site before running any credential/body parsing — cheap
+ * defense against anonymous scanning of a fixed, unscoped global URL (see
+ * `docs/THREAT_MODEL.md`'s "Site-scoped webhook endpoint routing"). Like
+ * `siteId`, it authorizes nothing by itself; the Bearer site credential
+ * remains the actual authentication boundary.
+ */
+export const BotBlockerWebhookIdSchema = z.string().min(16).max(64);
+
+/**
  * The site credential is server-only and must never appear in browser
  * code, a public bundle, or a client-visible cookie (see
  * `docs/THREAT_MODEL.md`'s "API-key separation"). Defined here only so
@@ -502,6 +518,7 @@ export type BotBlockerProtocolVersion = z.infer<typeof BotBlockerProtocolVersion
 export type BotBlockerContractVersion = z.infer<typeof BotBlockerContractVersionSchema>;
 export type DecisionTimeoutMs = z.infer<typeof DecisionTimeoutMsSchema>;
 export type SiteId = z.infer<typeof SiteIdSchema>;
+export type BotBlockerWebhookId = z.infer<typeof BotBlockerWebhookIdSchema>;
 export type SiteCredential = z.infer<typeof SiteCredentialSchema>;
 export type HttpMethod = z.infer<typeof HttpMethodSchema>;
 export type SanitizedRoutePath = z.infer<typeof SanitizedRoutePathSchema>;

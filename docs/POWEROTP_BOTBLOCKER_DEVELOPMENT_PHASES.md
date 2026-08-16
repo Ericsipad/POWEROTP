@@ -189,7 +189,23 @@ Create permanent authenticated/rate-limited route handlers for:
   `/v1/control/botblocker/decision-traces/{gateSessionId}`,
   `/v1/control/botblocker/health`, and `/v1/control/botblocker/policy-releases` routes
 
-Unimplemented services return typed unavailable responses, never synthetic outcomes.
+Unimplemented services return typed unavailable responses, never synthetic outcomes. The
+historical Phase 8 implementation left every route above at one fixed, unscoped global URL per
+operation; Phase 8A corrects that boundary.
+
+### Phase 8A — Site-scoped webhook endpoint routing
+
+Corrective phase: the routes above originally shared one fixed, unscoped global URL per
+operation, distinguished only by the Bearer site credential. Require a project-scoped
+`webhookId` path segment — generated automatically the moment a project is created, distinct
+from `siteId`, and not itself an authorization boundary — on every site-credential-authenticated
+runtime route (`rapid-auth`, `browser-assessment`, `risk-events`, `challenges` create/read/
+complete, `passports/register`, `passports/assert`, `paid-passes/assert`,
+`agent/entitlements`). A `webhookId` that does not resolve to a real, currently provisioned site
+returns a bare 404 before any body parsing or credential/idempotency work runs. `GET
+/v1/botblocker/policy/{siteId}` is unaffected: it is already scoped by the public `siteId` and
+has no credential to protect. See `docs/POWEROTP_BOTBLOCKER_PLAN.md`'s "Project-scoped webhook
+endpoint" section and `docs/THREAT_MODEL.md`'s "Site-scoped webhook endpoint routing" section.
 
 ### Phase 9 — Framework-neutral browser gate
 

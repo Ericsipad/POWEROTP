@@ -59,6 +59,10 @@ function createFakeDb() {
           sites.set(filter.projectId, site);
           return site;
         },
+        findOne: async (filter: { webhookId: string }) =>
+          [...sites.values()].find(
+            (site) => site.webhookId === filter.webhookId,
+          ) ?? null,
       };
     },
   } as unknown as Db;
@@ -92,6 +96,48 @@ describe("BotBlockerSiteService", () => {
 
     assert.equal(second.siteId, first.siteId);
     assert.equal(sites.size, 1);
+  });
+
+  it("generates a distinct webhookId independent of siteId", async () => {
+    const { db } = createFakeDb();
+    const service = new BotBlockerSiteService(db);
+
+    const configuration = await service.get(
+      "usr_owner",
+      "prj_1234567890123456",
+    );
+
+    assert.ok(configuration.webhookId);
+    assert.notEqual(configuration.webhookId, configuration.siteId);
+    assert.match(configuration.webhookId, /^bwh_/);
+  });
+
+  it("ensures the site without requiring ownership, for use at project creation", async () => {
+    const { db, sites } = createFakeDb();
+    const service = new BotBlockerSiteService(db);
+
+    const configuration = await service.ensure(
+      "usr_owner",
+      "prj_1234567890123456",
+    );
+
+    assert.ok(configuration.webhookId);
+    assert.equal(sites.size, 1);
+  });
+
+  it("resolves a site anonymously by its webhookId, matching only that project", async () => {
+    const { db } = createFakeDb();
+    const service = new BotBlockerSiteService(db);
+    const configuration = await service.get(
+      "usr_owner",
+      "prj_1234567890123456",
+    );
+
+    const resolved = await service.findByWebhookId(configuration.webhookId);
+    assert.equal(resolved?.projectId, "prj_1234567890123456");
+    assert.equal(resolved?.customerId, "usr_owner");
+
+    assert.equal(await service.findByWebhookId("bwh_does_not_exist"), null);
   });
 
   it("updates only customer-visible settings and writes an audit event", async () => {

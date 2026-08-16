@@ -13,6 +13,7 @@ import {
   createGateController,
   createPageLock,
   createSensorEvidenceAccumulator,
+  pageDimensions,
   type ChallengeUxMessage,
   type GateController,
   type GateEffect,
@@ -58,7 +59,10 @@ export async function createGateBrowserCoordinator(
     evidence: createSensorEvidenceAccumulator({
       sensorVersion: options.sensorVersion,
       webdriver: options.window.navigator.webdriver === true,
-    }).snapshot(options.window.location.pathname),
+    }).snapshot(
+      options.window.location.pathname,
+      pageDimensions(options.document),
+    ),
     proofs: options.initialProofs ?? {},
   });
   await postJson(fetcher, "/_powerotp/initial-evidence", initialBrowser).catch(() => {

@@ -396,6 +396,38 @@ This is a trust boundary, not merely a packaging choice:
   `customerId`/`projectId`/`siteId`; reuse of another project's gate-session ID is rejected
   without creating or returning that project's record.
 
+### Site-scoped webhook endpoint routing
+
+Phase 8A corrects a gap in the original Phase 8 central API surface: every runtime route
+originating from real website visitor traffic (`rapid-auth`, `browser-assessment`,
+`risk-events`, `challenges` create/read/complete, `passports/register`, `passports/assert`,
+`paid-passes/assert`, `agent/entitlements`) previously shared one fixed, unscoped global URL per
+operation, distinguished only by the Bearer site credential in the request body/header. Because
+this platform is fail-open by design — a decision timeout or unreachable backend must never
+block the customer's site — an attacker who can cheaply flood a fixed global runtime URL gains a
+correspondingly cheap way to degrade rate limits, database capacity, or availability shared
+across every customer at once, without needing to know any customer's credential first.
+
+- Every route above now requires a project-scoped `webhookId` path segment, generated
+  automatically at project creation (never lazily, never customer-requested) and distinct from
+  `siteId`. Like `siteId`, `webhookId` authorizes nothing by itself and may appear in
+  non-secret configuration; the Bearer site credential remains the sole authentication boundary
+  for the request.
+- The server resolves `webhookId` to a real site *before* parsing the request body or running
+  any credential/idempotency/nonce work, and returns a bare 404 immediately if it does not
+  resolve — the cheapest possible rejection for anonymous scanning traffic that does not know a
+  specific project's URL.
+- Once resolved, the existing Bearer-authenticated site must match the site the URL resolved to;
+  a mismatch (a credential valid for a different project replayed against this project's
+  webhook URL) is rejected as `audience_mismatch`, never silently accepted.
+- A dashboard-authenticated call the customer's own backend makes directly (project
+  configuration, credential rotation, project-scoped visitor listing) is a different traffic
+  class and is unaffected — it remains protected by the existing customer session, CSRF, and
+  project-ownership checks, not by URL scoping.
+- `GET /v1/botblocker/policy/{siteId}` is intentionally unaffected: it is already a public,
+  anonymous, cacheable read scoped by the low-privilege public `siteId`, with no credential to
+  protect and no fail-open flood-amplification risk of its own.
+
 ### CleanDataPage access, content, and revenue integrity
 
 - A CleanDataPage URL identifies a project/page but authorizes nothing. Every request requires

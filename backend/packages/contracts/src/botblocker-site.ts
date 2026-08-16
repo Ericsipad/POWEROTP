@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import {
   BOTBLOCKER_TIMEOUT_DEFAULT_MS,
+  BotBlockerWebhookIdSchema,
   DecisionTimeoutMsSchema,
   SiteIdSchema,
 } from "./botblocker.js";
@@ -9,11 +10,15 @@ import {
 /**
  * Customer-visible, project-scoped BotBlocker settings. Site credentials,
  * signing keys, and other server-only configuration are intentionally absent.
+ * `webhookId` is the opaque path segment every runtime route requires (see
+ * `BotBlockerWebhookIdSchema`); it is provisioned automatically the moment
+ * the project exists and is safe to display to the customer immediately.
  */
 export const BotBlockerSiteConfigurationSchema = z
   .object({
     siteId: SiteIdSchema,
     projectId: z.string().min(16),
+    webhookId: BotBlockerWebhookIdSchema,
     enabled: z.boolean(),
     decisionTimeoutMs: DecisionTimeoutMsSchema,
     createdAt: z.string().datetime(),

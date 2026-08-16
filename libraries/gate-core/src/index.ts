@@ -46,6 +46,10 @@ export {
   type SensorEvidenceOptions,
 } from "./sensor-evidence.js";
 export {
+  pageDimensions,
+  type PageDimensions,
+} from "./sensor-analytics.js";
+export {
   gateStates,
   isGateObservationPaused,
   isGatePageOpen,

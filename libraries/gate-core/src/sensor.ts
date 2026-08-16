@@ -8,6 +8,11 @@ import {
 } from "@powerotp/contracts";
 import type { GateEffect } from "./controller.js";
 import {
+  pageDimensions,
+  pageMetadata,
+  pagePoint,
+} from "./sensor-analytics.js";
+import {
   createSensorEvidenceAccumulator,
   sanitizeRoutePath,
 } from "./sensor-evidence.js";
@@ -297,53 +302,4 @@ export function createContinuousBrowserSensor(
   const patchedPushState = history.pushState;
   const patchedReplaceState = history.replaceState;
   return sensor;
-}
-
-function pagePoint(
-  event: MouseEvent | PointerEvent,
-  window: Window,
-): { x: number; y: number } {
-  return {
-    x: Number.isFinite(event.pageX) ? event.pageX : event.clientX + window.scrollX,
-    y: Number.isFinite(event.pageY) ? event.pageY : event.clientY + window.scrollY,
-  };
-}
-
-function pageDimensions(document: Document): { width: number; height: number } {
-  const root = document.documentElement;
-  const body = document.body;
-  return {
-    width: Math.max(
-      1,
-      root?.scrollWidth ?? 0,
-      root?.clientWidth ?? 0,
-      body?.scrollWidth ?? 0,
-      body?.clientWidth ?? 0,
-    ),
-    height: Math.max(
-      1,
-      root?.scrollHeight ?? 0,
-      root?.clientHeight ?? 0,
-      body?.scrollHeight ?? 0,
-      body?.clientHeight ?? 0,
-    ),
-  };
-}
-
-function pageMetadata(document: Document): {
-  pageId?: string;
-  pageName?: string;
-} {
-  const root = document.documentElement;
-  const body = document.body;
-  const pageId = root?.getAttribute("data-powerotp-page-id") ??
-    body?.getAttribute("data-powerotp-page-id") ??
-    undefined;
-  const pageName = root?.getAttribute("data-powerotp-page-name") ??
-    body?.getAttribute("data-powerotp-page-name") ??
-    undefined;
-  return {
-    ...(pageId ? { pageId } : {}),
-    ...(pageName ? { pageName } : {}),
-  };
 }

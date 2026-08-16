@@ -29,6 +29,20 @@ export class BotBlockerSiteService {
     projectId: string,
   ): Promise<BotBlockerSiteConfiguration> {
     await this.#assertOwned(customerId, projectId);
+    return this.ensure(customerId, projectId);
+  }
+
+  /**
+   * Idempotently provisions the durable site row (and its `webhookId`)
+   * without an ownership check, so it can be called during project
+   * creation before any customer session context exists. Safe to call
+   * repeatedly — later calls return the same row unchanged. Customer-facing
+   * reads must go through `get()`, which enforces ownership first.
+   */
+  async ensure(
+    customerId: string,
+    projectId: string,
+  ): Promise<BotBlockerSiteConfiguration> {
     const now = new Date();
     const site = await this.#sites.findOneAndUpdate(
       { projectId, customerId },
@@ -37,6 +51,7 @@ export class BotBlockerSiteService {
           _id: createId("bbs"),
           projectId,
           customerId,
+          webhookId: createId("bwh"),
           ...DEFAULT_BOTBLOCKER_SITE_CONFIGURATION,
           createdAt: now,
           updatedAt: now,
@@ -46,6 +61,17 @@ export class BotBlockerSiteService {
     );
     if (!site) throw new Error("BotBlocker site upsert returned no document");
     return toResponse(site);
+  }
+
+  /**
+   * Anonymous, project-scoped resolution for the runtime routes' URL
+   * `webhookId` segment. Never used for authorization by itself — see
+   * `BotBlockerWebhookIdSchema`'s doc comment — only to reject a request
+   * whose path doesn't correspond to a real site before running any
+   * credential/body auth.
+   */
+  findByWebhookId(webhookId: string) {
+    return this.#sites.findOne({ webhookId });
   }
 
   async update(
@@ -88,6 +114,7 @@ function toResponse(site: BotBlockerSiteDocument): BotBlockerSiteConfiguration {
   return {
     siteId: site._id,
     projectId: site.projectId,
+    webhookId: site.webhookId,
     enabled: site.enabled,
     decisionTimeoutMs: site.decisionTimeoutMs,
     createdAt: site.createdAt.toISOString(),

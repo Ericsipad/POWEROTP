@@ -41,6 +41,13 @@ reports. There is still no scoring, rapid allowlist/blacklist decisioning, OTP o
 Passport/PaidTokenPass implementation, billing/metering, production BotBlocker key, policy
 release, deployment, or traffic activation.
 
+Phase 8A corrects the shipped Phase 8 central API surface: every site-credential-authenticated
+runtime route (`rapid-auth`, `browser-assessment`, `risk-events`, `challenges` create/read/
+complete, `passports/register`, `passports/assert`, `paid-passes/assert`, `agent/entitlements`)
+now requires a project-scoped `webhookId` URL segment, generated automatically at project
+creation and rejected with a bare 404 before any body/credential work if it does not resolve to
+a real site. `GET /v1/botblocker/policy/{siteId}` is unaffected.
+
 The Phase 13 correction establishes a strict state-publication boundary. Middleware uses the
 site credential for first session contact and narrow server-held visitor tokens thereafter,
 then publishes advisory state for every customer application request except fixed technical
@@ -2428,3 +2435,80 @@ continues to observe and aggregate evidence only; it does not author scores, dec
 credential suspensions. These rules were added to the plan, threat model, and future phase
 instructions to prevent later sessions from reviving the earlier ambiguous identity/scoring
 interpretation.
+
+## 2026-08-16 — BotBlocker Phase 8A: site-scoped webhook endpoint routing
+
+**Outcome.** Corrected the shipped Phase 8 central API surface: every site-credential-
+authenticated runtime route now requires a project-scoped `webhookId` path segment, generated
+automatically the moment a project is created, and is rejected with a bare 404 — before any body
+parsing or credential/idempotency work runs — if that segment does not resolve to a real,
+currently provisioned site. This closes a real attack-surface gap: because the platform is
+fail-open by design, a fixed, unscoped global URL shared by every customer let anonymous flood
+traffic cheaply degrade shared capacity (rate limits, database load) without needing to know any
+customer's credential first. `GET /v1/botblocker/policy/{siteId}` was already scoped by the
+public `siteId` and needed no change.
+
+**Contracts.** `backend/packages/contracts/src/botblocker.ts` adds `BotBlockerWebhookIdSchema` —
+an opaque, `siteId`-shaped but conceptually distinct identifier used only for URL routing/
+rejection, never authorization. `backend/packages/contracts/src/botblocker-site.ts`'s
+`BotBlockerSiteConfigurationSchema` adds a required `webhookId` field so the dashboard can
+display/copy it immediately.
+
+**Persistence and service.** `botblocker-site-persistence.ts` adds `webhookId` to
+`BotBlockerSiteDocument` with its own unique index. `botblocker-site-service.ts` generates
+`webhookId` (`bwh_*`) alongside the existing `_id` in the same upsert, adds an ownership-free
+`ensure()` used at project creation, and adds `findByWebhookId()` for anonymous runtime-route
+resolution — deliberately separate from the ownership-checked `get()` customers' dashboard reads
+use.
+
+**Eager provisioning at project creation.** `project-service.ts`'s `ProjectService` takes an
+optional `ensureBotBlockerSite` hook, called immediately after the project and its API key are
+inserted; a failure rolls back both the project and the API key, so a project can never exist
+without its BotBlocker site (and therefore its `webhookId`) already provisioned — satisfying "the
+webhook is created at project startup," not lazily on first BotBlocker dashboard visit.
+`backend/apps/server/lib/server-context.ts` wires this by constructing `BotBlockerSiteService`
+before `ProjectService` and passing `botBlockerSites.ensure` as that hook.
+
+**Route/HTTP restructuring.** `backend/apps/server/lib/botblocker-http.ts`'s shared
+`runtimeMutation`/`unavailableChallengeRead` helpers now accept a `webhookId`, resolve it via
+`botBlockerSites.findByWebhookId()` immediately after the per-IP rate limit and before any
+`request.json()` call, and return a bare `404` (no body, `cache-control: no-store`) when it does
+not resolve. Once the existing Bearer/envelope authentication succeeds, the authenticated
+credential's own `siteId` must equal the URL-resolved site's `_id`; a mismatch returns
+`audience_mismatch` rather than being silently accepted. Every affected Next.js route file moved
+under a new `[webhookId]` path segment: `rapid-auth`, `browser-assessment`, `risk-events`,
+`passports/register`, `passports/assert`, `paid-passes/assert`, and `agent/entitlements` gained
+`[webhookId]/route.ts`; the `challenges` family was restructured so `challengeId` nests under
+`webhookId` (`challenges/[webhookId]/route.ts` for create,
+`challenges/[webhookId]/[challengeId]/route.ts` for read,
+`challenges/[webhookId]/[challengeId]/complete/route.ts` for complete) since Next.js does not
+allow two different dynamic segment names at the same path level.
+
+**Tests.** Added coverage in `botblocker-site-service.test.ts` (distinct `webhookId` generation,
+ownership-free `ensure()`, anonymous `findByWebhookId()` scoped to the correct project, unknown
+`webhookId` returning nothing) and a new `project-service.test.ts` (BotBlocker site/webhook
+provisioned during project creation; project and API key both rolled back if provisioning
+fails; unaffected creation when no hook is supplied). Updated
+`botblocker-site.test.ts` for the new required contract field.
+`backend/apps/server/app/route-inventory.test.ts` and `docs/API_ROUTE_INVENTORY.md` were
+updated together so the canonical route inventory continues to match the on-disk route tree
+exactly.
+
+**Verification.** Focused suites for `@powerotp/contracts` and `@powerotp/api` passed. Full
+`npm run verify` passed across every workspace. `npm audit` at the root, backend, and frontend
+lockfile boundaries reported zero vulnerabilities. `git diff --check` passed.
+
+**Documentation.** Updated `docs/POWEROTP_BOTBLOCKER_PLAN.md` (API surface list plus a new
+"Project-scoped webhook endpoint" section), `docs/POWEROTP_BOTBLOCKER_DEVELOPMENT_PHASES.md`
+(new `Phase 8A` entry, mirroring the existing `13A–13D`/`14A` lettered-correction convention),
+`docs/THREAT_MODEL.md` (new "Site-scoped webhook endpoint routing" section), and
+`docs/POWEROTP_BOTBLOCKER_SOC2_ISO27001_CONTROL_MATRIX.md`'s CC6.6 row.
+
+**Exclusions and operations.** No scoring, decision, allowlist/blacklist, OTP orchestration,
+Passport/PaidTokenPass behavior, billing, deployment, DNS, secret value, policy release,
+activation, fake development/production record, or remote mutation was added or performed. No
+change was made to `libraries/gate-node`'s shipped public API (`GateNodeOptions`,
+`GateNodeServices`) — no live HTTP client from any wrapper to the central API exists yet, so
+this correction has no effect on any currently shipped wrapper behavior; a future phase building
+that client must supply `webhookId` alongside `siteId`/`siteCredential`. No `.env` file was read
+or changed, no migration or seed was performed, and no commit or push was performed.

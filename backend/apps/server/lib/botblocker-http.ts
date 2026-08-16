@@ -28,23 +28,38 @@ export async function unavailableRuntimeMutation<
   request: NextRequest,
   schema: ZodType<T>,
   operation: string,
+  webhookId: string,
   expectedChallengeId?: string,
 ): Promise<NextResponse> {
   return runtimeMutation(
     request,
     schema,
     operation,
+    webhookId,
     undefined,
     expectedChallengeId,
   );
 }
 
+/**
+ * Every site-credential-authenticated runtime mutation is reached only
+ * through its project-scoped `webhookId` URL segment, resolved and checked
+ * for existence *before* any body parsing or credential/idempotency work —
+ * see `docs/THREAT_MODEL.md`'s "Site-scoped webhook endpoint routing". A
+ * `webhookId` that does not resolve to a real site returns a bare 404
+ * immediately; it never reaches `BotBlockerRuntimeSecurity`. Once resolved,
+ * the existing Bearer site-credential/envelope authentication still runs in
+ * full, and the authenticated credential's own site must additionally match
+ * the site the URL resolved to — a stolen/reused credential for a different
+ * project cannot be replayed against this project's webhook URL.
+ */
 export async function runtimeMutation<
   T extends BotBlockerRuntimeRequestEnvelope,
 >(
   request: NextRequest,
   schema: ZodType<T>,
   operation: string,
+  webhookId: string,
   handle?: (
     body: T,
     site: AuthenticatedBotBlockerSite,
@@ -52,19 +67,8 @@ export async function runtimeMutation<
   ) => Promise<void>,
   expectedChallengeId?: string,
 ): Promise<NextResponse> {
-  const body = await request.json();
-  const parsed = schema.safeParse(body);
-  if (!parsed.success) return botBlockerError("invalid_request", 400);
-  const envelope = parsed.data;
-  if (
-    expectedChallengeId &&
-    (!isRecord(envelope.payload) ||
-      envelope.payload.challengeId !== expectedChallengeId)
-  ) {
-    return botBlockerError("invalid_request", 400);
-  }
   const context = await getServerContext();
-  const { botBlockerRuntimeSecurity, dataStores } = context;
+  const { botBlockerSites, botBlockerRuntimeSecurity, dataStores } = context;
   try {
     await enforceRateLimit(
       dataStores.rateLimitStore,
@@ -72,6 +76,21 @@ export async function runtimeMutation<
       120,
       60,
     );
+    const webhookSite = await botBlockerSites.findByWebhookId(webhookId);
+    if (!webhookSite) return notFound();
+
+    const body = await request.json();
+    const parsed = schema.safeParse(body);
+    if (!parsed.success) return botBlockerError("invalid_request", 400);
+    const envelope = parsed.data;
+    if (
+      expectedChallengeId &&
+      (!isRecord(envelope.payload) ||
+        envelope.payload.challengeId !== expectedChallengeId)
+    ) {
+      return botBlockerError("invalid_request", 400);
+    }
+
     const site = await botBlockerRuntimeSecurity.authorizeMutation({
       authorizationHeader:
         request.headers.get("authorization") ?? undefined,
@@ -82,6 +101,9 @@ export async function runtimeMutation<
       body: envelope,
       rawBody: body,
     });
+    if (site.siteId !== webhookSite._id) {
+      return botBlockerError("audience_mismatch", 403);
+    }
     await enforceRateLimit(
       dataStores.rateLimitStore,
       `rl:botblocker:${operation}:site:${site.siteId}`,
@@ -97,6 +119,7 @@ export async function runtimeMutation<
 
 export async function unavailableChallengeRead(
   request: NextRequest,
+  webhookId: string,
   challengeId: string,
 ): Promise<NextResponse> {
   const envelope = {
@@ -105,7 +128,8 @@ export async function unavailableChallengeRead(
     nonce: request.headers.get("x-botblocker-nonce") ?? "",
     issuedAt: Number(request.headers.get("x-botblocker-issued-at")),
   };
-  const { botBlockerRuntimeSecurity, dataStores } = await getServerContext();
+  const { botBlockerSites, botBlockerRuntimeSecurity, dataStores } =
+    await getServerContext();
   try {
     await enforceRateLimit(
       dataStores.rateLimitStore,
@@ -113,19 +137,31 @@ export async function unavailableChallengeRead(
       300,
       60,
     );
-    await botBlockerRuntimeSecurity.authorizeRead({
+    const webhookSite = await botBlockerSites.findByWebhookId(webhookId);
+    if (!webhookSite) return notFound();
+    if (challengeId.length < 16) {
+      return botBlockerError("invalid_request", 400);
+    }
+    const site = await botBlockerRuntimeSecurity.authorizeRead({
       authorizationHeader:
         request.headers.get("authorization") ?? undefined,
       requestOrigin: request.nextUrl.origin,
       body: envelope,
     });
-    if (challengeId.length < 16) {
-      return botBlockerError("invalid_request", 400);
+    if (site.siteId !== webhookSite._id) {
+      return botBlockerError("audience_mismatch", 403);
     }
     return botBlockerUnavailable("not_implemented", false);
   } catch (error) {
     return mapBotBlockerRuntimeError(error);
   }
+}
+
+function notFound(): NextResponse {
+  return new NextResponse(null, {
+    status: 404,
+    headers: { "cache-control": "no-store" },
+  });
 }
 
 function mapBotBlockerRuntimeError(error: unknown): NextResponse {

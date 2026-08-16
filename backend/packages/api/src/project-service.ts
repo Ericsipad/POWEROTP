@@ -57,6 +57,18 @@ export class ProjectService {
     db: Db,
     private readonly config: ProductionConfig,
     private readonly stats?: ProjectStatsProvider,
+    /**
+     * Provisions the durable BotBlocker site row (and its `webhookId`) the
+     * moment a project exists, so the customer's scoped webhook endpoint is
+     * never something only lazily created on the customer's first dashboard
+     * visit — see `docs/THREAT_MODEL.md`'s "Site-scoped webhook endpoint
+     * routing". Optional so existing callers/tests that don't need
+     * BotBlocker keep working unchanged.
+     */
+    private readonly ensureBotBlockerSite?: (
+      customerId: string,
+      projectId: string,
+    ) => Promise<unknown>,
   ) {
     this.#projects = db.collection<ProjectDocument>("projects");
     this.#apiKeys = db.collection<ApiKeyDocument>("apiKeys");
@@ -93,9 +105,15 @@ export class ProjectService {
     }
 
     await this.#projects.insertOne(project);
+    let apiKeyInserted = false;
     try {
       await this.#apiKeys.insertOne(apiKey.document);
+      apiKeyInserted = true;
+      await this.ensureBotBlockerSite?.(customerId, project._id);
     } catch (error) {
+      if (apiKeyInserted) {
+        await this.#apiKeys.deleteOne({ _id: apiKey.document._id });
+      }
       await this.#projects.deleteOne({ _id: project._id });
       throw error;
     }

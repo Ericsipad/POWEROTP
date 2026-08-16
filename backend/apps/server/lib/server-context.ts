@@ -125,8 +125,13 @@ async function buildServerContext(): Promise<ServerContext> {
   );
   await scheduleBillingDailyCharges(billingDailyChargeQueue);
 
-  const projects = new ProjectService(dataStores.db, config, verifications);
   const botBlockerSites = new BotBlockerSiteService(dataStores.db);
+  const projects = new ProjectService(
+    dataStores.db,
+    config,
+    verifications,
+    (customerId, projectId) => botBlockerSites.ensure(customerId, projectId),
+  );
   const botBlockerSiteCredentials = new BotBlockerSiteCredentialService(
     dataStores.db,
     new BotBlockerSiteCredentialPersistence(dataStores.db, dataStores.client),
