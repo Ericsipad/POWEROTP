@@ -54,8 +54,10 @@ providing process-level failure isolation and independent horizontal scaling.
 ## Deployment (DigitalOcean App Platform)
 
 - Set up via the normal "Create App" → connect GitHub repo flow, **no App Spec YAML**.
-  Frontend uses source `/frontend`; backend uses source `/backend`. Each runs
-  `npm run build` / `npm start` using only files below its source directory.
+  Frontend uses source `frontend`; backend uses source `backend` (DigitalOcean source
+  directories are repository-relative and have no leading slash). Each runs
+  `npm run build` / `npm start` using only files below its source directory. Both
+  components were deployed from commit `e6812d5` after the standalone split.
 - Server secrets are backend-component variables. The frontend receives only public
   URL configuration. See
   [`infrastructure/app-platform/README.md`](../infrastructure/app-platform/README.md)

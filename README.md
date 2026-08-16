@@ -35,7 +35,8 @@ Phase 2 customer/admin setup and first-admin enrollment are documented in
 ## DigitalOcean
 
 Connect both App Platform apps to `Ericsipad/POWEROTP` on `main`. Use source directory
-`/frontend` for the website and `/backend` for the API; each runs `npm run build` and
+`frontend` for the website and `backend` for the API (DigitalOcean expects paths
+relative to the repository root, without a leading slash); each runs `npm run build` and
 `npm start` from its own package. No App Spec YAML is required. Setup details and
 required environment variables are documented in
 [`infrastructure/app-platform/README.md`](infrastructure/app-platform/README.md).

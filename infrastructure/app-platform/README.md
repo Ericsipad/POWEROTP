@@ -13,11 +13,15 @@ source directory, manifest, lockfile, and dependencies.
 
 Configure the components exactly as follows:
 
-- Frontend (`powerotp.com`): source `/frontend`, build `npm run build`, run
+- Frontend (`powerotp.com`): source `frontend`, build `npm run build`, run
   `npm start`, health check `/api/health`
-- Backend (`api.powerotp.com`): source `/backend`, build `npm run build`, run
+- Backend (`api.powerotp.com`): source `backend`, build `npm run build`, run
   `npm start`, health check `/health`
 - HTTP port: use App Platform's `PORT`; both Next.js processes read it automatically
+
+Source directories are relative to the repository root and must not have a leading
+slash. A backend build is correctly scoped only when its log begins with
+`powerotp-backend@...`; `powerotp@...` means the component is still building from `/`.
 
 ## Two standalone components, one repository
 
@@ -32,7 +36,9 @@ in Phase 4.
 
 ## Required App Platform variables
 
-Enter server secrets only on the backend component. The frontend receives only
+Enter server secrets only on the backend component and mark every credential/key/secret
+as an **encrypted** App Platform variable so values never appear in build/runtime logs.
+The frontend receives only
 `NEXT_PUBLIC_APP_URL=https://powerotp.com` and
 `NEXT_PUBLIC_API_URL=https://api.powerotp.com`. Do not commit values or create a
 repository `.env` file.
