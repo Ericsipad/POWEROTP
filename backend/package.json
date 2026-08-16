@@ -1,0 +1,26 @@
+{
+  "name": "powerotp-backend",
+  "private": true,
+  "version": "0.1.0",
+  "engines": {
+    "node": "22.x"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build -w @powerotp/contracts && npm run build -w @powerotp/botblocker-signing && npm run build -w @powerotp/mcp -w @powerotp/api && npm run build -w @powerotp/backend",
+    "dev": "npm run dev -w @powerotp/backend",
+    "lint": "npm run lint --workspaces --if-present",
+    "start": "npm run start -w @powerotp/backend",
+    "test": "npm run test --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "verify": "npm run build && npm run lint && npm run test"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.2",
+    "tsx": "^4.23.6",
+    "typescript": "^7.0.2"
+  }
+}

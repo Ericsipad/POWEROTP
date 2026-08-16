@@ -11,12 +11,13 @@
 ## Deploy
 
 1. Deploy the immutable commit from `main`.
-2. Wait for the App Platform component's health check.
-3. Confirm `/health` and `/ready`, then `/v1/capabilities` and `/` on the single public
-   domain — `/v1/capabilities` returning JSON (not the Next.js 404 page) proves the API
-   routes are actually being served, not silently falling through.
-4. Confirm the app reports dependency-ready without logging connection strings.
-5. Exercise the public MCP capability and request-shape tools at `/mcp`.
+2. Wait for both App Platform component health checks.
+3. Confirm `https://powerotp.com/api/health` and `https://powerotp.com/`, then
+   `https://api.powerotp.com/health`, `/ready`, and `/v1/capabilities`.
+   `/v1/capabilities` returning JSON proves backend routing is live.
+4. Confirm the backend reports dependency-ready without logging connection strings.
+5. Exercise the public MCP capability and request-shape tools at
+   `https://api.powerotp.com/mcp`.
 6. When verification transport exists, run one canary interaction per enabled method.
 
 ## Stop conditions

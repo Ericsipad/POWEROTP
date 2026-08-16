@@ -46,7 +46,7 @@ const ConfigSchema = z.object({
   /**
    * Independent secret (never `NODE_SECRET`) that signs the media manifest
    * for `voice_challenge` recordings — see `docs/AS_BUILT.md`'s Phase 5
-   * section and `apps/api/src/challenge-service.ts#currentManifest`.
+   * section and `backend/packages/api/src/challenge-service.ts#currentManifest`.
    * Optional: a node with no local media directory configured simply never
    * runs the media-sync loop.
    */

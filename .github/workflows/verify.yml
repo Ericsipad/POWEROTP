@@ -23,15 +23,25 @@ jobs:
         with:
           node-version: 22
           cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            backend/package-lock.json
+            frontend/package-lock.json
 
       - name: Install locked dependencies
-        run: npm ci
+        run: |
+          npm ci
+          npm ci --prefix backend
+          npm ci --prefix frontend
 
       - name: Verify production build, types, and tests
         run: npm run verify
 
       - name: Audit production dependencies
-        run: npm audit --omit=dev --audit-level=high
+        run: |
+          npm audit --omit=dev --audit-level=high
+          npm audit --prefix backend --omit=dev --audit-level=high
+          npm audit --prefix frontend --omit=dev --audit-level=high
 
   # Redeploys apps/telephony-agent on the Asterisk droplet after every push
   # to main, only once `verify` has passed — the droplet has no App

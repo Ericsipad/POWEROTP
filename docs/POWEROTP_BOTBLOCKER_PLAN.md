@@ -199,7 +199,7 @@ integration when a wrapper changes:
   listeners) for customers not using Express or Next.js.
 - `libraries/gate-express`: Express middleware/router wrapper.
 - `libraries/gate-next`: Next.js native `proxy.ts`/App Router wrapper.
-- `libraries/contracts/src/botblocker.ts`: the versioned protocol contracts all three wrappers
+- `backend/packages/contracts/src/botblocker.ts`: the versioned protocol contracts all three wrappers
   share — see [Phase 1](POWEROTP_BOTBLOCKER_DEVELOPMENT_PHASES.md#phase-1--base-protocol-contracts).
 
 Reference TypeScript/Node/React installation (Express shown; the raw Node HTTP and Next.js
@@ -249,7 +249,7 @@ The installed adapter remains stable while centrally controlled behavior arrives
   decision, they never add a third outcome.
 - Policy releases use canary rollout and signed rollback.
 
-Customer adapters contain public verification keys, never PowerOTP signing secrets. Existing `apps/api/src/interaction-tokens.ts` and `apps/api/src/security.ts` provide useful security patterns, but BotBlocker clearance and policy use asymmetric signatures.
+Customer adapters contain public verification keys, never PowerOTP signing secrets. Existing `backend/packages/api/src/interaction-tokens.ts` and `backend/packages/api/src/security.ts` provide useful security patterns, but BotBlocker clearance and policy use asymmetric signatures.
 
 ### RapidAuth Global Edge
 
@@ -518,7 +518,7 @@ offer/discovery metadata.
 
 ### Public MCP instruction system
 
-`apps/web/app/mcp/route.ts` remains public, read-only, and free of customer data. It is documentation for the customer's AI, not an account-management or deployment service.
+`backend/apps/server/app/mcp/route.ts` remains public, read-only, and free of customer data. It is documentation for the customer's AI, not an account-management or deployment service.
 
 For every adapter, MCP publishes:
 
@@ -536,7 +536,7 @@ MCP never reads or returns customer credentials, account state, project IDs, ris
 
 ### TypeScript/Node/React
 
-Three separate wrappers share one protocol (`libraries/contracts/src/botblocker.ts` plus
+Three separate wrappers share one protocol (`backend/packages/contracts/src/botblocker.ts` plus
 `libraries/gate-core`), so a customer never rewrites their integration when a wrapper gains a
 capability:
 

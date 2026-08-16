@@ -12,10 +12,11 @@ droplet" sections) for the ground truth of what is actually installed on
   identical across every droplet — not a per-node value generated through an admin flow,
   and not mutual TLS (true mTLS termination is not straightforward on DigitalOcean App
   Platform's shared ingress). A droplet is never individually configured or edited after
-  it's deployed: `CONTROL_PLANE_URL` and `NODE_SECRET` are baked into its deployment once,
+  it's deployed: `CONTROL_PLANE_URL=https://api.powerotp.com` and `NODE_SECRET` are
+  baked into its deployment once,
   and every other setting (which trunks exist, their credentials) is pulled automatically
-  from `GET /v1/nodes/config` on every poll. See `libraries/contracts/src/nodes.ts` and
-  `apps/api/src/node-service.ts`.
+  from `GET /v1/nodes/config` on every poll. See `backend/packages/contracts/src/nodes.ts` and
+  `backend/packages/api/src/node-service.ts`.
 - No customer-facing API, public ARI/AMI, Docker, or Portainer.
 - Media synchronization from private Spaces is not built yet (Phase 5).
 - `apps/telephony-agent` now places real outbound calls for `call_reachability`,
@@ -35,7 +36,7 @@ droplet" sections) for the ground truth of what is actually installed on
 
 **As of this session, this is automated.** `.github/workflows/verify.yml`'s
 `deploy-droplet` job runs after every push to `main` that passes `verify`
-(mirroring how DigitalOcean App Platform auto-deploys `apps/web` on every
+(mirroring how DigitalOcean App Platform auto-deploys `frontend` on every
 push) — it builds the same `git archive` tarball and pipes it on **stdin** to
 `potp-deploy` (this directory), the forced command its SSH key is pinned to,
 which runs the same `npm ci` / build / restart sequence described below.

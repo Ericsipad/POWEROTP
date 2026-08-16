@@ -93,7 +93,9 @@ test("Proxy replaces untrusted input with framework-native recommendation state"
   assert.equal(response.headers.get("x-powerotp-request-state"), null);
   const forwarded = forwardedHeaders(response).get("x-powerotp-request-state");
   assert.ok(forwarded);
-  const tampered = `${forwarded.slice(0, -1)}${forwarded.endsWith("A") ? "B" : "A"}`;
+  // Changing the final base64url character can alter only unused padding bits and
+  // decode to the original bytes. Corrupt the first encoded byte deterministically.
+  const tampered = `${forwarded.startsWith("A") ? "B" : "A"}${forwarded.slice(1)}`;
   assert.equal(adapter.getRequestState({ get: () => tampered }).status, "unavailable");
 });
 

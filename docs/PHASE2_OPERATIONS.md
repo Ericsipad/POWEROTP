@@ -5,11 +5,12 @@
 - MongoDB Atlas production connection
 - DigitalOcean Managed Valkey TLS connection
 - Brevo transactional-email API key and verified sender
-- The single App Platform component serving `powerotp.com` (web, `/v1` API, and `/mcp`
-  all handled in-process — no `app.`/`api.` subdomains, no ingress path-routing)
+- The frontend App Platform component serving `powerotp.com`
+- The backend App Platform component serving `api.powerotp.com` (`/v1`, `/mcp`, and
+  durable workers)
 
-Enter all values once as app-level environment variables in App Platform. Generate each
-cryptographic secret independently with at least 32 random bytes.
+Enter secrets on the backend component only. Generate each cryptographic secret
+independently with at least 32 random bytes.
 
 ### Provisioning Valkey
 

@@ -242,7 +242,7 @@ This is a trust boundary, not merely a packaging choice:
   timestamps, and an audience (site/session) binding; servers reject reused nonces within the
   replay window.
 - Challenge tokens are one-time and consumed on first accepted use or terminal state, mirroring
-  the existing OTP interaction-token pattern in `apps/api/src/interaction-tokens.ts`.
+  the existing OTP interaction-token pattern in `backend/packages/api/src/interaction-tokens.ts`.
 - A visitor session identifier is never accepted as sufficient proof of continuity across a
   privilege change (e.g. anonymous visitor to Passport holder) without a fresh signed
   assertion; this prevents an attacker from fixating a pre-verification session ID and
@@ -422,7 +422,7 @@ secrets (see [Enumeration and privacy](#enumeration-and-privacy) and
 
 ### Public MCP generator
 
-Phase 14 implements the `apps/mcp` BotBlocker resources/tools referenced in
+Phase 14 implements the `backend/packages/mcp` BotBlocker resources/tools referenced in
 [`POWEROTP_BOTBLOCKER_PLAN.md`](POWEROTP_BOTBLOCKER_PLAN.md#public-mcp-instruction-system) and
 in the ["MCP abuse"](#mcp-abuse) control above, which already required MCP to stay anonymous,
 read-only, and rate-limited/separately deployable.

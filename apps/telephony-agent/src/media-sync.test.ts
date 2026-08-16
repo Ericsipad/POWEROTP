@@ -12,7 +12,7 @@ import { syncMediaOnce } from "./media-sync.js";
 
 const SECRET = "manifest-signing-secret-with-32-plus-characters";
 
-/** Mirrors `apps/api/src/security.ts#signPayload` — see `media-sync.ts`'s
+/** Mirrors `backend/packages/api/src/security.ts#signPayload` — see `media-sync.ts`'s
  * comment on why this package intentionally re-implements verification
  * rather than depending on the control plane's service layer. */
 function signManifest(manifest: MediaManifest, secret: string): string {

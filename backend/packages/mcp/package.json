@@ -1,0 +1,27 @@
+{
+  "name": "@powerotp/mcp",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    "./mcp-app.js": {
+      "types": "./dist/mcp-app.d.ts",
+      "import": "./dist/mcp-app.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "start": "node dist/server.js",
+    "test": "node --import tsx --test \"src/**/*.test.ts\"",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/server": "^2.0.0",
+    "@powerotp/contracts": "*",
+    "zod": "^4.4.3"
+  }
+}

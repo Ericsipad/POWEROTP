@@ -1,6 +1,6 @@
 /**
  * Mounts the hosted POWEROTP verification modal
- * (`apps/web/app/widget/[sessionId]/page.tsx`) in an iframe. The `modalUrl`
+ * (`frontend/app/widget/[sessionId]/page.tsx`) in an iframe. The `modalUrl`
  * comes from a customer's own backend calling
  * `POST /v1/projects/{slug}/modal-sessions` with its project API key (see
  * `@powerotp/server-sdk`'s `createModalSession`) — never a raw interaction

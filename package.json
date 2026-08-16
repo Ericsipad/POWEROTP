@@ -1,24 +1,37 @@
 {
   "name": "powerotp",
   "private": true,
+  "type": "module",
   "version": "0.1.0",
   "engines": {
     "node": "22.x"
   },
   "workspaces": [
     "apps/*",
-    "libraries/*"
+    "libraries/*",
+    "backend/packages/contracts",
+    "backend/packages/botblocker-signing"
   ],
   "scripts": {
-    "build": "npm run build -w @powerotp/contracts && npm run build -w @powerotp/gate-core -w @powerotp/botblocker-signing && npm run build -w @powerotp/gate-node && npm run build -w @powerotp/gate-express -w @powerotp/gate-next -w @powerotp/server-sdk -w @powerotp/widget-loader && npm run build -w @powerotp/mcp -w @powerotp/api && npm run build -w @powerotp/web && npm run build -w @powerotp/telephony-agent",
-    "lint": "npm run lint --workspaces --if-present",
-    "start": "npm run start -w @powerotp/web",
-    "test": "npm run test --workspaces --if-present",
-    "typecheck": "npm run typecheck --workspaces --if-present",
+    "build": "npm run build:backend && npm run build:frontend && npm run build -w @powerotp/gate-core && npm run build -w @powerotp/gate-node && npm run build -w @powerotp/gate-express -w @powerotp/gate-next -w @powerotp/server-sdk -w @powerotp/widget-loader && npm run build -w @powerotp/telephony-agent",
+    "build:backend": "npm --prefix backend run build",
+    "build:frontend": "npm --prefix frontend run build",
+    "build:web": "npm run build:frontend",
+    "lint": "npm --prefix backend run lint && npm --prefix frontend run lint && npm run lint:root",
+    "lint:root": "npm run lint --workspaces --if-present",
+    "start": "npm run start:frontend",
+    "start:backend": "npm --prefix backend start",
+    "start:frontend": "npm --prefix frontend start",
+    "start:web": "npm run start:frontend",
+    "test": "npm --prefix backend test && npm --prefix frontend test && npm run test:root",
+    "test:root": "npm run test --workspaces --if-present && node --import tsx --test \"integration-tests/**/*.test.ts\"",
+    "typecheck": "npm --prefix backend run typecheck && npm --prefix frontend run typecheck && npm run typecheck:root",
+    "typecheck:root": "npm run typecheck --workspaces --if-present",
     "verify": "npm run build && npm run lint && npm run test"
   },
   "devDependencies": {
     "@types/node": "^26.1.2",
+    "server-only": "^0.0.1",
     "tsx": "^4.23.6",
     "typescript": "^7.0.2"
   }

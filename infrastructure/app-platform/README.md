@@ -1,44 +1,41 @@
 # DigitalOcean App Platform setup
 
-Set this app up in DigitalOcean exactly the same way as every other app here: connect
-the GitHub repo through the normal "Create App" flow and let App Platform auto-detect
-the build/run commands. There is no App Spec YAML to paste in and nothing infrastructure-
-as-code about this — the root `package.json`'s `build`/`start` scripts already do the
-right thing for a plain Node.js app.
+Connect the same GitHub repository to two independently scalable App Platform
+components. There is no App Spec YAML. Each component uses its own self-contained
+source directory, manifest, lockfile, and dependencies.
 
 ## Repository selection
 
 - Repository: `Ericsipad/POWEROTP`
-- Branch: `main`
-- Source directory: `/` (not a subfolder — this is an npm workspace monorepo and the
-  build needs the root lockfile plus the shared library packages)
+- Branch: `main` after cutover. Deploy the backend from the separation feature branch
+  first so it can be verified without changing the production frontend.
 - Auto-detected environment: Node.js
 
-App Platform should detect `npm run build` and `npm run start` from the root
-`package.json` automatically. If it asks you to confirm or override them, they should
-read exactly:
+Configure the components exactly as follows:
 
-- Build command: `npm run build`
-- Run command: `npm start`
-- HTTP port: whatever App Platform assigns via its `PORT` environment variable (the app
-  reads it automatically; you don't need to hardcode one)
+- Frontend (`powerotp.com`): source `/frontend`, build `npm run build`, run
+  `npm start`, health check `/api/health`
+- Backend (`api.powerotp.com`): source `/backend`, build `npm run build`, run
+  `npm start`, health check `/health`
+- HTTP port: use App Platform's `PORT`; both Next.js processes read it automatically
 
-## One component, one normal Next.js app
+## Two standalone components, one repository
 
-Everything — the marketing/dashboard site, the customer and verification API under
-`/v1`, its durable background workers, and the public `/mcp` integration guide — is one
-Next.js app (`apps/web`), built and run like any other Next.js app. `apps/api` and
-`apps/mcp` are library code imported by it, not separate services. There is nothing else
-to create in App Platform: one app, one component.
+`frontend` serves only the marketing site, dashboard, authentication pages, and hosted
+widget. `backend/apps/server` serves every `/v1` route, `/mcp`, `/health`, and `/ready`, and is
+the only process that connects to MongoDB/Valkey or starts BullMQ workers. `backend/packages/api`
+and `backend/packages/mcp` are private packages contained entirely inside `/backend`.
+The frontend has no dependency on them or on any root package.
 
 Do not deploy `apps/telephony-agent` to App Platform. It belongs on each Asterisk droplet
 in Phase 4.
 
 ## Required App Platform variables
 
-Enter these once as environment variables in the App Platform UI (your app's Settings →
-App-Level Environment Variables, same as your other apps). Do not commit their values
-and do not create a repository `.env` file.
+Enter server secrets only on the backend component. The frontend receives only
+`NEXT_PUBLIC_APP_URL=https://powerotp.com` and
+`NEXT_PUBLIC_API_URL=https://api.powerotp.com`. Do not commit values or create a
+repository `.env` file.
 
 - `MONGODB_URI`: MongoDB Atlas TLS connection string
 - `VALKEY_URL`: authenticated `rediss://` connection string
@@ -74,7 +71,7 @@ and do not create a repository `.env` file.
 - `API_KEY_HASH_SECRET`: at least 32 random bytes, independent from other secrets
 - `PASSWORD_PEPPER`: at least 32 random bytes, independent from every other secret. Mixed
   into every customer password hash via Argon2's own `secret` option (see
-  `apps/api/src/security.ts` and `docs/AS_BUILT.md`'s "Customer signup flow" section) —
+  `backend/packages/api/src/security.ts` and `docs/AS_BUILT.md`'s "Customer signup flow" section) —
   never stored alongside the hash. Rotating it invalidates every existing password hash,
   so treat it the same as any other long-lived secret once real customers exist.
 - `PII_ENCRYPTION_KEY`: at least 32 random bytes, independent from every other secret
@@ -95,7 +92,7 @@ and do not create a repository `.env` file.
 - `ADMIN_ALLOWED_IPS`: comma-separated exact IP addresses allowed to sign in at
   `/admin/login` — no other IP can log in regardless of password. The literal entry
   `0.0.0.0` is a deliberate "allow all IPs" opt-out (see
-  `apps/api/src/ip-allowlist.ts`) for when you need to log in from a genuinely dynamic
+  `backend/packages/api/src/ip-allowlist.ts`) for when you need to log in from a genuinely dynamic
   IP; using it means admin login relies on the password alone, dropping IP as a second
   factor — prefer real IPs when you can.
 - `BREVO_API_KEY`: production transactional-email API key
@@ -107,13 +104,14 @@ and do not create a repository `.env` file.
   e.g. "POWEROTP - Sign Up Email Template") and where to find its id. Leave unset to keep
   the original inline-HTML verification email working exactly as before.
 - `EMAIL_FROM`: verified POWEROTP sender address. Also the `sender.email` for
-  every `email_code` verification delivery (see `apps/api/src/email-otp-service.ts`
+  every `email_code` verification delivery (see `backend/packages/api/src/email-otp-service.ts`
   and `docs/AS_BUILT.md`'s "Email verification type, customer branding, and
   dashboard redesign" section) — no separate env var needed for that type;
   it reuses this and `BREVO_API_KEY` directly. `email_code`'s own rate
   (admin-entered, a single flat USD/email value, not per-country) is set at
   `/admin`, not via an env var — see that section.
-- `PUBLIC_APP_URL` / `PUBLIC_API_URL`: both `https://powerotp.com` (see Domains below)
+- `PUBLIC_APP_URL=https://powerotp.com`
+- `PUBLIC_API_URL=https://api.powerotp.com`
 - `DEMO_PROJECT_SLUG`: optional; slug of the project backing the public "try it now"
   widget on the marketing site — use `demo`. After deploy, sign in at `/admin` and click
   "Provision demo project" once to create it at that exact slug. Leave the variable
@@ -122,7 +120,7 @@ and do not create a repository `.env` file.
   credentials, a flat numbered pool — any configured trunk can serve any of the three
   voice verification methods (`call_reachability`, `voice_code`, `voice_challenge`); the
   telephony-agent rotates across whichever trunks are currently healthy and fails over to
-  the next one on a provider-level error. See `apps/api/src/outbound-trunks.ts` and the
+  the next one on a provider-level error. See `backend/packages/api/src/outbound-trunks.ts` and the
   "Outbound trunk pool" section of `docs/AS_BUILT.md` for the full design. `TRUNK1..6`
   gives headroom beyond the 3 numbers in use today; raising the cap later (e.g.
   `TRUNK7_*`) is a one-line change. Leave unset until telephony wiring, or add/remove
@@ -140,14 +138,14 @@ and do not create a repository `.env` file.
   deliberately separate from the SIP-shaped `TRUNKn_URL/USER/PASS` variables because the
   control plane sends SMS directly over HTTPS; no Asterisk node receives them. The
   actual sending number(s) come from `TRUNKn_DID` above, not a dedicated SMS-only
-  variable — `apps/api/src/sms.ts` rotates round-robin across every configured
+  variable — `backend/packages/api/src/sms.ts` rotates round-robin across every configured
   `TRUNKn_DID` and falls over to the next one if a send is rejected, so `sms_code`
   isn't limited to one number. The adapter uses POST form data so the API password is
   never placed in a request URL. Leave the two credentials and every `TRUNKn_DID`
   unset until the provider account is ready; `sms_code` then fails closed with
   `method_not_available`.
 - `NODE_SECRET`: at least 32 random bytes, the single shared secret every telephony
-  droplet uses to authenticate to `/v1/nodes/config` (see `apps/api/src/node-service.ts`
+  droplet uses to authenticate to `/v1/nodes/config` (see `backend/packages/api/src/node-service.ts`
   and `docs/AS_BUILT.md`'s "Phase 4 node identity" section). Not a per-node value and
   never edited on a droplet — it is baked into a node's deployment once, and rotating it
   is only ever an App Platform env var edit plus redeploying every node with the new
@@ -160,35 +158,34 @@ and do not create a repository `.env` file.
 - `MEDIA_MANIFEST_SECRET`: optional, at least 32 random bytes, independent from every
   other secret (never reused for `NODE_SECRET`) — signs the media manifest telephony
   nodes verify before trusting a recording checksum (see
-  `apps/api/src/challenge-service.ts#currentManifest`). Also written to each droplet's
+  `backend/packages/api/src/challenge-service.ts#currentManifest`). Also written to each droplet's
   `/etc/powerotp/agent.env`, the exact same value, the same way `NODE_SECRET` is (see
   `infrastructure/asterisk/README.md`).
 - `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET`: optional, Stripe API credentials backing
   fixed-amount ($5/$25/$50/$100) customer balance top-ups — see
-  `apps/api/src/stripe-service.ts` and `docs/AS_BUILT.md`'s "Customer balance billing"
+  `backend/packages/api/src/stripe-service.ts` and `docs/AS_BUILT.md`'s "Customer balance billing"
   section. `STRIPE_WEBHOOK_SECRET` is the signing secret for the specific webhook
   endpoint configured in the Stripe dashboard to point at
-  `https://powerotp.com/v1/billing/stripe/webhook`, not the API secret key itself. Leave
+  `https://api.powerotp.com/v1/billing/stripe/webhook`, not the API secret key itself. Leave
   both unset to keep top-ups failing closed with `billing_not_configured`.
 
 ## Domains
 
-There is exactly one public web-facing domain, `powerotp.com` (plus `na1.powerotp.com`,
-which points directly at the first telephony droplet, not App Platform). One process
-serves every path on that single domain — `PUBLIC_APP_URL` and `PUBLIC_API_URL` are
-therefore both `https://powerotp.com`. Do not create separate `app.`/`api.`/`mcp.`
-subdomains or point either URL at one; the app will build broken absolute URLs (e.g.
-`statusUrl`) if it does.
+`powerotp.com` points to the frontend component. `api.powerotp.com` points to the
+backend component. `na1.powerotp.com` continues to point directly at the first
+telephony droplet. The browser backend permits credentialed CORS only from the exact
+`PUBLIC_APP_URL`; never use a wildcard origin with session cookies.
 
 ## Release checks
 
 App Platform should use Node 22. A deployment is healthy only when:
 
-- `/health` returns `200`
-- `/ready` returns `200` once Atlas and Valkey are reachable
-- `/v1/capabilities` returns the verification types/states (proves the API routes are
+- `https://powerotp.com/api/health` returns `200`
+- `https://api.powerotp.com/health` returns `200`
+- `https://api.powerotp.com/ready` returns `200` once Atlas and Valkey are reachable
+- `https://api.powerotp.com/v1/capabilities` returns the verification types/states (proves the API routes are
   actually being served, not falling through to the Next.js 404 page)
-- `/` returns the marketing site
+- `https://powerotp.com/` returns the marketing site
 
 The app intentionally fails startup when required configuration is missing or data
 stores are unreachable.

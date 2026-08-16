@@ -15,7 +15,7 @@
 # Optional:
 #   MEDIA_MANIFEST_SECRET same value as App Platform's; enables voice_challenge
 #                         media sync. Omit on a node that never serves it.
-#   CONTROL_PLANE_URL     defaults to https://powerotp.com
+#   CONTROL_PLANE_URL     defaults to https://api.powerotp.com
 #
 # Secrets are read from the environment and written only to root-owned files
 # under /etc/powerotp; nothing is echoed. The ARI password is generated here and
@@ -30,7 +30,7 @@ set -euo pipefail
 for v in NODE_SECRET OPS_PUBKEY CI_DEPLOY_PUBKEY; do
   [[ -n "${!v:-}" ]] || { echo "missing required env var: $v" >&2; exit 1; }
 done
-CONTROL_PLANE_URL="${CONTROL_PLANE_URL:-https://powerotp.com}"
+CONTROL_PLANE_URL="${CONTROL_PLANE_URL:-https://api.powerotp.com}"
 step() { printf '\n=== %s\n' "$1"; }
 
 step "swap (npm ci OOM-kills on this droplet size without it)"
@@ -107,7 +107,7 @@ ufw default allow outgoing >/dev/null
 ufw allow OpenSSH >/dev/null
 # Nothing here legitimately makes outbound SSH/SMTP/RDP connections: the agent
 # speaks HTTPS to the control plane and SIP over UDP, and email goes through
-# Brevo's API from apps/web. Denying these means a future compromise cannot
+# Brevo's API from frontend. Denying these means a future compromise cannot
 # turn this node into the brute-force bot a phishing mail once claimed it was.
 for p in 22 23 25 445 465 587 3389; do
   ufw deny out "$p"/tcp comment 'egress-abuse-guard' >/dev/null

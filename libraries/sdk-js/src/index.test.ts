@@ -47,13 +47,13 @@ describe("PowerOtpClient.createVerification", () => {
     const accepted = {
       interactionId: "int_0123456789abcdef",
       state: "queued",
-      statusUrl: "https://powerotp.com/v1/verifications/int_0123456789abcdef",
+      statusUrl: "https://api.powerotp.com/v1/verifications/int_0123456789abcdef",
       expiresAt: new Date().toISOString(),
     };
     const { fetchFn, calls } = fakeFetch({ status: 202, body: accepted });
     const client = new PowerOtpClient({
       apiKey: "potp_sk_test",
-      projectUrl: "https://powerotp.com/v1/projects/demo/verifications",
+      projectUrl: "https://api.powerotp.com/v1/projects/demo/verifications",
       fetch: fetchFn,
     });
 
@@ -63,14 +63,14 @@ describe("PowerOtpClient.createVerification", () => {
     );
 
     assert.equal(result.interactionId, accepted.interactionId);
-    assert.equal(calls[0]!.url, "https://powerotp.com/v1/projects/demo/verifications");
+    assert.equal(calls[0]!.url, "https://api.powerotp.com/v1/projects/demo/verifications");
   });
 
   it("requires an idempotency key", async () => {
     const { fetchFn } = fakeFetch({ status: 202, body: {} });
     const client = new PowerOtpClient({
       apiKey: "potp_sk_test",
-      projectUrl: "https://powerotp.com/v1/projects/demo/verifications",
+      projectUrl: "https://api.powerotp.com/v1/projects/demo/verifications",
       fetch: fetchFn,
     });
 
@@ -93,14 +93,14 @@ describe("PowerOtpClient.createModalSession", () => {
     const { fetchFn, calls } = fakeFetch({ status: 202, body: accepted });
     const client = new PowerOtpClient({
       apiKey: "potp_sk_test",
-      projectUrl: "https://powerotp.com/v1/projects/demo/verifications",
+      projectUrl: "https://api.powerotp.com/v1/projects/demo/verifications",
       fetch: fetchFn,
     });
 
     const result = await client.createModalSession(["sms_code"]);
 
     assert.equal(result.sessionId, accepted.sessionId);
-    assert.equal(calls[0]!.url, "https://powerotp.com/v1/projects/demo/modal-sessions");
+    assert.equal(calls[0]!.url, "https://api.powerotp.com/v1/projects/demo/modal-sessions");
   });
 });
 
@@ -116,14 +116,14 @@ describe("PowerOtpClient.getVerificationStatus", () => {
     const { fetchFn, calls } = fakeFetch({ status: 200, body: status });
     const client = new PowerOtpClient({
       apiKey: "potp_sk_test",
-      projectUrl: "https://powerotp.com/v1/projects/demo/verifications",
+      projectUrl: "https://api.powerotp.com/v1/projects/demo/verifications",
       fetch: fetchFn,
     });
 
     const result = await client.getVerificationStatus("int_0123456789abcdef");
 
     assert.equal(result.state, "succeeded");
-    assert.equal(calls[0]!.url, "https://powerotp.com/v1/verifications/int_0123456789abcdef");
+    assert.equal(calls[0]!.url, "https://api.powerotp.com/v1/verifications/int_0123456789abcdef");
   });
 });
 
@@ -132,7 +132,7 @@ describe("PowerOtpClient.submitResponse", () => {
     const { fetchFn, calls } = fakeFetch({ status: 200, body: { succeeded: true } });
     const client = new PowerOtpClient({
       apiKey: "potp_sk_test",
-      projectUrl: "https://powerotp.com/v1/projects/demo/verifications",
+      projectUrl: "https://api.powerotp.com/v1/projects/demo/verifications",
       fetch: fetchFn,
     });
 
@@ -141,7 +141,7 @@ describe("PowerOtpClient.submitResponse", () => {
     assert.equal(result.succeeded, true);
     assert.equal(
       calls[0]!.url,
-      "https://powerotp.com/v1/verifications/int_0123456789abcdef/response",
+      "https://api.powerotp.com/v1/verifications/int_0123456789abcdef/response",
     );
   });
 });

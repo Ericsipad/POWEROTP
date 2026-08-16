@@ -24,7 +24,7 @@ export interface PowerOtpClientOptions {
 }
 
 /** The replay window `verifyCallbackSignature` accepts, matching the
- * server's own tolerance in `apps/api/src/callback-signing.ts`. */
+ * server's own tolerance in `backend/packages/api/src/callback-signing.ts`. */
 const CALLBACK_REPLAY_WINDOW_MS = 5 * 60 * 1_000;
 
 export class PowerOtpClient {
@@ -138,7 +138,7 @@ export class PowerOtpClient {
 /**
  * Verifies a `powerotp-signature: t=<timestamp>,v1=<hmac>` callback header
  * against the exact raw request body a customer's server received —
- * mirrors `apps/api/src/callback-signing.ts#verifyCallbackSignature`
+ * mirrors `backend/packages/api/src/callback-signing.ts#verifyCallbackSignature`
  * exactly (timestamped HMAC-SHA256, constant-time compare, same replay
  * window) so a customer never has to reimplement it by hand. Kept as a
  * small, duplicated primitive here rather than an `@powerotp/api`

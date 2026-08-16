@@ -18,11 +18,11 @@ async function defaultDownloadAsset(url: string): Promise<Buffer> {
 }
 
 /**
- * Verifies the manifest signature independently of `apps/api` — this
+ * Verifies the manifest signature independently of `backend/packages/api` — this
  * package is deployed to droplets and deliberately has no dependency on
  * the control plane's service layer or its database driver — using the
  * same signed-payload format as
- * `apps/api/src/security.ts#verifySignedPayload`.
+ * `backend/packages/api/src/security.ts#verifySignedPayload`.
  */
 function verifyManifestToken(token: string, secret: string) {
   const [encodedPayload, signature] = token.split(".");

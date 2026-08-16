@@ -58,7 +58,7 @@ assigns them to specific telephony nodes.
   `SPACES_SECRET_KEY` in App Platform — this is the only credential that ever exists;
   telephony droplets never receive Spaces credentials at all. A node instead downloads
   each recording via a short-lived presigned URL the control plane generates per request
-  (see `apps/api/src/challenge-service.ts#currentManifest`), scoped to that one object
+  (see `backend/packages/api/src/challenge-service.ts#currentManifest`), scoped to that one object
   for a few minutes.
 - CORS disabled (no browser ever talks to Spaces directly — uploads go through the
   admin API, downloads go through a node's presigned URL)

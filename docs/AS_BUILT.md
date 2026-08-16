@@ -12,28 +12,30 @@ would otherwise have to rediscover the hard way.
 
 ## Current architecture
 
-One app, one DigitalOcean App Platform component, no App Spec YAML:
+One repository, two self-contained DigitalOcean App Platform components:
 
-- `apps/web` is the only deployed thing. It is a normal Next.js app —
-  `npm run build` / `npm start`, nothing custom. Every API endpoint (`/v1/*`, `/mcp`,
-  `/health`, `/ready`) is a Next.js Route Handler under `apps/web/app`.
-- `apps/api` and `apps/mcp` are **library-only** packages now (no server, no `start`
-  script that binds a port). `apps/web` imports them directly via package exports, e.g.
-  `import { AuthService } from "@powerotp/api/auth-service.js"`. Both packages expose a
-  wildcard `exports` map (`"./*.js": "./dist/*.js"`) so any built module is importable.
-- `apps/web/lib/server-context.ts` is the single process-wide singleton: it connects
-  Mongo/Valkey, runs `ensureIndexes`, builds the BullMQ queues/workers, and constructs
-  `AuthService`/`ProjectService`/`VerificationService`. `apps/web/instrumentation.ts`
-  calls it eagerly on server boot (Next.js's official startup hook) so bad config fails
-  fast instead of on the first request.
-- `apps/web/lib/{api-route,api-errors,session-cookies,rate-limit}.ts` reimplement, using
-  plain Next.js/Fetch APIs, what Fastify plugins used to do: correlation IDs + error
-  mapping, session/CSRF cookies, and a Valkey-backed fixed-window rate limiter.
-- MCP is mounted at `apps/web/app/mcp/route.ts`, which calls
+- `frontend` is a frontend-only Next.js app for `https://powerotp.com`. It serves the
+  marketing site, dashboard/admin pages, auth pages, and hosted widget. Browser API
+  calls use `frontend/lib/api-client.ts` and `NEXT_PUBLIC_API_URL`. Its browser API
+  models and lockfile are frontend-local; it imports nothing from `/backend` or root.
+- `backend/apps/server` is an API-only Next.js app for `https://api.powerotp.com`. Every API
+  endpoint (`/v1/*`, `/mcp`, `/health`, `/ready`) is a Route Handler under
+  `backend/apps/server/app`.
+- `backend/packages/api` and `backend/packages/mcp` remain **library-only** packages.
+  `backend/apps/server` imports them directly via package exports. They, the backend
+  contracts/signing packages, manifest, and lockfile all live below `/backend`.
+- `backend/apps/server/lib/server-context.ts` owns Mongo/Valkey, index setup, BullMQ
+  queues/workers, and service construction. `backend/apps/server/instrumentation.ts` starts it
+  eagerly. The frontend has no datastore secrets, connections, or background workers.
+- `backend/apps/server/lib/{api-route,api-errors,session-cookies,rate-limit}.ts` provide
+  correlation IDs, error mapping, host-only session/CSRF cookies, and rate limiting.
+  `backend/apps/server/proxy.ts` allows credentialed browser CORS only from configured exact
+  origins; cookies remain `Secure`, host-only, and `SameSite=Strict`.
+- MCP is mounted at `backend/apps/server/app/mcp/route.ts`, which calls
   `createMcpTransport()` (from `@powerotp/mcp/mcp-app.js`) and delegates directly —
   `transport.handleRequest(request)` already speaks the Fetch API, so no bridging layer
-  is needed inside Next.js. `apps/mcp` still has its own tiny standalone Node-http
-  bootstrap (`apps/mcp/src/server.ts`) for running the MCP guide in isolation locally;
+  is needed inside Next.js. `backend/packages/mcp` still has its own tiny standalone Node-http
+  bootstrap (`backend/packages/mcp/src/server.ts`) for running the MCP guide in isolation locally;
   it is not used in production.
 
 ### Why this shape (history, so it doesn't get re-litigated)
@@ -44,24 +46,25 @@ shipped, and it turned out DigitalOcean's actual deployed app never had matching
 rules applied, so `/v1/*` and `/mcp` silently 404'd into the Next.js catch-all in
 production; (2) one component running a hand-rolled custom server that embedded Next.js
 programmatically and bridged Fastify/MCP into it — this worked but was flagged as
-needlessly different from every other app in this account; (3) the current shape: a
-plain Next.js app with the API as Route Handlers and no separate services or custom
-server at all. This is the one to keep building on.
+needlessly different from every other app in this account; (3) a single Next.js app
+containing both frontend and Route Handlers. The current split keeps standard Next.js
+Route Handlers but uses separate hostnames instead of fragile ingress path-routing,
+providing process-level failure isolation and independent horizontal scaling.
 
 ## Deployment (DigitalOcean App Platform)
 
 - Set up via the normal "Create App" → connect GitHub repo flow, **no App Spec YAML**.
-  Node.js is auto-detected from `package.json`; build/run commands read `npm run build`
-  / `npm start`.
-- Environment variables are entered once as **app-level** variables in the DO UI (not
-  per-component — there's only one component anyway). See
+  Frontend uses source `/frontend`; backend uses source `/backend`. Each runs
+  `npm run build` / `npm start` using only files below its source directory.
+- Server secrets are backend-component variables. The frontend receives only public
+  URL configuration. See
   [`infrastructure/app-platform/README.md`](../infrastructure/app-platform/README.md)
   for the full list and what each one is for.
-- Domain: `powerotp.com` only. There are **no** `app.`/`api.`/`mcp.` subdomains —
-  `PUBLIC_APP_URL` and `PUBLIC_API_URL` are both `https://powerotp.com`. Do not create
-  those subdomains or repoint the URLs at them.
-- Health check path: `/health`. Readiness (Mongo+Valkey reachable): `/ready`.
-- Verify a deploy actually worked by hitting `/v1/capabilities` — if it returns the
+- Domains: frontend `powerotp.com`; backend `api.powerotp.com`.
+  `PUBLIC_APP_URL=https://powerotp.com` and
+  `PUBLIC_API_URL=https://api.powerotp.com`.
+- Frontend health check: `/api/health`. Backend health/readiness: `/health`, `/ready`.
+- Verify the backend by hitting `https://api.powerotp.com/v1/capabilities` — if it returns the
   Next.js 404 HTML instead of JSON, the deploy is broken (this exact failure mode is
   what caused the App Platform rework above).
 
@@ -72,7 +75,7 @@ server at all. This is the one to keep building on.
   Collections are created lazily by `ensureIndexes()` on first successful boot.
 - **Valkey**: DigitalOcean Managed Database, already provisioned and set as `VALKEY_URL`
   in App Platform. Used for both the rate limiter and BullMQ (dispatch/timeout/callback
-  queues via `apps/api/src/verification-queue.ts`).
+  queues via `backend/packages/api/src/verification-queue.ts`).
   - **Known fixed bug**: BullMQ job IDs cannot contain `:`. Job IDs are
     `dispatch-${interactionId}` / `timeout-${interactionId}` / `callback-${eventId}`
     (hyphens), not colons. If you see `"Custom Id cannot contain :"` in logs, something
@@ -94,7 +97,7 @@ server at all. This is the one to keep building on.
   so re-running the endpoint self-heals any legacy bad value.
 - **Droplet auto-deploy**: as of this session, `powerotpvoip1` redeploys itself
   automatically on every push to `main` (once `verify` passes), the same as
-  `apps/web` already does on App Platform — see `.github/workflows/verify.yml`'s
+  `frontend` already does on App Platform — see `.github/workflows/verify.yml`'s
   `deploy-droplet` job and `infrastructure/asterisk/README.md`. It uses three
   GitHub Actions secrets (`DROPLET_HOST`/`DROPLET_SSH_USER`/`DROPLET_SSH_KEY`,
   the same key as the local `ssh powerotp` alias) to run the identical
@@ -217,15 +220,15 @@ environment variables — `ADMIN_EMAIL`, `ADMIN_PASSWORD` (plain value, compared
 at login, not hashed), and `ADMIN_ALLOWED_IPS` (comma-separated exact IPs; no CIDR).
 Login requires all three to match — email, password, and client IP — with a single
 generic `invalid_credentials` error regardless of which check failed, so a caller can't
-tell which part was wrong. `apps/api/src/auth-service.ts#loginAdmin` upserts a minimal
+tell which part was wrong. `backend/packages/api/src/auth-service.ts#loginAdmin` upserts a minimal
 `usr_platform_admin` database record on successful login purely so the existing
 session/cookie machinery (built for customer accounts) keeps working unchanged — that
 record is not itself a credential; the env vars are the only real credential. There is
 no recovery flow: changing the password or IP allowlist is editing env vars and
 redeploying.
 
-`isIpAllowed()` in `apps/api/src/ip-allowlist.ts` reads the client IP from
-`clientIp()` in `apps/web/lib/api-route.ts`, which prefers Cloudflare's
+`isIpAllowed()` in `backend/packages/api/src/ip-allowlist.ts` reads the client IP from
+`clientIp()` in `frontend/lib/api-route.ts`, which prefers Cloudflare's
 `cf-connecting-ip` header (Cloudflare sits in front of App Platform) over
 `x-forwarded-for`.
 
@@ -255,10 +258,10 @@ pulling full configuration immediately. Rotating access is changing `NODE_SECRET
 Platform and redeploying every node with the new value — identical in spirit to how
 `ADMIN_PASSWORD`/`ADMIN_ALLOWED_IPS` already work.
 
-- Contracts: `libraries/contracts/src/nodes.ts` — just `NodeSchema` (a connection-log
+- Contracts: `backend/packages/contracts/src/nodes.ts` — just `NodeSchema` (a connection-log
   entry: id/ip/firstSeenAt/lastSeenAt, for `/admin` visibility only, not access control)
   and `NodeConfigSchema` (trunks).
-- `apps/api/src/node-service.ts` (`NodeService`): `list` (admin visibility),
+- `backend/packages/api/src/node-service.ts` (`NodeService`): `list` (admin visibility),
   `authenticate` (constant-time compare of the `Authorization: Bearer` header against
   `config.NODE_SECRET`; on success, upserts a connection-log row keyed by source IP as a
   liveness heartbeat), `configFor` (returns every fully-configured `TRUNK1..6_*` trunk in
@@ -293,7 +296,7 @@ The control plane never talks to Asterisk/ARI directly — only a droplet's
 added alongside the existing 60-second trunk-config sync so call dispatch doesn't wait
 a full minute:
 
-- `apps/api/src/transport.ts#createNodeDispatchTransport` replaces the voice methods'
+- `backend/packages/api/src/transport.ts#createNodeDispatchTransport` replaces the voice methods'
   `unavailableTransport` stub: it still fails immediately with `method_not_available` if
   no trunk is configured (unchanged behavior), but once one is, it advances the
   interaction to `dispatching` and stops — that state *is* the signal a node polls for.
@@ -382,7 +385,7 @@ a full minute:
   optional per `docs/PRODUCT_SPEC.md`, but nothing generated one when omitted, so an
   omitted code could never actually succeed a submission; `VerificationService#create`
   now generates a cryptographically random five-digit code
-  (`apps/api/src/security.ts#createFiveDigitCode`) when one isn't supplied.
+  (`backend/packages/api/src/security.ts#createFiveDigitCode`) when one isn't supplied.
 
 ## Outbound trunk pool: rotation and failover (implemented)
 
@@ -402,16 +405,16 @@ only have the one number working."*
 
 1. **Config shape**: `TRUNK1_URL/USER/PASS` through `TRUNK6_URL/USER/PASS` (App Platform
    env vars, all optional, same empty-string-is-unset convention as every other optional
-   field) replace the old per-type `OUTBOUND1..3_*` vars. `apps/api/src/outbound-trunks.ts#allOutboundTrunks`
+   field) replace the old per-type `OUTBOUND1..3_*` vars. `backend/packages/api/src/outbound-trunks.ts#allOutboundTrunks`
    returns every fully-configured trunk (`TRUNKn` where url/user/pass are all present) as
    a flat array tagged with a stable id (`trunk-1`, `trunk-2`, ...), in numeric order.
-   `hasAnyOutboundTrunk` gates voice-method dispatch in `apps/api/src/transport.ts` — any
+   `hasAnyOutboundTrunk` gates voice-method dispatch in `backend/packages/api/src/transport.ts` — any
    trunk can serve any of the three voice types now, so dispatch only checks "does at
-   least one trunk exist at all", not a type-specific one. `libraries/contracts/src/nodes.ts#NodeConfigSchema.trunks`
+   least one trunk exist at all", not a type-specific one. `backend/packages/contracts/src/nodes.ts#NodeConfigSchema.trunks`
    is the same flat, id-tagged array shape on the wire. Each `TRUNKn` also has an
    optional 4th field, `TRUNKn_DID` — that trunk's own phone number — which is *not*
    part of `allOutboundTrunks`'/`NodeConfig`'s shape (a telephony node never needs a
-   DID, only SIP credentials) but is read independently by `apps/api/src/outbound-trunks.ts#allTrunkDids`
+   DID, only SIP credentials) but is read independently by `backend/packages/api/src/outbound-trunks.ts#allTrunkDids`
    as the pool of sender numbers `sms_code` rotates across (see "Phase 6 SMS provider
    adapter" below) — one flat `TRUNKn_*` env var group now covers both what a node
    dials out with and what the control plane can text from, instead of a separate,
@@ -419,7 +422,7 @@ only have the one number working."*
 2. **Selection happens on the telephony-agent (droplet) side**, not the control plane —
    only the agent can see live call outcomes over each trunk's registration, and this
    keeps the control plane's job unchanged ("please do a call_reachability call", never
-   "please use trunk N"). `apps/api/src/node-service.ts#configFor` just hands over the
+   "please use trunk N"). `backend/packages/api/src/node-service.ts#configFor` just hands over the
    full pool; `apps/telephony-agent/src/pjsip-config.ts#renderPjsipTrunks` renders one
    PJSIP registration/auth/aor/endpoint/identify block per trunk id (`trunk-1`, `trunk-2`,
    ...) — no longer named after a verification type at all.
@@ -515,11 +518,11 @@ How to live-test any voice type via the public anonymous demo widget backing end
 (gated by `DEMO_PROJECT_SLUG` being set):
 
 ```
-POST https://powerotp.com/v1/demo/verifications
+POST https://api.powerotp.com/v1/demo/verifications
 Body: {"type":"call_reachability","targetNumber":"+14034701805"}
 ```
 
-then poll `GET https://powerotp.com/v1/demo/verifications/{interactionId}` until a
+then poll `GET https://api.powerotp.com/v1/demo/verifications/{interactionId}` until a
 terminal-ish state. Check agent logs (`sudo journalctl -u powerotp-agent`) for which
 trunk id actually got used and whether a failover retry happened.
 
@@ -576,32 +579,32 @@ recordings and challenges, private Spaces storage, a signed media manifest, node
 sync, and ARI recording playback — reusing the same encrypted-secret and node-dispatch
 machinery already proven for `voice_code` rather than introducing anything new.
 
-- **Contracts**: `libraries/contracts/src/challenges.ts` (`ChallengeSchema`,
+- **Contracts**: `backend/packages/contracts/src/challenges.ts` (`ChallengeSchema`,
   `ChallengeSubmissionSchema`, `CreateChallengeSchema`, `RecordingAsset`) already existed
   before this phase and needed no changes; `NodeJobSchema` in
-  `libraries/contracts/src/nodes.ts` gained an optional `soundBasename` for claimed
+  `backend/packages/contracts/src/nodes.ts` gained an optional `soundBasename` for claimed
   `voice_challenge` jobs.
 - **Storage**: two new Mongo collections, `recordingAssets` and `challengeDefinitions`
-  (`apps/api/src/challenge-persistence.ts`), plus a `{ type, state, createdAt }` index on
+  (`backend/packages/api/src/challenge-persistence.ts`), plus a `{ type, state, createdAt }` index on
   the verification collection to support `claimNextForNode` filtering by type at scale
-  (`apps/api/src/persistence.ts`). The verification document's previously-unused
+  (`backend/packages/api/src/persistence.ts`). The verification document's previously-unused
   singular `answerOptionId` field was replaced with an embedded, per-interaction
   `challenge` snapshot (`challengeDefinitionId`, freshly shuffled `challengeOptions`,
-  `expectedAnswerOptionIdsEncrypted`) — see `apps/api/src/verification-persistence.ts`.
-- **`apps/api/src/media-service.ts`**: validates an admin upload (magic-byte sniffing for
+  `expectedAnswerOptionIdsEncrypted`) — see `backend/packages/api/src/verification-persistence.ts`.
+- **`backend/packages/api/src/media-service.ts`**: validates an admin upload (magic-byte sniffing for
   WAV/MP3/M4A, a hard size cap rejected before even inspecting contents) and normalizes
   it with `@ffmpeg-installer/ffmpeg` (an npm static binary, not a DigitalOcean Aptfile —
   App Platform's Aptfile buildpack doesn't reliably expose system FFmpeg at runtime) to
   8kHz mono, matching the existing PJSIP `allow=ulaw,alaw` codec config so the output is
   directly playable via ARI's `sound:` media type with no dialplan change. Also computes
   the SHA-256 checksum a node later verifies before trusting a download.
-- **`apps/api/src/spaces-client.ts`**: a thin S3-compatible wrapper (`@aws-sdk/client-s3`
+- **`backend/packages/api/src/spaces-client.ts`**: a thin S3-compatible wrapper (`@aws-sdk/client-s3`
   + `@aws-sdk/s3-request-presigner`) over the private Spaces bucket — `putObject` for
   admin publish, `presignedGetUrl` (short-lived) for node download. Telephony droplets
   never hold Spaces credentials at all, matching the "no per-node secrets" node-identity
   model; a node instead receives one presigned URL per recording from the manifest
   route below.
-- **`apps/api/src/challenge-service.ts`** (`ChallengeService`): admin `publishRecording`/
+- **`backend/packages/api/src/challenge-service.ts`** (`ChallengeService`): admin `publishRecording`/
   `createChallenge`/`listRecordings`/`listChallenges`/`retireRecording`/`retireChallenge`
   (soft-retire only — an immutable Spaces object and any challenge/interaction already
   referencing it are left untouched, so retiring never breaks an in-flight interaction);
@@ -612,7 +615,7 @@ machinery already proven for `voice_code` rather than introducing anything new.
   `gradeSubmission` (exact-set match against `minSelections`/`maxSelections`/
   `allowsMultiple`, decrypting only transiently); `currentManifest` (the signed manifest
   + presigned URLs described below).
-- **`VerificationService`** (`apps/api/src/verification-service.ts`): `create()` binds a
+- **`VerificationService`** (`backend/packages/api/src/verification-service.ts`): `create()` binds a
   challenge synchronously via `selectAndMaterialize()` for `voice_challenge` — a missing
   published challenge is a content-catalog precondition, so it fails the request
   immediately with `no_published_challenges` (409), the same way a bad E.164 number or
@@ -620,23 +623,23 @@ machinery already proven for `voice_code` rather than introducing anything new.
   unconfigured trunk. `toStatus()` only includes `challenge` (question/options, never
   correctness information) once the verification has reached `awaiting_response` or a
   later terminal state (`hasReachedAwaitingResponse()` in
-  `apps/api/src/verification-state-machine.ts`) — never at `queued`/`dispatching`/
+  `backend/packages/api/src/verification-state-machine.ts`) — never at `queued`/`dispatching`/
   `calling`/etc., so a status poll can't see the challenge before the recording has
   actually been dispatched for playback. `submitChallenge()` grades a submission the
   same way `submitCode()` grades a voice/SMS code, and `soundBasenameForDelivery()`
   mirrors `codeForDelivery()` for the claiming node.
-- **`apps/api/src/transport.ts`**: `voice_challenge` now uses
+- **`backend/packages/api/src/transport.ts`**: `voice_challenge` now uses
   `createNodeDispatchTransport`, identical in shape to `call_reachability`/`voice_code` —
   it still fails immediately with `method_not_available` if no trunk is configured in
   the pool at all; the challenge-content precondition above is checked earlier, at
   creation, not here.
-- **Admin routes** (`apps/web/app/v1/admin/recordings/route.ts` + `[id]/route.ts`,
-  `apps/web/app/v1/admin/challenges/route.ts` + `[id]/route.ts`): session + CSRF gated
+- **Admin routes** (`backend/apps/server/app/v1/admin/recordings/route.ts` + `[id]/route.ts`,
+  `backend/apps/server/app/v1/admin/challenges/route.ts` + `[id]/route.ts`): session + CSRF gated
   exactly like `/v1/admin/demo-project` (`requireAdminSession` + `verifyCsrfHeader`; IP
   allowlisting is enforced once at admin login, not re-checked per request, consistent
   with every other admin route). `/admin`'s new `challenges-panel.tsx` wires recording
   upload and challenge authoring into the existing admin page.
-- **`GET /v1/nodes/media-manifest`** (`apps/web/app/v1/nodes/media-manifest/route.ts`):
+- **`GET /v1/nodes/media-manifest`** (`backend/apps/server/app/v1/nodes/media-manifest/route.ts`):
   `NODE_SECRET`-authenticated exactly like `/v1/nodes/config`, no per-node identity.
   Returns `204` when nothing is published yet (no Spaces/manifest-secret configuration,
   or no published challenge currently references a recording) — the agent's media-sync
@@ -662,7 +665,7 @@ machinery already proven for `voice_code` rather than introducing anything new.
   `submit_challenge` action that already existed in the contracts.
 - **New optional config**: `SPACES_ENDPOINT`/`SPACES_BUCKET`/`SPACES_ACCESS_KEY`/
   `SPACES_SECRET_KEY` and an independent `MEDIA_MANIFEST_SECRET` (never reused for
-  `NODE_SECRET`) in `apps/api/src/config.ts` — all optional, all covered by the same
+  `NODE_SECRET`) in `backend/packages/api/src/config.ts` — all optional, all covered by the same
   empty-string-is-unset sanitization as every other optional field (see the "empty-string
   optional env vars" incident above), so `voice_challenge` and the admin
   recording/challenge APIs fail closed with `media_storage_not_configured` (Spaces not
@@ -677,7 +680,7 @@ transitively by `server-context.ts` → `challenge-service.ts`) reached a server
 Root cause: `@ffmpeg-installer/ffmpeg` resolves its platform binary via dynamic
 `require()` branching at runtime — code Turbopack cannot statically analyze and bundle
 correctly. Fixed by adding `serverExternalPackages: ["@ffmpeg-installer/ffmpeg",
-"@aws-sdk/client-s3", "@aws-sdk/s3-request-presigner"]` to `apps/web/next.config.ts` —
+"@aws-sdk/client-s3", "@aws-sdk/s3-request-presigner"]` to `frontend/next.config.ts` —
 Next.js's documented mechanism for telling the bundler to leave a package as a real
 Node `require()` at runtime instead of statically bundling it (the AWS SDK packages were
 included proactively since they carry similarly dynamic optional dependencies, even
@@ -693,7 +696,7 @@ the telephony-agent, a SIP trunk, or the node-facing job queue:
 - `VerificationService#create` generates a cryptographically random five-digit SMS code
   and stores only `expectedCodeEncrypted`, using the same authenticated encryption and
   response-grading path as `voice_code`. The customer cannot supply an SMS code.
-- `apps/api/src/sms.ts#createVoipMsSmsService` calls VoIP.ms's `sendSMS` REST method
+- `backend/packages/api/src/sms.ts#createVoipMsSmsService` calls VoIP.ms's `sendSMS` REST method
   over HTTPS. Credentials (`VOIPMS_SMS_API_USERNAME`/`VOIPMS_SMS_API_PASSWORD`) are
   VoIP.ms's REST/JSON API account email + API key — a different credential pair from
   the SIP trunk credentials, entered separately in App Platform. Parameters are sent
@@ -701,7 +704,7 @@ the telephony-agent, a SIP trunk, or the node-facing job queue:
   DID is not a separate hardcoded variable** (there was originally a single
   `VOIPMS_SMS_DID`, replaced during the trunk-pool session below): `sendSMS` still
   requires exactly one origin DID per call — every SMS needs a single "from" number,
-  the same as everywhere else — but `apps/api/src/outbound-trunks.ts#allTrunkDids`
+  the same as everywhere else — but `backend/packages/api/src/outbound-trunks.ts#allTrunkDids`
   reuses whichever `TRUNKn_DID` values are configured (see "Outbound trunk pool"
   below) as the pool of numbers `sms_code` can send from, and `sms.ts` rotates
   round-robin across all of them, falling over to the next one if a send is rejected
@@ -709,7 +712,7 @@ the telephony-agent, a SIP trunk, or the node-facing job queue:
   `TRUNKn_DID` is deliberately never sent to a telephony node (`allOutboundTrunks`,
   used for node config, never includes it) — nodes only need SIP credentials to dial
   out, never a DID.
-- `apps/api/src/transport.ts#createSmsCodeTransport` drives
+- `backend/packages/api/src/transport.ts#createSmsCodeTransport` drives
   `queued -> dispatching -> awaiting_response` after provider acceptance and normalizes
   provider/API failures to stable `provider_rejected` or `provider_unavailable` reason
   codes. The atomic `queued -> dispatching` transition is also the send claim, so a
@@ -878,7 +881,7 @@ the deploy path, which were fixed. Current shape:
   connections an abuse bot would — the exact behavior the phishing mail alleged is now
   structurally impossible, and attempts are logged. Nothing legitimate needs these: the
   agent talks HTTPS to the control plane and SIP over UDP, and email goes through Brevo's
-  API from `apps/web`, never SMTP from the droplet.
+  API from `frontend`, never SMTP from the droplet.
 - **IAX2 removed.** `chan_iax2` was loaded and listening on `udp/4569` with Asterisk's
   packaged anonymous `[guest]` user in `iax.conf`, despite IAX2 being completely unused
   (`iax2 show peers`/`show registry`: zero of each — all trunks are PJSIP). Added
@@ -1013,10 +1016,10 @@ cause: App Platform lets an operator create an env var with a blank value instea
 omitting it, which `ProductionConfigSchema` treated as invalid for optional fields — and
 because `instrumentation.ts` calls `loadConfig()` eagerly at boot to fail fast on bad
 config (by design), one blank optional variable crashed the entire process, not just the
-feature it was for. Fixed in `apps/api/src/config.ts#loadConfig`: empty-string values are
+feature it was for. Fixed in `backend/packages/api/src/config.ts#loadConfig`: empty-string values are
 now filtered out before parsing, so "unset" and "set to blank" are equivalent for
 optional fields, while a required field left empty still correctly fails fast. Covered by
-`apps/api/src/config.test.ts`. If a future deploy goes fully dark again (every route,
+`backend/packages/api/src/config.test.ts`. If a future deploy goes fully dark again (every route,
 including `/health`), suspect a config validation crash first and check for this pattern
 before anything else.
 
@@ -1054,19 +1057,19 @@ the existing document, never a new collection).
   return value (whichever trunk produced the final outcome, not an
   earlier failed-over attempt) — and recorded via
   `VerificationService#recordProviderAttemptMeta` before the corresponding
-  state transition is applied (`apps/web/app/v1/nodes/jobs/[interactionId]/events/route.ts`).
-  For `sms_code`, `apps/api/src/sms.ts#createVoipMsSmsService`'s
+  state transition is applied (`backend/apps/server/app/v1/nodes/jobs/[interactionId]/events/route.ts`).
+  For `sms_code`, `backend/packages/api/src/sms.ts#createVoipMsSmsService`'s
   `sendVerificationCode` now returns `{ did }` on success (only on
   success — a DID that was tried and rejected before a working one is
   never recorded, since it was never actually used/billed), threaded
   through `TransportHandle#advance`'s new optional third `meta` argument
-  (`apps/api/src/transport.ts`, wired in
-  `apps/api/src/verification-queue.ts#createDispatchWorker`). The existing
+  (`backend/packages/api/src/transport.ts`, wired in
+  `backend/packages/api/src/verification-queue.ts#createDispatchWorker`). The existing
   per-transition timeline in `verificationEvents` (already timestamped)
   remains the record of state-change timing; nothing new was needed there.
 - **What's captured minutes later (the "VoIP.ms version")**:
   `VerificationService#transition` schedules a delayed reconciliation job
-  (`apps/api/src/provider-reconcile-worker.ts`, queue
+  (`backend/packages/api/src/provider-reconcile-worker.ts`, queue
   `verification-provider-reconcile`) the *first* time an interaction
   crosses into "delivery is done" — expressed generically as
   `!hasReachedAwaitingResponse(current.type, current.state) &&
@@ -1077,7 +1080,7 @@ the existing document, never a new collection).
   customer's own later code/challenge submission) — and only when a real
   trunk/DID was actually recorded (skipped entirely for
   `method_not_available`, since nothing was ever attempted).
-  `apps/api/src/provider-reconcile-service.ts` then queries VoIP.ms's
+  `backend/packages/api/src/provider-reconcile-service.ts` then queries VoIP.ms's
   `getCDR` (voice) or `getSMS` (`sms_code`) for a ±1-day window around the
   interaction's `createdAt` (VoIP.ms's own date filters are day-granularity,
   not datetime) and matches the closest-in-time row whose destination/
@@ -1096,7 +1099,7 @@ the existing document, never a new collection).
   `tools/api-responses.json` and its published `GetCDRResponseCDR`/
   `GetSMSResponseSMS` types — see the `VoipMsCdrRow`/`VoipMsSmsRow`
   interfaces and their doc comments in
-  `apps/api/src/provider-reconcile-service.ts` for the full confirmed
+  `backend/packages/api/src/provider-reconcile-service.ts` for the full confirmed
   shape and citations. `sms_code`'s cost is **not** read from `getSMS` (VoIP.ms
   doesn't return a per-message cost there) — it's `SMS_OUTBOUND_RATE_USD`
   (`$0.0075`, VoIP.ms's own published flat rate, a constant to update by
@@ -1104,11 +1107,11 @@ the existing document, never a new collection).
   matched. No new credentials were needed — `getCDR`/`getSMS` are called
   with the same account-wide `VOIPMS_SMS_API_USERNAME`/
   `VOIPMS_SMS_API_PASSWORD` REST credentials `sms_code` already uses (the
-  new low-level POST helper, `apps/api/src/voipms-http.ts`, is also a
+  new low-level POST helper, `backend/packages/api/src/voipms-http.ts`, is also a
   dedup of `sms.ts`'s previously-inline `multipart/form-data` POST logic —
   behavior-preserving, same log lines, same live-confirmed
   `multipart/form-data`-not-urlencoded quirk, just shared with the new
-  `apps/api/src/voipms-billing-client.ts`).
+  `backend/packages/api/src/voipms-billing-client.ts`).
 - **Retry/give-up policy**: VoIP.ms's own CDR/SMS logs are not guaranteed
   to be queryable the instant a call/message finishes, so a "no match yet"
   result is retried via BullMQ's backoff (5 attempts, fixed 2-minute delay,
@@ -1165,16 +1168,16 @@ transactional running-balance ledger, and Stripe fixed-amount top-ups.
   tier1 = balance $0–$49.99 (most expensive), tier2 = $50–$99.99, tier3 =
   $100+ (cheapest) — more money on deposit gets a better rate, the reverse
   of an earlier draft. The dollar boundaries are a fixed product decision
-  (`apps/api/src/balance-service.ts#tierForBalance`), not admin-configurable;
+  (`backend/packages/api/src/balance-service.ts#tierForBalance`), not admin-configurable;
   only the *rates* charged per tier are.
-- **Rate charts** (`apps/api/src/rate-chart-service.ts`,
+- **Rate charts** (`backend/packages/api/src/rate-chart-service.ts`,
   `callRateCards`/`smsRateCards` collections, `_id` = ISO 3166-1 alpha-2
   country code): one row per country, three tier columns each, for calls
   (USD/minute, shared by `call_reachability`/`voice_code`/`voice_challenge`
   — a VoIP.ms per-minute cost doesn't depend on which OTP type placed the
   call) and SMS (USD/message, `sms_code`) separately. Edited via
   `GET/PUT /v1/admin/billing/call-rates` and `.../sms-rates` and rendered
-  as editable grids in `apps/web/app/admin/billing-rates-panel.tsx`. A
+  as editable grids in `frontend/app/admin/billing-rates-panel.tsx`. A
   country with no rate entered yet bills $0, never a guessed default.
 - **Plan charge chart** (`planCharges` collection, exactly 3 documents):
   `monthlyDisplayUsd` (the "$10/month" a customer sees) and
@@ -1188,7 +1191,7 @@ transactional running-balance ledger, and Stripe fixed-amount top-ups.
   `userId`/`projectId`/`interactionId`/`stripePaymentId` (whichever apply),
   `type` (`otp1`..`otp4` map 1:1 to
   `call_reachability`/`voice_code`/`voice_challenge`/`sms_code` via
-  `otpChargeTypeFor` in `libraries/contracts/src/billing.ts`;
+  `otpChargeTypeFor` in `backend/packages/contracts/src/billing.ts`;
   `daily_charge`; `topup`; `visit` is reserved but unused, see below),
   `country` where applicable, and `openingBalanceUsd`/`tierAtTransaction`/
   `amountUsd`/`closingBalanceUsd` — every row carries its own before/after
@@ -1196,7 +1199,7 @@ transactional running-balance ledger, and Stripe fixed-amount top-ups.
   recomputing anything. A materialized `customerBalances` cache
   (`{ _id: userId, balanceUsd, tier }`) is always written in the same
   MongoDB multi-document transaction as the ledger insert
-  (`apps/api/src/balance-service.ts#applyLedgerEntry`, using
+  (`backend/packages/api/src/balance-service.ts#applyLedgerEntry`, using
   `client.startSession()` — Atlas is always a replica set, so real
   transactions are always available), so concurrent charges/credits can
   never corrupt the running balance. A tier-dependent charge amount is
@@ -1205,7 +1208,7 @@ transactional running-balance ledger, and Stripe fixed-amount top-ups.
   top-up can't leave a charge using a stale tier.
 - **Charge trigger**: `VerificationService#transition` calls
   `BillingChargeService#chargeCompletedInteraction`
-  (`apps/api/src/billing-charge-service.ts`) at the exact same moment
+  (`backend/packages/api/src/billing-charge-service.ts`) at the exact same moment
   provider-cost reconciliation is already scheduled from — the first time
   an interaction crosses into "delivery is done" — never waiting on
   VoIP.ms's own CDR reconciliation. Billed quantity comes from **this
@@ -1217,13 +1220,13 @@ transactional running-balance ledger, and Stripe fixed-amount top-ups.
   - SMS: a flat 1-message charge whenever a real send was accepted by
     VoIP.ms (`smsDid` recorded), regardless of confirmed delivery.
   - Country is resolved from the interaction's own E.164 `targetNumber` via
-    `apps/api/src/country-lookup.ts` (`libphonenumber-js`, a real
+    `backend/packages/api/src/country-lookup.ts` (`libphonenumber-js`, a real
     maintained library) — deliberately not a hand-rolled calling-code
     prefix table, which would misattribute countries that share one (e.g.
     NANP's `+1`: this project's own real canary number, `+14034701805`,
     is actually Canadian, not American).
   - Never charged for the platform-admin-owned demo project
-    (`PLATFORM_ADMIN_USER_ID`, `apps/api/src/persistence.ts`) —
+    (`PLATFORM_ADMIN_USER_ID`, `backend/packages/api/src/persistence.ts`) —
     `applyLedgerEntry`/`requireNonNegativeBalance` both exempt it, since
     there is no real customer balance behind the public marketing demo.
 - **Insufficient balance**: `VerificationService#create` calls
@@ -1232,7 +1235,7 @@ transactional running-balance ledger, and Stripe fixed-amount top-ups.
   402), not a per-call cost pre-estimate (real cost isn't known until after
   the attempt completes). Applies uniformly to every creation path
   (customer-backend, the hosted modal, the demo — exempted as above).
-- **Daily plan charge**: `apps/api/src/billing-daily-charge-worker.ts`, a
+- **Daily plan charge**: `backend/packages/api/src/billing-daily-charge-worker.ts`, a
   BullMQ repeatable job (`billing-daily-charges` queue, once/day) charges
   every *active project* ("website install"/card) its owning customer's
   current-tier `dailyChargedUsd` — one row per project per day, not one per
@@ -1241,7 +1244,7 @@ transactional running-balance ledger, and Stripe fixed-amount top-ups.
   today, UTC?"), not just the repeatable job's stable `jobId` — a mid-tick
   restart re-running the same calendar day's pass can never double-charge
   an already-charged project.
-- **Stripe top-ups** (`apps/api/src/stripe-service.ts`): fixed amounts only
+- **Stripe top-ups** (`backend/packages/api/src/stripe-service.ts`): fixed amounts only
   — $5/$25/$50/$100, no arbitrary custom amount.
   `POST /v1/billing/topups` (customer session-gated) creates a Stripe
   Checkout session; the actual credit is only ever applied from
@@ -1263,14 +1266,14 @@ transactional running-balance ledger, and Stripe fixed-amount top-ups.
   unit-tests other live provider calls like VoIP.ms's `sendSMS`).
 - **Customer/admin visibility**: `GET /v1/billing/balance` and
   `GET /v1/billing/ledger` (customer session-gated, own data only) back a
-  new dashboard section (`apps/web/app/dashboard/billing-panel.tsx`) showing
+  new dashboard section (`frontend/app/dashboard/billing-panel.tsx`) showing
   balance/tier, the 4 top-up buttons, and a recent-ledger table.
   `GET /v1/admin/billing/ledger?userId=` (admin-only) backs
-  `apps/web/app/admin/billing-ledger-panel.tsx`, a manual look-up-by-user-id
+  `frontend/app/admin/billing-ledger-panel.tsx`, a manual look-up-by-user-id
   panel for support, same convention as every other admin panel.
 - **Deliberately deferred, explicitly scoped down through this session's
   Q&A rather than guessed at** — the "visit" ledger type is reserved in
-  `libraries/contracts/src/billing.ts`'s type enum but has **no real
+  `backend/packages/contracts/src/billing.ts`'s type enum but has **no real
   charging logic wired to it**: it belongs to the future BotBlocker/
   gate-adapter product (`docs/POWEROTP_BOTBLOCKER_PLAN.md`), which does not
   exist yet. The user's own described rule for that future product,
@@ -1298,22 +1301,22 @@ normally."
 
 - **Password pepper**: `PASSWORD_PEPPER` (required, ≥32 bytes, independent
   from every other secret) is mixed into every customer password hash via
-  Argon2's own `secret` option (`apps/api/src/security.ts#hashPassword`/
+  Argon2's own `secret` option (`backend/packages/api/src/security.ts#hashPassword`/
   `verifyPassword`) — true keyed hashing, not string concatenation. Never
   stored anywhere near the hash (unlike Argon2's own per-hash salt), so a
   leaked `users` collection alone is never enough to offline-crack
   passwords. Safe to introduce as a newly-required env var with zero
   migration concern — there were no real customer accounts yet this
   session.
-- **Password rules**: `PasswordSchema` (`libraries/contracts/src/auth.ts`)
+- **Password rules**: `PasswordSchema` (`backend/packages/contracts/src/auth.ts`)
   gained a special-character requirement (12+ chars, upper, lower, digit,
   special — all five, per the user's exact framing). The same five rules
   are also exported as `PASSWORD_REQUIREMENTS` (an array of
   `{ id, label, test }` predicates) so the signup modal's live checklist UI
   and the server-side Zod schema can never silently drift apart.
-- **The rapid signup modal** (`apps/web/app/signup-modal.tsx`, triggered from
+- **The rapid signup modal** (`frontend/app/signup-modal.tsx`, triggered from
   a "Sign up" nav link and the homepage hero CTA via
-  `apps/web/app/signup-cta.tsx`): one modal collects email, password (typed
+  `frontend/app/signup-cta.tsx`): one modal collects email, password (typed
   twice, with the live checklist above) — then, on submit, creates the
   account **and** its first project/API key together,
   showing the raw API key once directly in the same modal with the note
@@ -1322,7 +1325,7 @@ normally."
   email" (the account must still click that link before the key can create
   anything real — see "Email-verification gate" below). `POST
   /v1/auth/signup` (`SignupSchema`/`SignupResponseSchema` in
-  `libraries/contracts/src/auth.ts`) does this in one request:
+  `backend/packages/contracts/src/auth.ts`) does this in one request:
   `AuthService#register` (unchanged core logic, now returns `{ userId,
   alreadyVerified }` instead of `void` so the route can act on it) followed
   by `ProjectService#create` using the neutral name `My Project`, no allowed
@@ -1349,7 +1352,7 @@ normally."
   (below) purely by holding the key shown once at signup, never clicking
   the activation link at all. Exempts the platform-admin-owned demo
   project, like every other per-customer gate in this codebase.
-- **Free monthly usage quota** (`apps/api/src/usage-quota-service.ts`,
+- **Free monthly usage quota** (`backend/packages/api/src/usage-quota-service.ts`,
   `UsageQuotaService`, `usageQuotas` collection) — checked *before*
   `BalanceService#requireNonNegativeBalance` inside
   `VerificationService#create`; a request it covers never touches the
@@ -1408,7 +1411,7 @@ normally."
   an account — `UsageQuotaService`, for a signup timestamp to seed a new
   quota window's eligibility — reads the separate, deliberately PII-free
   `customerAccounts` collection (`CustomerAccountDocument`, just `_id` +
-  `createdAt`, `apps/api/src/persistence.ts`) instead. `BalanceService`
+  `createdAt`, `backend/packages/api/src/persistence.ts`) instead. `BalanceService`
   never reads any account document at all — it only ever takes a `userId`.
   This was reinforced directly this session (the user's own framing: "use
   the client user id in our system to process things and not refer to user
@@ -1427,7 +1430,7 @@ normally."
   `AuthService#decryptEmail` helper, in exactly two places: sending the
   verification email (`AuthService#register`, which already has the
   plaintext from the request body, never round-trips through the DB for
-  this) and `apps/web/lib/session-cookies.ts#sessionUser`, which returns it
+  this) and `frontend/lib/session-cookies.ts#sessionUser`, which returns it
   to the account itself in a session response. Two independent new secrets
   by design — a leak of either one alone should never compromise the
   other (encryption vs. lookup-indexing are different concerns, matching
@@ -1435,7 +1438,7 @@ normally."
   platform admin's `UserDocument` (upserted by `AuthService#loginAdmin`)
   uses the exact same encrypted/hashed shape for consistency, even though
   `ADMIN_EMAIL` itself is already a non-secret App Platform config value.
-- **Brevo email template support** (`apps/api/src/email.ts`): the account
+- **Brevo email template support** (`backend/packages/api/src/email.ts`): the account
   verification email can now use a Brevo dashboard template
   (`templateId` + `params.VERIFY_URL`) instead of the original inline HTML,
   selected by the new optional `POWEROTP_SIGNUP_EMAIL_TEMPLATE_ID` env var
@@ -1473,23 +1476,23 @@ normally."
   `POWEROTP_SIGNUP_EMAIL_TEMPLATE_ID` in App Platform (see
   [`infrastructure/app-platform/README.md`](../infrastructure/app-platform/README.md)).
 - **Admin manual balance credit/debit** (`POST /v1/admin/billing/credit`,
-  `apps/web/app/admin/billing-ledger-panel.tsx`'s new "Manually credit/debit
+  `frontend/app/admin/billing-ledger-panel.tsx`'s new "Manually credit/debit
   this user" form): the only way to adjust a customer's balance today
   outside of the automated top-up/charge paths — built specifically to
   close the "no mitigation exists" gap flagged at the end of the prior
   session (a real customer blocked by `insufficient_balance` before rates/
   Stripe were configured had no remediation short of editing Mongo
   directly). Writes a new `admin_adjustment` ledger type (added to
-  `financialTransactionTypes` in `libraries/contracts/src/billing.ts`)
+  `financialTransactionTypes` in `backend/packages/contracts/src/billing.ts`)
   through the same `BalanceService#applyLedgerEntry` transaction as every
   other ledger row, with a new optional `note` field (only ever populated
   for this type) recording the admin's stated reason. `AdjustBalanceSchema`
   takes a signed `amountUsd` (positive credits, negative debits).
-- **Dashboard balance auto-refresh** (`apps/web/app/dashboard/billing-panel.tsx`):
+- **Dashboard balance auto-refresh** (`frontend/app/dashboard/billing-panel.tsx`):
   polls `/v1/billing/balance` and `/v1/billing/ledger` every 10 seconds
   while the dashboard is open, so a Stripe-webhook-applied top-up credit
   (which lands asynchronously, slightly after the customer's browser is
-  already redirected back by `apps/web/app/top-banner.tsx`) becomes visible
+  already redirected back by `frontend/app/top-banner.tsx`) becomes visible
   without a manual page refresh. Deliberately different from every admin
   panel's "manual refresh only" convention — this one is customer-facing and
   the whole point is reflecting an async webhook credit promptly.
@@ -1503,11 +1506,11 @@ redesign so every verification type — including the new one — has its own
 settings and filtered history view.
 
 - **`email_code`, a 5th verification type**: added to `verificationTypes`
-  (`libraries/contracts/src/verification.ts`) alongside
+  (`backend/packages/contracts/src/verification.ts`) alongside
   `call_reachability`/`voice_code`/`voice_challenge`/`sms_code`. Its state
   machine is identical to `sms_code`'s (`queued → dispatching →
   awaiting_response → succeeded|failed|expired|canceled` — see
-  `apps/api/src/verification-state-machine.ts`): a five-digit code is
+  `backend/packages/api/src/verification-state-machine.ts`): a five-digit code is
   always platform-generated (never client-supplied, same as `sms_code`) and
   validated through the exact same `POST
   /v1/verifications/{interactionId}/response` route every other code-based
@@ -1521,22 +1524,22 @@ settings and filtered history view.
   dispatch transport can keep treating "the destination" as one string
   regardless of type. `CreateVerificationSchema`'s `superRefine` now
   validates it as an email address for `email_code` and E.164 for every
-  other type. `apps/api/src/masking.ts` gained `maskEmail`/`maskTarget` (a
+  other type. `backend/packages/api/src/masking.ts` gained `maskEmail`/`maskTarget` (a
   type-aware dispatcher) so interaction summaries and widget-interaction
   rows mask an email address (`j•••••@example.com`) instead of running
   E.164 masking against it.
-- **Delivery transport** (`apps/api/src/email-otp-service.ts`,
+- **Delivery transport** (`backend/packages/api/src/email-otp-service.ts`,
   `createBrevoEmailOtpService`, wired into
-  `apps/api/src/transport.ts#createEmailCodeTransport`): sends the code over
+  `backend/packages/api/src/transport.ts#createEmailCodeTransport`): sends the code over
   the same Brevo account as account-verification email, through its own
-  dedicated module (not `apps/api/src/email.ts`, which only ever sends the
+  dedicated module (not `backend/packages/api/src/email.ts`, which only ever sends the
   fixed signup-verification email and operator alerts) since every
   `email_code` send renders a different, per-project-branded template.
   Unlike `sms_code`'s VoIP.ms credentials, `BREVO_API_KEY`/`EMAIL_FROM` are
   both already-required config fields, so this transport has no "provider
   not configured" fallback state — it is always real once deployed.
 - **Not offered through the hosted widget yet**:
-  `ModalSessionVerificationRequestSchema` (`libraries/contracts/src/modal-sessions.ts`)
+  `ModalSessionVerificationRequestSchema` (`backend/packages/contracts/src/modal-sessions.ts`)
   still validates `targetNumber` as E.164-only, and
   `ModalSessionService#createSession` explicitly filters `email_code` out of
   any session's `allowedTypes` — reachable today only via a customer's own
@@ -1544,17 +1547,17 @@ settings and filtered history view.
   Extending the widget's own contact-input UI for email is a deliberate,
   documented scope cut, not an oversight.
 - **Free quota and billing**: `email_code` gets its own free allowance in
-  `apps/api/src/usage-quota-service.ts` — **1,000 per rolling 30 days**, the
+  `backend/packages/api/src/usage-quota-service.ts` — **1,000 per rolling 30 days**, the
   user's own number from when this type was first scoped, same 180-day
   eligibility window as every other type. Once quota runs out, charging
   goes through a **new, deliberately flat, non-per-country rate** —
-  `EmailRateSchema`/`EmailRateCardDocument` (`libraries/contracts/src/billing.ts`,
-  `apps/api/src/billing-persistence.ts`) is a single global document (fixed
+  `EmailRateSchema`/`EmailRateCardDocument` (`backend/packages/contracts/src/billing.ts`,
+  `backend/packages/api/src/billing-persistence.ts`) is a single global document (fixed
   `_id: "global"`), not a per-country chart like
   `CallRateCardSchema`/`SmsRateCardSchema`, since Brevo's own per-email cost
   isn't country-dependent. Admin-editable at `GET`/`PUT
   /v1/admin/billing/email-rate` and a new card in `/admin`'s
-  "Billing rates" panel (`apps/web/app/admin/billing-rates-panel.tsx`), same
+  "Billing rates" panel (`frontend/app/admin/billing-rates-panel.tsx`), same
   "gathered and entered by an admin, never auto-fetched" convention as
   every other rate. Ledger type `otp5` was added to
   `financialTransactionTypes`, mapped 1:1 from `email_code` via
@@ -1562,8 +1565,8 @@ settings and filtered history view.
   writes a normal `otp5` row at `amountUsd: 0`/`note: "free_quota"`, same
   convention as every other type.
 - **Customer-brandable delivery emails**: `ProjectDocument` gained optional
-  `brandName`/`brandLogoUrl` fields (`apps/api/src/persistence.ts`,
-  `libraries/contracts/src/projects.ts`) — set by a customer for their own
+  `brandName`/`brandLogoUrl` fields (`backend/packages/api/src/persistence.ts`,
+  `backend/packages/contracts/src/projects.ts`) — set by a customer for their own
   project, used *only* to brand that project's `email_code` delivery
   emails to their own end users (sender name, subject line, and an
   optional logo image), never anywhere else. Per an explicit multiple-choice
@@ -1581,7 +1584,7 @@ settings and filtered history view.
   same-topic session, after the user asked directly whether Brevo supports
   either): `ProjectDocument` gained two more optional branding fields,
   `brandReplyToEmail` and `brandHtmlTemplate`
-  (`libraries/contracts/src/projects.ts`, `BrandReplyToEmailSchema`/
+  (`backend/packages/contracts/src/projects.ts`, `BrandReplyToEmailSchema`/
   `BrandHtmlTemplateSchema`). The "From" email address always stays our own
   verified `EMAIL_FROM` — Brevo (like every ESP) requires the sending
   domain to be authenticated in the account that sends, so we cannot send
@@ -1590,7 +1593,7 @@ settings and filtered history view.
   customers. `replyTo`, however, is completely independent of `sender` in
   Brevo's API and needs no verification at all, so `brandReplyToEmail` is
   the real, fully-supported way for an end user's reply to reach the
-  customer directly (`apps/api/src/email-otp-service.ts`, a `replyTo`
+  customer directly (`backend/packages/api/src/email-otp-service.ts`, a `replyTo`
   field added to the Brevo API call only when set). `brandHtmlTemplate` is
   a customer's own complete HTML email body, pasted in as-is (max 20,000
   characters) — Zod-validated to contain the literal `{{CODE}}` placeholder
@@ -1605,23 +1608,23 @@ settings and filtered history view.
   same per-interaction `emailBranding` snapshot as `brandName`/
   `brandLogoUrl` above, for the same reason.
 - **Customer dashboard redesign**: each project card
-  (`apps/web/app/dashboard/project-card.tsx`) now renders
-  `VerificationTabs` (`apps/web/app/dashboard/verification-tabs.tsx`) instead
+  (`frontend/app/dashboard/project-card.tsx`) now renders
+  `VerificationTabs` (`frontend/app/dashboard/verification-tabs.tsx`) instead
   of a flat method-chip list plus one always-unfiltered interaction
   timeline. One tab per verification type (including the new `email_code`)
   shows that type's own "enabled for this project" toggle (writing straight
   through the existing `PATCH /v1/projects/{id}` `enabledMethods` update)
   plus, for `email_code` only, the branding form above. Every type's tab
   then shows the *same* shared history table
-  (`apps/web/app/dashboard/interactions-table.tsx`, extracted from the old
+  (`frontend/app/dashboard/interactions-table.tsx`, extracted from the old
   `InteractionTimeline`, now fed rows directly instead of owning its own
   fetch/show-hide state) filtered to just that type — `GET
   /v1/projects/{projectId}/interactions` gained an optional `?type=` query
-  param (`apps/api/src/verification-reporting.ts#listProjectInteractions`),
+  param (`backend/packages/api/src/verification-reporting.ts#listProjectInteractions`),
   validated against `VerificationTypeSchema` server-side. Per the user's
   exact framing: "tabs for each type ... settings for each and the table
   for each history ... same table all pages but filtered for the type."
-- **A new "Visitors" tab** (`apps/web/app/dashboard/visitors-panel.tsx`):
+- **A new "Visitors" tab** (`frontend/app/dashboard/visitors-panel.tsx`):
   the customer-facing equivalent of the admin-only widget-interactions
   panel, scoped to the caller's own project via a new `GET
   /v1/projects/{projectId}/visitors` route
@@ -1633,24 +1636,24 @@ settings and filtered history view.
   "Coming soon"** — deliberately scaffolding only, per the user's explicit
   framing ("frame the table cards for this phase... most of which yet to
   build"). No scoring model, middleware signal ingestion beyond the existing
-  bot-signal honeypot (`apps/api/src/bot-signal-service.ts`, unchanged this
+  bot-signal honeypot (`backend/packages/api/src/bot-signal-service.ts`, unchanged this
   session), or threat logic of any kind exists yet — this is UI framing for
   a future phase, not a real feature.
 - **New unit tests** (all passing, `npm run verify` clean across every
-  workspace): `apps/api/src/email-otp-service.test.ts` (new — plain vs.
+  workspace): `backend/packages/api/src/email-otp-service.test.ts` (new — plain vs.
   branded template rendering, HTML-escapes an untrusted brand name,
   provider-rejected vs. provider-unavailable normalization),
-  `apps/api/src/transport.test.ts` (extended — `email_code`'s
-  dispatch/failure/branding-passthrough behavior), `apps/api/src/masking.test.ts`
-  (extended — `maskEmail`/`maskTarget`), `apps/api/src/usage-quota-service.test.ts`
-  (extended — the 1,000/30-day `email_code` limit), `apps/api/src/billing-charge-service.test.ts`
+  `backend/packages/api/src/transport.test.ts` (extended — `email_code`'s
+  dispatch/failure/branding-passthrough behavior), `backend/packages/api/src/masking.test.ts`
+  (extended — `maskEmail`/`maskTarget`), `backend/packages/api/src/usage-quota-service.test.ts`
+  (extended — the 1,000/30-day `email_code` limit), `backend/packages/api/src/billing-charge-service.test.ts`
   (extended — flat-rate charging with no country, and the $0 case when no
-  admin rate has been entered yet), `apps/mcp/src/content.test.ts` (updated
+  admin rate has been entered yet), `backend/packages/mcp/src/content.test.ts` (updated
   — now asserts 5 verification types, not 4), and (reply-to/custom-HTML
-  addition) `apps/api/src/email-otp-service.test.ts` (extended further —
+  addition) `backend/packages/api/src/email-otp-service.test.ts` (extended further —
   `replyTo` set only when branded, omitted otherwise, and `{{CODE}}`
   substitution into a customer's own HTML leaves everything else
-  unmodified) and `libraries/contracts/src/index.test.ts` (extended —
+  unmodified) and `backend/packages/contracts/src/index.test.ts` (extended —
   `email_code` target validation both directions, `BrandHtmlTemplateSchema`'s
   `{{CODE}}` requirement).
 
@@ -1662,7 +1665,7 @@ auto-polling, no charts/history, no alerting) per an explicit scope check
 during this session:
 
 - **Node staleness badge**: purely client-side in
-  `apps/web/app/admin/page.tsx` — a node that hasn't polled `/v1/nodes/config`
+  `frontend/app/admin/page.tsx` — a node that hasn't polled `/v1/nodes/config`
   in more than `STALE_THRESHOLD_MS` (3x the agent's 60s default
   `POLL_INTERVAL_MS`) shows a "stale" badge instead of "live", computed from
   the same `lastSeenAt` the nodes panel already fetched. No backend change.
@@ -1686,17 +1689,17 @@ during this session:
     trunk id) and posts them via the new
     `apps/telephony-agent/src/control-plane-client.ts#reportTrunkStatus` to
     a new node-facing route, `POST /v1/nodes/trunk-status`
-    (`apps/web/app/v1/nodes/trunk-status/route.ts`), `NODE_SECRET`-
+    (`backend/apps/server/app/v1/nodes/trunk-status/route.ts`), `NODE_SECRET`-
     authenticated exactly like `/v1/nodes/config`. A report failure is
     logged, never thrown — it must not block the trunk-config sync it's
     piggybacked on.
-  - `apps/api/src/node-service.ts#reportTrunkStatus` stores it on the
+  - `backend/packages/api/src/node-service.ts#reportTrunkStatus` stores it on the
     existing `nodes` collection document (matched by `ip`, the same
     identity `authenticate` already uses), extending `NodeDocument`
-    (`apps/api/src/persistence.ts`) with optional `trunkStatus`/
+    (`backend/packages/api/src/persistence.ts`) with optional `trunkStatus`/
     `trunkStatusReportedAt`. `NodeSchema`/`TrunkStatusSchema`/
     `TrunkStatusReportSchema` are new contracts
-    (`libraries/contracts/src/nodes.ts`).
+    (`backend/packages/contracts/src/nodes.ts`).
   - Registration state and `TrunkPool` health are two genuinely independent
     signals surfaced side by side, not merged into one status — a trunk can
     be `Registered` but recently provider-rejected on calls (`healthy:
@@ -1710,15 +1713,15 @@ during this session:
     existing `deploy-droplet` CI job (see "Droplet auto-deploy" above), no
     manual step. Until then, `/admin` simply shows no trunk-status
     sub-table for that node (treated as "not yet reported", not an error).
-- **Queue depth**: `apps/api/src/verification-queue.ts#getQueueCounts` adds
+- **Queue depth**: `backend/packages/api/src/verification-queue.ts#getQueueCounts` adds
   a thin wrapper over BullMQ's own `Queue#getJobCounts()` for all three
   queues this app runs (`verification-jobs`, `verification-callbacks`,
   `verification-provider-reconcile`), exposed via a new admin-session-gated
   route, `GET /v1/admin/queues`
-  (`apps/web/app/v1/admin/queues/route.ts`) — `queues` is now retained on
-  `ServerContext` (`apps/web/lib/server-context.ts`) rather than only used
+  (`backend/apps/server/app/v1/admin/queues/route.ts`) — `queues` is now retained on
+  `ServerContext` (`backend/apps/server/lib/server-context.ts`) rather than only used
   locally inside `buildServerContext`. Rendered as a manual-refresh table in
-  the new `apps/web/app/admin/ops-panel.tsx`. Not unit-tested directly (it's
+  the new `frontend/app/admin/ops-panel.tsx`. Not unit-tested directly (it's
   a thin passthrough to BullMQ's own well-tested method, same as this
   project's existing `enqueueDispatch`/`enqueueCallback` helpers, which
   aren't unit-tested against a real Redis either) — verify live via
@@ -1734,7 +1737,7 @@ infrastructure:
 
 - **Per-project usage counters already existed** (`Project#stats` —
   `total`/`succeeded`/`failed`/`byType`, computed by
-  `apps/api/src/verification-reporting.ts#computeProjectStats` and already
+  `backend/packages/api/src/verification-reporting.ts#computeProjectStats` and already
   rendered on the customer dashboard's `project-card.tsx`) — nothing new
   was needed here, just confirmed as already covering the customer-facing
   half of this session's usage-counters scope.
@@ -1743,27 +1746,27 @@ infrastructure:
   `computeProjectStats` to share one `aggregateStats` helper with an
   optional filter), `VerificationService#platformStats`, and a new
   admin-session-gated route, `GET /v1/admin/usage`
-  (`apps/web/app/v1/admin/usage/route.ts`). Rendered as a new manual-
-  refresh panel, `apps/web/app/admin/usage-panel.tsx`, reusing the exact
+  (`backend/apps/server/app/v1/admin/usage/route.ts`). Rendered as a new manual-
+  refresh panel, `frontend/app/admin/usage-panel.tsx`, reusing the exact
   `statsGrid`/`opsTable` CSS classes already used elsewhere on `/admin`.
 - **Callback delivery diagnostics (visibility only, no manual retry)**: the
-  data already existed — `apps/api/src/callback-worker.ts` has recorded
+  data already existed — `backend/packages/api/src/callback-worker.ts` has recorded
   every delivery attempt (`delivered`/`failed`, status code, error, attempt
   number) to the `callbackDeliveries` collection since Phase 3. This session
   only added visibility: `verification-reporting.ts#listRecentCallbackDeliveries`
   (most recent 50, newest first), `VerificationService#recentCallbackDeliveries`,
   a new admin route `GET /v1/admin/callback-deliveries`
-  (`apps/web/app/v1/admin/callback-deliveries/route.ts`), and a new panel
-  `apps/web/app/admin/callback-deliveries-panel.tsx`. New contract:
+  (`backend/apps/server/app/v1/admin/callback-deliveries/route.ts`), and a new panel
+  `frontend/app/admin/callback-deliveries-panel.tsx`. New contract:
   `CallbackDeliverySummarySchema`/`CallbackDeliveriesResponseSchema`
-  (`libraries/contracts/src/verification.ts`).
+  (`backend/packages/contracts/src/verification.ts`).
 - **Alerting**: emails `ADMIN_EMAIL` (the existing Brevo integration already
-  used for customer email verification — `apps/api/src/email.ts` gained
+  used for customer email verification — `backend/packages/api/src/email.ts` gained
   `EmailService#sendAdminAlert`, no new credential) when any of three
   conditions trip, checked every 5 minutes by a new BullMQ repeatable job
-  (`platform-alerts` queue, `apps/api/src/alert-worker.ts`, scheduled via
+  (`platform-alerts` queue, `backend/packages/api/src/alert-worker.ts`, scheduled via
   `scheduleAlertChecks` — idempotent stable `jobId`, safe to call on every
-  server boot, wired into `apps/web/lib/server-context.ts`):
+  server boot, wired into `backend/apps/server/lib/server-context.ts`):
   - A queue's `waiting + delayed` job count exceeds `QUEUE_BACKLOG_THRESHOLD`
     (50), or its `failed` count exceeds `QUEUE_FAILED_THRESHOLD` (20) —
     checked for every queue this app runs.
@@ -1773,10 +1776,10 @@ infrastructure:
     single failed call on a quiet day never triggers a false alarm.
   - A telephony node has gone quiet past the same `NODE_STALE_THRESHOLD_MS`
     (3x the agent's 60s poll interval) the `/admin` staleness badge already
-    uses — this constant moved to `libraries/contracts/src/nodes.ts` so
+    uses — this constant moved to `backend/packages/contracts/src/nodes.ts` so
     both sides share one definition of "stale" instead of two independent
     hardcoded values.
-  - All three condition checks (`apps/api/src/alerting-service.ts`) are pure
+  - All three condition checks (`backend/packages/api/src/alerting-service.ts`) are pure
     functions taking already-fetched data (queue counts, a total/failed
     count pair, a node list) — no Mongo/BullMQ/Node handle passed in — so
     they're unit-tested (`alerting-service.test.ts`) without any live
@@ -1784,7 +1787,7 @@ infrastructure:
   - A new `alertState` collection (`AlertStateDocument`, one row per
     triggered condition key, e.g. `queue_backlog:verification-jobs`,
     `node_stale:<nodeId>`) backs a one-hour cooldown
-    (`apps/api/src/alert-dispatcher.ts#dispatchAlerts`) so an ongoing
+    (`backend/packages/api/src/alert-dispatcher.ts#dispatchAlerts`) so an ongoing
     problem re-emails at most once per hour, not every 5-minute check.
     Silently a no-op (not an error) whenever `ADMIN_EMAIL` is unset, the
     same deferred-configuration convention as every other optional feature.
@@ -1801,7 +1804,7 @@ infrastructure:
   where `RETENTION_PERIOD_SECONDS` = 548 days ~= 18 months, rounded up so
   nothing expires a day early) on `verificationRequests`,
   `verificationEvents`, and `callbackDeliveries`
-  (`apps/api/src/verification-persistence.ts`) — the exact same mechanism
+  (`backend/packages/api/src/verification-persistence.ts`) — the exact same mechanism
   this project already uses for `sessions`/`emailVerifications`/
   `idempotencyRecords`, just with a much longer horizon. **Deliberately not
   built yet, per the user's own explicit framing this session**: exporting
@@ -1837,9 +1840,9 @@ when the user enters the API creds in their site."
   has the number (e.g. from its own signup form). The hosted modal flips
   that: the end user types the number *into the modal itself*, so a new,
   more limited credential has to exist *before* any interaction does. A
-  "modal session" (`libraries/contracts/src/modal-sessions.ts`,
-  `apps/api/src/modal-session-persistence.ts`,
-  `apps/api/src/modal-session-service.ts#ModalSessionService`) is created
+  "modal session" (`backend/packages/contracts/src/modal-sessions.ts`,
+  `backend/packages/api/src/modal-session-persistence.ts`,
+  `backend/packages/api/src/modal-session-service.ts#ModalSessionService`) is created
   by a customer's own backend with its project API key
   (`POST /v1/projects/{slug}/modal-sessions`, optionally narrowing
   `allowedTypes` to a subset of the project's own `enabledMethods` — always
@@ -1854,7 +1857,7 @@ when the user enters the API creds in their site."
   `emailVerifications`). `ModalSessionService#requireActive` also checks
   `expiresAt` manually on every read, since Mongo's TTL sweep only runs
   periodically, not the instant a document expires.
-- **The hosted page**: `apps/web/app/widget/[sessionId]/page.tsx` +
+- **The hosted page**: `frontend/app/widget/[sessionId]/page.tsx` +
   `widget-client.tsx` — a customer embeds
   `modalUrl` (returned alongside `sessionId`/`expiresAt` from session
   creation) directly, typically in an iframe. On load it fetches
@@ -1871,14 +1874,14 @@ when the user enters the API creds in their site."
   modal has no project API key, so it cannot poll
   `GET /v1/verifications/{interactionId}` the way it worked before this
   session (API-key-only). Fixed by adding a second, `view_status`-scoped
-  interaction-token action (`libraries/contracts/src/verification.ts`'s
+  interaction-token action (`backend/packages/contracts/src/verification.ts`'s
   `InteractionTokenClaimsSchema.action` enum gained `"view_status"`
   alongside the existing `submit_code`/`submit_challenge`) that the status
   route now also accepts via the same `x-interaction-token` header the
   response route already used — but, unlike those two, **never single-use
   consumed**, since polling the same interaction repeatedly is expected,
   not a replay. This token's `audience` is a fixed constant
-  (`apps/api/src/interaction-tokens.ts#WIDGET_STATUS_TOKEN_AUDIENCE`, not
+  (`backend/packages/api/src/interaction-tokens.ts#WIDGET_STATUS_TOKEN_AUDIENCE`, not
   the request's `Origin` header) — deliberately different from the
   existing submit-action tokens, which must match a customer's own
   allowlisted origin: a same-origin `GET` fetch isn't guaranteed to always
@@ -1917,7 +1920,7 @@ when the user enters the API creds in their site."
   `submitResponse(interactionId, body)` (both against the top-level
   `/v1/verifications/...` paths on the project URL's origin) — previously
   create-only. Also exports a standalone `verifyCallbackSignature` function
-  mirroring `apps/api/src/callback-signing.ts`'s algorithm exactly (a
+  mirroring `backend/packages/api/src/callback-signing.ts`'s algorithm exactly (a
   deliberate, documented duplication rather than an `@powerotp/api`
   dependency — that package is server-internal, pulling in BullMQ/MongoDB/
   the AWS SDK, nothing a customer's own backend should ever need to
@@ -1925,7 +1928,7 @@ when the user enters the API creds in their site."
   user's own framing was to complete them now and defer publishing to a
   public registry as a separate decision (needs an npm org/token that
   doesn't exist yet); revisit only if asked.
-- **MCP deepened** (`apps/mcp/src/content.ts`/`mcp-app.ts`): fixed a
+- **MCP deepened** (`backend/packages/mcp/src/content.ts`/`mcp-app.ts`): fixed a
   real, previously-shipped bug (`integration-overview.creation` was missing
   the `/v1` prefix on the creation path — never actually reachable if a
   reader tried to use it literally), added `status`/`callbacks`/
@@ -1961,8 +1964,8 @@ when the user enters the API creds in their site."
   Hitting it (`GET /v1/modal-sessions/{sessionId}/ai-index-summary`) logs a
   raw `"possible bot"` signal (timestamp, best-effort project/session
   context, IP, user agent) to a new `botSignals` collection
-  (`apps/api/src/bot-signal-service.ts`,
-  `apps/api/src/modal-session-persistence.ts#BotSignalDocument`, 90-day TTL
+  (`backend/packages/api/src/bot-signal-service.ts`,
+  `backend/packages/api/src/modal-session-persistence.ts#BotSignalDocument`, 90-day TTL
   — a detection primitive's data doesn't need the 18-month billing-record
   retention the verification collections have) and returns a harmless
   `{ summary: "coming_soon" }` body. Deliberately minimal: no scoring, no
@@ -1983,7 +1986,7 @@ sound ... sparkles ... a big green human face silhouette and verified
 text") **on both surfaces** — the demo and every real customer's hosted
 modal.
 
-- **`apps/web/app/verification-modal/verification-modal-view.tsx`**
+- **`frontend/app/verification-modal/verification-modal-view.tsx`**
   (`VerificationModalView`, new, shared): the "a verification is running"
   view — live progress text, code/challenge entry once
   `awaiting_response`, and the terminal result. Deliberately agnostic of
@@ -1993,7 +1996,7 @@ modal.
   tokens, the public demo (`try-it-now.tsx`) uses nothing at all. Extracted
   from `widget-client.tsx`, which now renders it instead of duplicating
   that logic once a session's phone number step is done.
-- **`apps/web/app/verification-modal/verified-celebration.tsx`**
+- **`frontend/app/verification-modal/verified-celebration.tsx`**
   (`VerifiedCelebration`, new): the actual animated success moment,
   three phases — (1) a green checkmark draws in (SVG stroke animation) while
   a short synthesized "pop" plays (`pop-sound.ts`, a Web Audio API
@@ -2010,18 +2013,18 @@ modal.
   construction, not by copying the animation twice.
 - **New public route,
   `POST /v1/demo/verifications/{interactionId}/response`**
-  (`apps/web/app/v1/demo/verifications/[interactionId]/response/route.ts`):
+  (`backend/apps/server/app/v1/demo/verifications/[interactionId]/response/route.ts`):
   the demo previously only ever watched status, never let a visitor
   actually submit the code/challenge answer they received — this was a
   real functional gap the new "show the actual modal in the demo" request
   exposed, not just a UI change. Scoped exactly like the existing demo
   create/status routes (anonymous, but only for the one
-  operator-configured demo project — `apps/web/lib/demo-project.ts#requireDemoProject`,
+  operator-configured demo project — `frontend/lib/demo-project.ts#requireDemoProject`,
   extracted this session so a third demo route didn't triplicate that
   same project-lookup logic). Reuses `VerificationService#submitCode`/
   `#submitChallenge` unchanged — same grading logic as the real,
   API-key/interaction-token-gated response route.
-- **`apps/web/app/try-it-now.tsx`**: once a demo verification is created,
+- **`frontend/app/try-it-now.tsx`**: once a demo verification is created,
   renders a second card next to the existing request/response JSON panel
   (`.tryItNowRow`, flex-wrap so it stacks on narrow screens) — the exact
   same `VerificationModalView` a real customer's end user sees, prefilled
@@ -2038,7 +2041,7 @@ IP and User-Agent are now captured directly from their browser's request to
 interaction" — the only point where the *end user's* own browser talks to
 POWEROTP, as opposed to a customer's backend) and stored as new optional
 `endUserIp`/`endUserUserAgent` fields on `VerificationRequestDocument`
-(`apps/api/src/verification-persistence.ts`), written via a new
+(`backend/packages/api/src/verification-persistence.ts`), written via a new
 `VerificationService#recordEndUserMeta` (a plain metadata write, mirroring
 `recordProviderAttemptMeta`, never a state-machine transition). Deliberately
 **never** captured on the customer-backend-created path
@@ -2046,13 +2049,13 @@ POWEROTP, as opposed to a customer's backend) and stored as new optional
 customer's own server, not the end user, so an "IP" captured there would
 just be that server's IP, not a meaningful signal, and never trusted from a
 header a caller could set itself (only ever read via
-`apps/web/lib/api-route.ts#clientIp`, the same Cloudflare-aware helper used
+`frontend/lib/api-route.ts#clientIp`, the same Cloudflare-aware helper used
 everywhere else).
 
 Surfaced read-only on `/admin` via a new "Widget interactions" panel
-(`apps/web/app/admin/widget-interactions-panel.tsx`, `GET
+(`frontend/app/admin/widget-interactions-panel.tsx`, `GET
 /v1/admin/widget-interactions`, `VerificationService#recentWidgetInteractions`,
-`apps/api/src/verification-reporting.ts#listRecentWidgetInteractions`) —
+`backend/packages/api/src/verification-reporting.ts#listRecentWidgetInteractions`) —
 manual-refresh, most recent 50, same convention as every other admin panel
 this project has. **Explicitly visibility/audit only**: no fraud/risk
 scoring, rate limiting by IP, or any other logic is attached to this data
@@ -2061,7 +2064,7 @@ addition, not something to build speculatively now.
 
 ## SMS fallback hint, retry-as-call, and card close buttons
 
-`VerificationModalView` (`apps/web/app/verification-modal/verification-modal-view.tsx`)
+`VerificationModalView` (`frontend/app/verification-modal/verification-modal-view.tsx`)
 shows "Didn't get a text? Try a phone call instead. Some carriers block
 international SMS." under the code-entry field whenever an `sms_code`
 interaction reaches `awaiting_response` — added after live-testing an SMS
@@ -2093,7 +2096,7 @@ the actual UI copy end users see must not reference future plans.
   appears in any UI at all**: "For Bot Blocker, this OTP challenge will
   only be shown to suspected bots." rendered above (not inside) the
   demo's floating
-  modal-preview card (`.tryItNowBotNote`, `apps/web/app/try-it-now.tsx`)
+  modal-preview card (`.tryItNowBotNote`, `frontend/app/try-it-now.tsx`)
   — explicitly per the user's instruction that this framing belongs on the
   marketing demo for evaluators, never inside the real widget a real end
   user sees. No bot detection exists to gate this on; it's a static

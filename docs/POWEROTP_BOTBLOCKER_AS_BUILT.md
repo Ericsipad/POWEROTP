@@ -86,7 +86,7 @@ SOC 2/ISO 27001 control-status matrix. No code, contracts, or infrastructure cha
 - Named the three initial TypeScript/Node/React wrappers explicitly as sharing one protocol:
   raw Node HTTP (`libraries/gate-node`), Express (`libraries/gate-express`), and Next.js
   (`libraries/gate-next`), all over `libraries/gate-core` and
-  `libraries/contracts/src/botblocker.ts`. Previously the plan named only an Express reference
+  `backend/packages/contracts/src/botblocker.ts`. Previously the plan named only an Express reference
   implementation and listed Next.js separately under "Later adapters" — corrected the
   contradiction; Next.js is one of the three initial wrappers.
 - Reconciled the customer-curated agent-content path: `/powerotp/aisummary` (introduced in
@@ -172,7 +172,7 @@ may start from a fresh session once this entry and the closeout below are record
 ### Phase 1 — Base protocol contracts (2026-08-12)
 
 **Outcome.** Added the first BotBlocker code in the repository: a new, standalone contracts
-module (`libraries/contracts/src/botblocker.ts`) defining versioned protocol identifiers, the
+module (`backend/packages/contracts/src/botblocker.ts`) defining versioned protocol identifiers, the
 50–2,000 ms (200 ms default) decision-timeout contract, adapter/request-context types, the
 sanitized browser-evidence contract, first/recurring/partial behavior-report contracts with a
 report sequence/staleness helper, a decision-revision *envelope* (no `outcome` field — that is
@@ -182,7 +182,7 @@ the rest of the codebase imports these exports yet.
 
 **Architecture decisions/clarifications recorded this phase:**
 
-- Followed the existing `libraries/contracts/src/*.ts` convention exactly: zod schemas named
+- Followed the existing `backend/packages/contracts/src/*.ts` convention exactly: zod schemas named
   `XxxSchema`, `as const` string-union arrays for enums, and `z.infer`-derived exported types at
   the bottom of the file (see `verification.ts`, `projects.ts`, `nodes.ts` for the established
   pattern this file matches).
@@ -194,7 +194,7 @@ the rest of the codebase imports these exports yet.
   tests meaningful at runtime, not only at compile time.
 - `DecisionRevisionEnvelopeSchema` mirrors the audience/nonce/issued-and-expiry-timestamp shape
   of the existing `InteractionTokenClaimsSchema` pattern in
-  `apps/api/src/interaction-tokens.ts`, per the session's explicit instruction to reuse that
+  `backend/packages/api/src/interaction-tokens.ts`, per the session's explicit instruction to reuse that
   token-binding pattern. It deliberately has no `outcome` field; adding one before Phase 2 would
   have fabricated a decision type this phase is not scoped to define.
 - Report ordering uses a `ReportSequenceSchema` (`gateSessionId` + monotonic `sequence` +
@@ -206,13 +206,13 @@ the rest of the codebase imports these exports yet.
   that table's five allowed rows (route path, click category + `data-powerotp-id`, mouse
   directness, scroll smoothness, honeypot activations) exists in the type.
 - **Test-infrastructure fix required to make the "type-level exclusion" test requirement real**:
-  the pre-existing `libraries/contracts/tsconfig.json` excludes `src/**/*.test.ts` (needed so
+  the pre-existing `backend/packages/contracts/tsconfig.json` excludes `src/**/*.test.ts` (needed so
   `npm run build` doesn't emit test files into `dist`), and both `lint` and `typecheck` reused
   that same build config — meaning **no test file in this package (including the pre-existing
   `index.test.ts`) was ever actually type-checked by `npm run typecheck`/`npm run lint`
   before this phase**, since `tsx` (used to *run* tests) only transpiles and never type-checks.
   This made the required `@ts-expect-error` type-level prohibited-field tests unenforceable as
-  written. Fixed by adding `libraries/contracts/tsconfig.typecheck.json` (extends the same base
+  written. Fixed by adding `backend/packages/contracts/tsconfig.typecheck.json` (extends the same base
   config, includes test files, `noEmit: true`, does not affect `dist` output) and pointing only
   `lint`/`typecheck` (not `build`) at it. Verified the fix has teeth: temporarily removing a
   `// @ts-expect-error` comment during development caused `npm run typecheck -w
@@ -226,14 +226,14 @@ the rest of the codebase imports these exports yet.
 
 **Exact files changed:**
 
-- `libraries/contracts/src/botblocker.ts` (new) — all Phase 1 contracts.
-- `libraries/contracts/src/botblocker.test.ts` (new) — boundary tests (49/50/2000/2001 ms),
+- `backend/packages/contracts/src/botblocker.ts` (new) — all Phase 1 contracts.
+- `backend/packages/contracts/src/botblocker.test.ts` (new) — boundary tests (49/50/2000/2001 ms),
   prohibited-field tests (type-level `@ts-expect-error` plus runtime `safeParse` rejection),
   behavior-report/discriminated-union tests, `isStaleSequence` tests, decision-envelope tests,
   request-context tests, and unavailable/error-response tests.
-- `libraries/contracts/src/index.ts` (added `export * from "./botblocker.js";`).
-- `libraries/contracts/tsconfig.typecheck.json` (new) — see test-infrastructure fix above.
-- `libraries/contracts/package.json` (`lint`/`typecheck` scripts point at the new typecheck
+- `backend/packages/contracts/src/index.ts` (added `export * from "./botblocker.js";`).
+- `backend/packages/contracts/tsconfig.typecheck.json` (new) — see test-infrastructure fix above.
+- `backend/packages/contracts/package.json` (`lint`/`typecheck` scripts point at the new typecheck
   config; `test` script now globs `src/**/*.test.ts` instead of naming one file).
 
 **Migrations.** None.
@@ -259,8 +259,8 @@ consumer; there is nothing to deploy.
 
 - The test-type-checking gap described above (test files silently never type-checked in this
   package) pre-dates this phase and was not limited to BotBlocker code — `index.test.ts` had the
-  same exposure. It is now fixed for `libraries/contracts` specifically. Other packages
-  (`libraries/sdk-js`, `apps/api`, etc.) were not audited or changed this phase; if a future
+  same exposure. It is now fixed for `backend/packages/contracts` specifically. Other packages
+  (`libraries/sdk-js`, `backend/packages/api`, etc.) were not audited or changed this phase; if a future
   phase relies on `@ts-expect-error`-style type-level tests elsewhere, check whether that
   package's `lint`/`typecheck` scripts actually include its test files first.
 
@@ -286,7 +286,7 @@ consumer; there is nothing to deploy.
 
 **Phase 2 prerequisites.** None outstanding — Phase 2 (Decision, challenge, and proof contracts)
 may start from a fresh session once this entry is recorded. Phase 2 should extend
-`libraries/contracts/src/botblocker.ts` (or add a sibling file re-exported from `index.ts`) with
+`backend/packages/contracts/src/botblocker.ts` (or add a sibling file re-exported from `index.ts`) with
 the `allow | otp` union, challenge lifecycle, policy, clearance, Passport assertion,
 PaidTokenPass assertion, risk-event batch, and explicit unavailable responses, reusing
 `BotBlockerProtocolVersionSchema`, `ReportSequenceSchema`/`isStaleSequence`,
@@ -366,25 +366,25 @@ is contracts only, exactly as scoped.
 
 **Exact files changed:**
 
-- `libraries/contracts/src/botblocker.ts` (edited) — added `botBlockerDecisionOutcomes`/
+- `backend/packages/contracts/src/botblocker.ts` (edited) — added `botBlockerDecisionOutcomes`/
   `BotBlockerDecisionOutcomeSchema`, added `outcome` to `DecisionRevisionEnvelopeSchema`, added
   `policy_version_regression`/`invalid_challenge_transition` to `botBlockerErrorCodes`, updated
   the file's top-of-file and envelope doc comments to describe Phase 2's changes instead of
   deferring them.
-- `libraries/contracts/src/botblocker-challenge.ts` (new) — challenge lifecycle contracts.
-- `libraries/contracts/src/botblocker-policy.ts` (new) — signed-policy payload contracts.
-- `libraries/contracts/src/botblocker-clearance.ts` (new) — unsigned site-clearance contract.
-- `libraries/contracts/src/botblocker-proofs.ts` (new) — Passport/PaidTokenPass assertion and
+- `backend/packages/contracts/src/botblocker-challenge.ts` (new) — challenge lifecycle contracts.
+- `backend/packages/contracts/src/botblocker-policy.ts` (new) — signed-policy payload contracts.
+- `backend/packages/contracts/src/botblocker-clearance.ts` (new) — unsigned site-clearance contract.
+- `backend/packages/contracts/src/botblocker-proofs.ts` (new) — Passport/PaidTokenPass assertion and
   risk-event-batch contracts.
-- `libraries/contracts/src/botblocker.test.ts` (edited) — replaced the two Phase 1 envelope
+- `backend/packages/contracts/src/botblocker.test.ts` (edited) — replaced the two Phase 1 envelope
   tests that asserted "no outcome field" with outcome-union boundary tests (accepts `allow`/
   `otp`, rejects five different fabricated third values including an empty string) and envelope
   tests (accepts/rejects with and without `outcome`, rejects a browser-supplied `score`).
-- `libraries/contracts/src/botblocker-challenge.test.ts` (new).
-- `libraries/contracts/src/botblocker-policy.test.ts` (new).
-- `libraries/contracts/src/botblocker-clearance.test.ts` (new).
-- `libraries/contracts/src/botblocker-proofs.test.ts` (new).
-- `libraries/contracts/src/index.ts` (edited) — added the four new sibling-file exports.
+- `backend/packages/contracts/src/botblocker-challenge.test.ts` (new).
+- `backend/packages/contracts/src/botblocker-policy.test.ts` (new).
+- `backend/packages/contracts/src/botblocker-clearance.test.ts` (new).
+- `backend/packages/contracts/src/botblocker-proofs.test.ts` (new).
+- `backend/packages/contracts/src/index.ts` (edited) — added the four new sibling-file exports.
 
 **Migrations.** None.
 
@@ -410,7 +410,7 @@ phase — no new environment variable exists for BotBlocker yet.
   `botblocker-policy.js`/`.d.ts`, `botblocker-proofs.js`/`.d.ts`, and the updated
   `botblocker.js`/`.d.ts` — no `.test.*` artifacts.
 - `npm run verify` (full monorepo: build + lint + test across every workspace, including
-  `apps/web`'s Next.js production build and `apps/api`'s test suite): exit code 0, zero failures
+  `frontend`'s Next.js production build and `backend/packages/api`'s test suite): exit code 0, zero failures
   in any workspace, run in full before declaring this phase complete.
 
 **Manual production/deployment steps.** None. This phase shipped a library-only export with no
@@ -498,27 +498,27 @@ dashboard Project card later. `HttpsUrlSchema` also rejects malformed values wit
 
 **Exact files changed for the signup correction:**
 
-- `libraries/contracts/src/auth.ts`
-- `libraries/contracts/src/projects.ts`
-- `libraries/contracts/src/index.test.ts`
-- `apps/web/app/signup-modal.tsx`
-- `apps/web/app/v1/auth/signup/route.ts`
-- `apps/web/app/dashboard/project-card.tsx`
+- `backend/packages/contracts/src/auth.ts`
+- `backend/packages/contracts/src/projects.ts`
+- `backend/packages/contracts/src/index.test.ts`
+- `frontend/app/signup-modal.tsx`
+- `backend/apps/server/app/v1/auth/signup/route.ts`
+- `frontend/app/dashboard/project-card.tsx`
 - `docs/AS_BUILT.md`
 
 **Exact files added/changed for Phase 3:**
 
-- `libraries/contracts/src/botblocker-signing.ts` (new)
-- `libraries/contracts/src/botblocker-signing.test.ts` (new)
-- `libraries/contracts/src/botblocker-clearance.ts`
-- `libraries/contracts/src/botblocker-clearance.test.ts`
-- `libraries/contracts/src/botblocker-policy.ts`
-- `libraries/contracts/src/botblocker-policy.test.ts`
-- `libraries/contracts/src/index.ts`
-- `libraries/botblocker-signing/package.json` (new)
-- `libraries/botblocker-signing/tsconfig.json` (new)
-- `libraries/botblocker-signing/src/index.ts` (new)
-- `libraries/botblocker-signing/src/index.test.ts` (new)
+- `backend/packages/contracts/src/botblocker-signing.ts` (new)
+- `backend/packages/contracts/src/botblocker-signing.test.ts` (new)
+- `backend/packages/contracts/src/botblocker-clearance.ts`
+- `backend/packages/contracts/src/botblocker-clearance.test.ts`
+- `backend/packages/contracts/src/botblocker-policy.ts`
+- `backend/packages/contracts/src/botblocker-policy.test.ts`
+- `backend/packages/contracts/src/index.ts`
+- `backend/packages/botblocker-signing/package.json` (new)
+- `backend/packages/botblocker-signing/tsconfig.json` (new)
+- `backend/packages/botblocker-signing/src/index.ts` (new)
+- `backend/packages/botblocker-signing/src/index.test.ts` (new)
 - `package.json`
 - `package-lock.json`
 - `docs/POWEROTP_BOTBLOCKER_SOC2_ISO27001_CONTROL_MATRIX.md`
@@ -607,24 +607,24 @@ implemented early in Phase 4.
 - Replay consumption returns `replay_detected` when `SET NX` loses, `expired` before writing an
   already-invalid nonce, and `storage_unavailable` on a Valkey exception. The latter is a
   rejection, never a fail-open success.
-- `apps/api/src/botblocker-replay.ts` passes the existing authenticated ioredis client directly
+- `backend/packages/api/src/botblocker-replay.ts` passes the existing authenticated ioredis client directly
   to the atomic consumer; TypeScript verifies the production client implements the required
   `SET key value PX ttl NX` interface. Test fakes exist only in test files.
 
 **Exact files added/changed for Phase 4 implementation:**
 
-- `libraries/botblocker-signing/src/key-ring.ts` (new)
-- `libraries/botblocker-signing/src/key-ring.test.ts` (new)
-- `libraries/botblocker-signing/src/replay.ts` (new)
-- `libraries/botblocker-signing/src/replay.test.ts` (new)
-- `libraries/botblocker-signing/src/index.ts`
-- `libraries/botblocker-signing/src/index.test.ts`
-- `apps/api/src/botblocker-config.ts` (new)
-- `apps/api/src/botblocker-config.test.ts` (new)
-- `apps/api/src/botblocker-replay.ts` (new)
-- `apps/api/src/config.ts`
-- `apps/api/src/config.test.ts`
-- `apps/api/package.json`
+- `backend/packages/botblocker-signing/src/key-ring.ts` (new)
+- `backend/packages/botblocker-signing/src/key-ring.test.ts` (new)
+- `backend/packages/botblocker-signing/src/replay.ts` (new)
+- `backend/packages/botblocker-signing/src/replay.test.ts` (new)
+- `backend/packages/botblocker-signing/src/index.ts`
+- `backend/packages/botblocker-signing/src/index.test.ts`
+- `backend/packages/api/src/botblocker-config.ts` (new)
+- `backend/packages/api/src/botblocker-config.test.ts` (new)
+- `backend/packages/api/src/botblocker-replay.ts` (new)
+- `backend/packages/api/src/config.ts`
+- `backend/packages/api/src/config.test.ts`
+- `backend/packages/api/package.json`
 - `package-lock.json`
 - `infrastructure/app-platform/README.md`
 - `docs/POWEROTP_BOTBLOCKER_SOC2_ISO27001_CONTROL_MATRIX.md`
@@ -726,18 +726,18 @@ server-only configuration is stored in or returned by the customer-visible contr
 
 **Exact files added/changed:**
 
-- `libraries/contracts/src/botblocker-site.ts` (new)
-- `libraries/contracts/src/botblocker-site.test.ts` (new)
-- `libraries/contracts/src/index.ts`
-- `apps/api/src/botblocker-site-persistence.ts` (new)
-- `apps/api/src/botblocker-site-service.ts` (new)
-- `apps/api/src/botblocker-site-service.test.ts` (new)
-- `apps/api/src/persistence.ts`
-- `apps/web/app/v1/projects/[projectId]/botblocker/route.ts` (new)
-- `apps/web/lib/server-context.ts`
-- `apps/web/app/dashboard/botblocker-panel.tsx` (new)
-- `apps/web/app/dashboard/project-card.tsx`
-- `apps/web/app/dashboard.css`
+- `backend/packages/contracts/src/botblocker-site.ts` (new)
+- `backend/packages/contracts/src/botblocker-site.test.ts` (new)
+- `backend/packages/contracts/src/index.ts`
+- `backend/packages/api/src/botblocker-site-persistence.ts` (new)
+- `backend/packages/api/src/botblocker-site-service.ts` (new)
+- `backend/packages/api/src/botblocker-site-service.test.ts` (new)
+- `backend/packages/api/src/persistence.ts`
+- `backend/apps/server/app/v1/projects/[projectId]/botblocker/route.ts` (new)
+- `backend/apps/server/lib/server-context.ts`
+- `frontend/app/dashboard/botblocker-panel.tsx` (new)
+- `frontend/app/dashboard/project-card.tsx`
+- `frontend/app/dashboard.css`
 - `docs/POWEROTP_BOTBLOCKER_SOC2_ISO27001_CONTROL_MATRIX.md`
 - `docs/POWEROTP_BOTBLOCKER_AS_BUILT.md`
 
@@ -826,12 +826,12 @@ execution, score, threshold, policy service, OTP flow, fake data, or production 
 
 **Exact files added/changed:**
 
-- `libraries/contracts/src/botblocker-persistence.ts` (new)
-- `libraries/contracts/src/botblocker-persistence.test.ts` (new)
-- `libraries/contracts/src/index.ts`
-- `apps/api/src/botblocker-intelligence-persistence.ts` (new)
-- `apps/api/src/botblocker-intelligence-persistence.test.ts` (new)
-- `apps/api/src/persistence.ts`
+- `backend/packages/contracts/src/botblocker-persistence.ts` (new)
+- `backend/packages/contracts/src/botblocker-persistence.test.ts` (new)
+- `backend/packages/contracts/src/index.ts`
+- `backend/packages/api/src/botblocker-intelligence-persistence.ts` (new)
+- `backend/packages/api/src/botblocker-intelligence-persistence.test.ts` (new)
+- `backend/packages/api/src/persistence.ts`
 - `docs/PASSPORT_BUSINESS_AND_LEGAL_PLAN.md`
 - `docs/POWEROTP_BOTBLOCKER_SOC2_ISO27001_CONTROL_MATRIX.md`
 - `docs/POWEROTP_BOTBLOCKER_AS_BUILT.md`
@@ -917,7 +917,7 @@ a secret name or permit unkeyed/raw-IP persistence.
   0 failures. New tests cover opaque IDs, exact 18-month retention, exact 30-day lookback,
   required TTL/lookup/relationship/idempotency indexes, absence of a unique IP constraint,
   atomic stale-sequence rejection, and cross-project isolation for all four entities.
-- `npm run verify`: passed after removing only the generated `apps/web/.next` directory and
+- `npm run verify`: passed after removing only the generated `frontend/.next` directory and
   retrying the documented OneDrive `EPERM` failure. Full build/lint/test passed, including the
   Next.js production build.
 - `npm audit`: 0 vulnerabilities.
@@ -964,20 +964,20 @@ created.
 
 **Exact files added/changed:**
 
-- `libraries/contracts/src/botblocker-policy-persistence.ts` (new)
-- `libraries/contracts/src/botblocker-policy-persistence.test.ts` (new)
-- `libraries/contracts/src/index.ts`
-- `apps/api/src/botblocker-policy-persistence.ts` (new)
-- `apps/api/src/botblocker-policy-persistence.test.ts` (new)
-- `apps/api/src/botblocker-policy-service.ts` (new)
-- `apps/api/src/botblocker-policy-service.test.ts` (new)
-- `apps/api/src/botblocker-site-persistence.ts`
-- `apps/api/src/persistence.ts`
-- `apps/web/lib/botblocker-policy-http.ts` (new)
-- `apps/web/lib/http-etag.ts` (new)
-- `apps/web/lib/server-context.ts`
-- `apps/web/app/v1/botblocker/policy/[siteId]/route.ts` (new)
-- `apps/web/app/v1/botblocker/policy/[siteId]/route.test.ts` (new)
+- `backend/packages/contracts/src/botblocker-policy-persistence.ts` (new)
+- `backend/packages/contracts/src/botblocker-policy-persistence.test.ts` (new)
+- `backend/packages/contracts/src/index.ts`
+- `backend/packages/api/src/botblocker-policy-persistence.ts` (new)
+- `backend/packages/api/src/botblocker-policy-persistence.test.ts` (new)
+- `backend/packages/api/src/botblocker-policy-service.ts` (new)
+- `backend/packages/api/src/botblocker-policy-service.test.ts` (new)
+- `backend/packages/api/src/botblocker-site-persistence.ts`
+- `backend/packages/api/src/persistence.ts`
+- `frontend/lib/botblocker-policy-http.ts` (new)
+- `frontend/lib/http-etag.ts` (new)
+- `backend/apps/server/lib/server-context.ts`
+- `backend/apps/server/app/v1/botblocker/policy/[siteId]/route.ts` (new)
+- `backend/apps/server/app/v1/botblocker/policy-route.test.ts` (new)
 - `docs/POWEROTP_BOTBLOCKER_SOC2_ISO27001_CONTROL_MATRIX.md`
 - `docs/POWEROTP_BOTBLOCKER_AS_BUILT.md`
 
@@ -1108,46 +1108,46 @@ returned or persisted.
 
 **Exact files added/changed.**
 
-- Contracts: `libraries/contracts/src/botblocker.ts`,
-  `libraries/contracts/src/botblocker-api-runtime.ts`,
-  `libraries/contracts/src/botblocker-api-runtime.test.ts`,
-  `libraries/contracts/src/botblocker-api-control.ts`,
-  `libraries/contracts/src/botblocker-api-control.test.ts`, and
-  `libraries/contracts/src/index.ts`.
-- API: `apps/api/src/config.ts`, `apps/api/src/config.test.ts`,
-  `apps/api/src/persistence.ts`, `apps/api/src/botblocker-errors.ts`,
-  `apps/api/src/botblocker-site-credential-persistence.ts`,
-  `apps/api/src/botblocker-site-credential-persistence.test.ts`,
-  `apps/api/src/botblocker-site-credential-service.ts`,
-  `apps/api/src/botblocker-site-credential-service.test.ts`,
-  `apps/api/src/botblocker-runtime-security.ts`,
-  `apps/api/src/botblocker-runtime-security.test.ts`,
-  `apps/api/src/botblocker-intelligence-persistence.ts`,
-  `apps/api/src/botblocker-operations-service.ts`,
-  `apps/api/src/botblocker-operations-service.test.ts`,
-  `apps/api/src/botblocker-policy-persistence.ts`, and
-  `apps/api/src/botblocker-policy-control-service.ts`.
-- Shared web wiring: `apps/web/lib/api-errors.ts`,
-  `apps/web/lib/botblocker-http.ts`, `apps/web/lib/botblocker-responses.ts`,
-  and `apps/web/lib/server-context.ts`.
+- Contracts: `backend/packages/contracts/src/botblocker.ts`,
+  `backend/packages/contracts/src/botblocker-api-runtime.ts`,
+  `backend/packages/contracts/src/botblocker-api-runtime.test.ts`,
+  `backend/packages/contracts/src/botblocker-api-control.ts`,
+  `backend/packages/contracts/src/botblocker-api-control.test.ts`, and
+  `backend/packages/contracts/src/index.ts`.
+- API: `backend/packages/api/src/config.ts`, `backend/packages/api/src/config.test.ts`,
+  `backend/packages/api/src/persistence.ts`, `backend/packages/api/src/botblocker-errors.ts`,
+  `backend/packages/api/src/botblocker-site-credential-persistence.ts`,
+  `backend/packages/api/src/botblocker-site-credential-persistence.test.ts`,
+  `backend/packages/api/src/botblocker-site-credential-service.ts`,
+  `backend/packages/api/src/botblocker-site-credential-service.test.ts`,
+  `backend/packages/api/src/botblocker-runtime-security.ts`,
+  `backend/packages/api/src/botblocker-runtime-security.test.ts`,
+  `backend/packages/api/src/botblocker-intelligence-persistence.ts`,
+  `backend/packages/api/src/botblocker-operations-service.ts`,
+  `backend/packages/api/src/botblocker-operations-service.test.ts`,
+  `backend/packages/api/src/botblocker-policy-persistence.ts`, and
+  `backend/packages/api/src/botblocker-policy-control-service.ts`.
+- Shared web wiring: `frontend/lib/api-errors.ts`,
+  `frontend/lib/botblocker-http.ts`, `frontend/lib/botblocker-responses.ts`,
+  and `backend/apps/server/lib/server-context.ts`.
 - Runtime/customer routes:
-  `apps/web/app/v1/botblocker/rapid-auth/route.ts`,
-  `apps/web/app/v1/botblocker/browser-assessment/route.ts`,
-  `apps/web/app/v1/botblocker/risk-events/route.ts`,
-  `apps/web/app/v1/botblocker/challenges/route.ts`,
-  `apps/web/app/v1/botblocker/challenges/[challengeId]/route.ts`,
-  `apps/web/app/v1/botblocker/challenges/[challengeId]/complete/route.ts`,
-  `apps/web/app/v1/botblocker/passports/register/route.ts`,
-  `apps/web/app/v1/botblocker/passports/assert/route.ts`,
-  `apps/web/app/v1/botblocker/paid-passes/assert/route.ts`,
-  `apps/web/app/v1/botblocker/agent/entitlements/route.ts`,
-  `apps/web/app/v1/projects/[projectId]/botblocker/visitors/route.ts`, and
-  `apps/web/app/v1/projects/[projectId]/botblocker/rotate-site-credential/route.ts`.
-- Operator routes: `apps/web/app/v1/control/botblocker/rapid-list/route.ts`,
-  `apps/web/app/v1/control/botblocker/decision-traces/[gateSessionId]/route.ts`,
-  `apps/web/app/v1/control/botblocker/health/route.ts`, and
-  `apps/web/app/v1/control/botblocker/policy-releases/route.ts`.
-- Web tests: `apps/web/app/v1/botblocker/phase8-http.test.ts`.
+  `backend/apps/server/app/v1/botblocker/rapid-auth/route.ts`,
+  `backend/apps/server/app/v1/botblocker/browser-assessment/route.ts`,
+  `backend/apps/server/app/v1/botblocker/risk-events/route.ts`,
+  `backend/apps/server/app/v1/botblocker/challenges/route.ts`,
+  `backend/apps/server/app/v1/botblocker/challenges/[challengeId]/route.ts`,
+  `backend/apps/server/app/v1/botblocker/challenges/[challengeId]/complete/route.ts`,
+  `backend/apps/server/app/v1/botblocker/passports/register/route.ts`,
+  `backend/apps/server/app/v1/botblocker/passports/assert/route.ts`,
+  `backend/apps/server/app/v1/botblocker/paid-passes/assert/route.ts`,
+  `backend/apps/server/app/v1/botblocker/agent/entitlements/route.ts`,
+  `backend/apps/server/app/v1/projects/[projectId]/botblocker/visitors/route.ts`, and
+  `backend/apps/server/app/v1/projects/[projectId]/botblocker/rotate-site-credential/route.ts`.
+- Operator routes: `backend/apps/server/app/v1/control/botblocker/rapid-list/route.ts`,
+  `backend/apps/server/app/v1/control/botblocker/decision-traces/[gateSessionId]/route.ts`,
+  `backend/apps/server/app/v1/control/botblocker/health/route.ts`, and
+  `backend/apps/server/app/v1/control/botblocker/policy-releases/route.ts`.
+- Backend tests: `backend/apps/server/app/v1/botblocker/phase8-http.test.ts`.
 - Documentation: `docs/POWEROTP_BOTBLOCKER_PLAN.md`,
   `docs/POWEROTP_BOTBLOCKER_DEVELOPMENT_PHASES.md`, `docs/THREAT_MODEL.md`,
   `docs/POWEROTP_BOTBLOCKER_AS_BUILT.md`,
@@ -1366,8 +1366,8 @@ PaidTokenPass, billing, deployment, or CleanDataPage behavior was added.
 
 **Exact files.**
 
-- Contracts: `libraries/contracts/src/botblocker.ts` and
-  `libraries/contracts/src/botblocker.test.ts`.
+- Contracts: `backend/packages/contracts/src/botblocker.ts` and
+  `backend/packages/contracts/src/botblocker.test.ts`.
 - Sensor production: `libraries/gate-core/src/sensor.ts`,
   `libraries/gate-core/src/sensor-evidence.ts`, and
   `libraries/gate-core/src/index.ts`.
@@ -1873,7 +1873,7 @@ forwards only that narrow token upstream.
 - `docs/POWEROTP_BOTBLOCKER_SOC2_ISO27001_CONTROL_MATRIX.md`: records the identified Phase 9–13
   implementation gap without claiming the corrective code exists.
 - `docs/POWEROTP_BOTBLOCKER_AS_BUILT.md`: current-status clarification and this entry.
-- `libraries/contracts/src/botblocker.ts`: corrected the timeout comment/reference; no schema,
+- `backend/packages/contracts/src/botblocker.ts`: corrected the timeout comment/reference; no schema,
   type, constant, wire shape, or runtime behavior changed.
 
 **Product semantics recorded by Phase 13A, corrected to the current state-only boundary.**
@@ -1972,7 +1972,7 @@ rejection remain unchanged. An early OTP never starts observation. A late OTP le
 observation running. Observation pauses only after successful explicit OTP opening and resumes
 as a fresh interval only after authoritative success.
 
-**Files and compatibility.** Added `libraries/contracts/src/botblocker-browser.ts` and its
+**Files and compatibility.** Added `backend/packages/contracts/src/botblocker-browser.ts` and its
 tests plus `libraries/gate-core/src/recommendation.ts`. Updated the shared controller, state
 helpers, raw Node browser coordinator and bounded bridge, and focused tests. Express and Next
 request/middleware behavior was not redesigned; their security and React tests were updated
@@ -2127,7 +2127,7 @@ tools to the existing `@powerotp/mcp` package alongside the unrelated OTP-platfo
 which is untouched and remains fully compatible (`content.test.ts` and its two describe blocks
 still pass unchanged). The new capability set is a documentation/generator layer only: it adds no
 new backend service, credential, account-management action, or repository/dashboard/hosting
-mutation. `apps/web/app/mcp/route.ts` exposes it automatically because it already delegates to
+mutation. `backend/apps/server/app/mcp/route.ts` exposes it automatically because it already delegates to
 `createMcpTransport()` in `@powerotp/mcp/mcp-app.js`, which now also calls
 `registerBotBlockerCapabilities()`.
 
@@ -2149,7 +2149,7 @@ existing OTP tools' convention, and accepts no credential as an argument.
 `.strict()` Zod `AdapterManifestSchema` before responding, so a future builder-shape regression
 fails loudly instead of silently widening the public contract.
 
-**Manifest generator.** New `apps/mcp/src/botblocker/` module:
+**Manifest generator.** New `backend/packages/mcp/src/botblocker/` module:
 `manifest.ts` (`buildBotBlockerManifest`/`buildAllBotBlockerManifests`), `types.ts`, `schemas.ts`,
 `checksum.ts` (SHA-256 helper), `env.ts` (environment-variable name catalog), `architecture.ts`
 (resource content), `tools.ts` (registration), and one template module per adapter under
@@ -2191,7 +2191,7 @@ groups instead of one flat list:
 - `BOTBLOCKER_ENV_VARS` (required, real, shipped): `POWEROTP_SITE_ID` and
   `POWEROTP_SITE_CREDENTIAL`. The credential is exactly the value already returned once by the
   real, shipped `POST /v1/projects/{projectId}/botblocker/rotate-site-credential`
-  (`apps/api/src/botblocker-site-credential-service.ts`, Phase 8) — MCP now points to that real
+  (`backend/packages/api/src/botblocker-site-credential-service.ts`, Phase 8) — MCP now points to that real
   endpoint by name in every adapter's placement steps instead of inventing a dashboard flow.
 - `BOTBLOCKER_PLANNED_ENV_VARS`: `POWEROTP_WEBHOOK_SIGNING_SECRET`, specified in
   `POWEROTP_BOTBLOCKER_PLAN.md`'s "OTP integration" section (256-bit, per project, shown once,
@@ -2213,7 +2213,7 @@ groups instead of one flat list:
   yet hands a customer the specific public value their server needs to check that signature, the
   way the real `rotate-site-credential` endpoint already hands them the site credential — most
   naturally an extension of the already-shipped, public `GET /v1/botblocker/policy/{siteId}`,
-  whose current contract (`libraries/contracts/src/botblocker-policy.ts`) carries only a key-*ID*
+  whose current contract (`backend/packages/contracts/src/botblocker-policy.ts`) carries only a key-*ID*
   reference, not key bytes. Every adapter's generated `powerotp.server.ts`/`server/powerotp.ts`
   file still includes the field (it is real, required, and non-optional on the shipped
   `GateNodeOptions` type, so omitting it would not compile), now with a comment and a
@@ -2241,7 +2241,7 @@ statement: the constructor takes this value directly today, and Phase 14A will r
 automatically later. `BOTBLOCKER_UNDELIVERED_ENV_VARS`'s export name and doc comment were kept
 accurate but their customer-facing description text no longer reads as a discovered problem.
 
-**Tests and results.** New `apps/mcp/src/botblocker/{manifest,typecheck}.test.ts` and
+**Tests and results.** New `backend/packages/mcp/src/botblocker/{manifest,typecheck}.test.ts` and
 `templates/nextjs.test.ts` join the existing `content.test.ts`, for 41 total `@powerotp/mcp`
 tests, 0 failures. Coverage includes: strict output-schema validation; byte-for-byte
 reproducibility across independent builds; manifest checksum recomputation; absence of
@@ -2254,7 +2254,7 @@ presence of the unresolved-verification-key and planned-webhook-secret disclosur
 adapter's `knownLimitations`; and presence of the real rotation endpoint name in every adapter's
 `placementSteps`.
 `typecheck.test.ts` materializes each manifest's exact files at their exact relative paths under
-a gitignored `apps/mcp/.botblocker-typecheck/` scratch directory and shells out to this
+a gitignored `backend/packages/mcp/.botblocker-typecheck/` scratch directory and shells out to this
 monorepo's own `node_modules/typescript/bin/tsc` CLI — the classic embeddable
 `ts.createProgram`/`ts.ModuleResolutionKind` compiler API does not exist in the native TypeScript
 7 this repository already depends on, so the test spawns the same `tsc -p ... --noEmit` CLI every
@@ -2262,7 +2262,7 @@ workspace's own `typecheck` script already uses, rather than a different, less-r
 mechanism. All three adapters compile cleanly against the real, already-built
 `@powerotp/gate-node`/`gate-express`/`gate-next` declaration files, which also independently
 proves exact file placement and relative-import correctness (a wrong path or ordering would fail
-module resolution, not just type-checking). `server-only` (added as an `apps/mcp` `devDependency`
+module resolution, not just type-checking). `server-only` (added as an `backend/packages/mcp` `devDependency`
 purely for this compile check, matching what a real Next.js customer installs) was empirically
 confirmed to need no ambient type declaration for its side-effect-only `import "server-only";` form.
 
@@ -2278,10 +2278,10 @@ typecheck, and test, including the `@powerotp/gate-next` production fixture buil
 performed as part of that build step) passed with zero failures across every reported suite, run
 twice (once before and once after the credential-model correction). `npm audit` reported zero
 vulnerabilities both times. Final `git diff --check` passed. A targeted scan of built
-`apps/mcp/dist/*.js` output found no `potp_bb_`, PEM private-key header, or
-CleanDataPage/`aisummary` literal. A repository-wide scan of `apps/web/.next` found `potp_bb_`
-only in pre-existing, unrelated `apps/api` server-only chunks (the site-credential prefix
-constant, not a secret value, and absent from every `apps/web/.next/static` client chunk) — this
+`backend/packages/mcp/dist/*.js` output found no `potp_bb_`, PEM private-key header, or
+CleanDataPage/`aisummary` literal. A repository-wide scan of `frontend/.next` found `potp_bb_`
+only in pre-existing, unrelated `backend/packages/api` server-only chunks (the site-credential prefix
+constant, not a secret value, and absent from every `frontend/.next/static` client chunk) — this
 predates Phase 14 and is not part of this phase's generated output.
 
 **Exclusions and operations.** No real RapidAuth/intelligence ingestion, fingerprint/IP hash

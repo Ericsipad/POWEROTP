@@ -115,7 +115,7 @@ execution documents.
 
 Add versioned identifiers, adapter/request context, browser evidence, first/recurring/
 partial behavior reports, report sequence, decision revision, timeout, and stable error
-contracts in `libraries/contracts/src/botblocker.ts`, with boundary/prohibited-field
+contracts in `backend/packages/contracts/src/botblocker.ts`, with boundary/prohibited-field
 tests.
 
 ### Phase 2 — Decision, challenge, and proof contracts
