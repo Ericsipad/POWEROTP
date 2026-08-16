@@ -34,5 +34,8 @@
     "server-only": "^0.0.1",
     "tsx": "^4.23.6",
     "typescript": "^7.0.2"
+  },
+  "optionalDependencies": {
+    "@typescript/typescript-linux-x64": "^7.0.2"
   }
 }
