@@ -65,20 +65,22 @@ describe("BotBlockerSiteCredentialPersistence", () => {
         prefix: "potp_bb_old",
         lastFour: "old1",
         createdAt: new Date(1),
+        active: true,
       },
     ];
     const db = {
       collection: () => ({
         updateMany: async (
           filter: Record<string, unknown>,
-          update: { $set: { revokedAt: Date } },
+          update: { $set: { revokedAt: Date }; $unset: { active: string } },
         ) => {
           for (const document of documents) {
             if (
               document.siteId === filter.siteId &&
-              document.revokedAt === undefined
+              document.active === true
             ) {
               document.revokedAt = update.$set.revokedAt;
+              delete document.active;
             }
           }
         },

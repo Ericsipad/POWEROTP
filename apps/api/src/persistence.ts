@@ -164,41 +164,72 @@ export interface AuditDocument {
   details?: Record<string, string | number | boolean>;
 }
 
+/**
+ * Index specs are performance/integrity aids, not code the request path
+ * depends on to run — a bad spec in one feature (e.g. a MongoDB operator a
+ * given Atlas version rejects) must never stop the whole process from
+ * booting and serving every *other* route, including completely unrelated
+ * ones like the marketing site. Each step below is isolated: failures are
+ * logged loudly instead of rejecting `ensureIndexes` as a whole, so the
+ * server always finishes starting up.
+ */
+async function ensureIndexStep(label: string, work: () => Promise<unknown>): Promise<void> {
+  try {
+    await work();
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        service: "powerotp-api",
+        component: "ensure-indexes",
+        msg: "index setup step failed; continuing startup",
+        step: label,
+        error: error instanceof Error ? error.message : String(error),
+      }),
+    );
+  }
+}
+
 export async function ensureIndexes(db: Db) {
   await Promise.all([
-    db.collection<UserDocument>("users").createIndex({ emailLookupHash: 1 }, { unique: true }),
-    db
-      .collection<SessionDocument>("sessions")
-      .createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
-    db
-      .collection<SessionDocument>("sessions")
-      .createIndex({ userId: 1, expiresAt: -1 }),
-    db
-      .collection<EmailVerificationDocument>("emailVerifications")
-      .createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
-    db
-      .collection<ProjectDocument>("projects")
-      .createIndex({ slug: 1 }, { unique: true }),
-    db
-      .collection<ProjectDocument>("projects")
-      .createIndex({ customerId: 1, createdAt: -1 }),
-    db
-      .collection<ApiKeyDocument>("apiKeys")
-      .createIndex({ keyHash: 1 }, { unique: true }),
-    db
-      .collection<ApiKeyDocument>("apiKeys")
-      .createIndex({ projectId: 1, revokedAt: 1 }),
-    db
-      .collection<AuditDocument>("auditEvents")
-      .createIndex({ actorId: 1, occurredAt: -1 }),
-    db.collection<NodeDocument>("nodes").createIndex({ ip: 1 }, { unique: true }),
+    ensureIndexStep("users.emailLookupHash", () =>
+      db.collection<UserDocument>("users").createIndex({ emailLookupHash: 1 }, { unique: true }),
+    ),
+    ensureIndexStep("sessions.expiresAt", () =>
+      db.collection<SessionDocument>("sessions").createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
+    ),
+    ensureIndexStep("sessions.userId_expiresAt", () =>
+      db.collection<SessionDocument>("sessions").createIndex({ userId: 1, expiresAt: -1 }),
+    ),
+    ensureIndexStep("emailVerifications.expiresAt", () =>
+      db
+        .collection<EmailVerificationDocument>("emailVerifications")
+        .createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
+    ),
+    ensureIndexStep("projects.slug", () =>
+      db.collection<ProjectDocument>("projects").createIndex({ slug: 1 }, { unique: true }),
+    ),
+    ensureIndexStep("projects.customerId_createdAt", () =>
+      db.collection<ProjectDocument>("projects").createIndex({ customerId: 1, createdAt: -1 }),
+    ),
+    ensureIndexStep("apiKeys.keyHash", () =>
+      db.collection<ApiKeyDocument>("apiKeys").createIndex({ keyHash: 1 }, { unique: true }),
+    ),
+    ensureIndexStep("apiKeys.projectId_revokedAt", () =>
+      db.collection<ApiKeyDocument>("apiKeys").createIndex({ projectId: 1, revokedAt: 1 }),
+    ),
+    ensureIndexStep("auditEvents.actorId_occurredAt", () =>
+      db.collection<AuditDocument>("auditEvents").createIndex({ actorId: 1, occurredAt: -1 }),
+    ),
+    ensureIndexStep("nodes.ip", () =>
+      db.collection<NodeDocument>("nodes").createIndex({ ip: 1 }, { unique: true }),
+    ),
+    ensureIndexStep("verification", () => ensureVerificationIndexes(db)),
+    ensureIndexStep("challenge", () => ensureChallengeIndexes(db)),
+    ensureIndexStep("modalSession", () => ensureModalSessionIndexes(db)),
+    ensureIndexStep("billing", () => ensureBillingIndexes(db)),
+    ensureIndexStep("botBlockerSite", () => ensureBotBlockerSiteIndexes(db)),
+    ensureIndexStep("botBlockerSiteCredential", () => ensureBotBlockerSiteCredentialIndexes(db)),
+    ensureIndexStep("botBlockerIntelligence", () => ensureBotBlockerIntelligenceIndexes(db)),
+    ensureIndexStep("botBlockerPolicy", () => ensureBotBlockerPolicyIndexes(db)),
   ]);
-  await ensureVerificationIndexes(db);
-  await ensureChallengeIndexes(db);
-  await ensureModalSessionIndexes(db);
-  await ensureBillingIndexes(db);
-  await ensureBotBlockerSiteIndexes(db);
-  await ensureBotBlockerSiteCredentialIndexes(db);
-  await ensureBotBlockerIntelligenceIndexes(db);
-  await ensureBotBlockerPolicyIndexes(db);
 }

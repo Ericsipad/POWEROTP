@@ -13,6 +13,13 @@ export interface BotBlockerSiteCredentialDocument {
   lastFour: string;
   createdAt: Date;
   revokedAt?: Date;
+  /**
+   * Present (always `true`) while the credential is active, and removed on
+   * revocation. MongoDB partial indexes don't support `$exists: false` /
+   * `$not`, so the unique "one active credential per site" index must key
+   * off a field's presence rather than `revokedAt`'s absence.
+   */
+  active?: true;
 }
 
 export async function ensureBotBlockerSiteCredentialIndexes(
@@ -27,7 +34,7 @@ export async function ensureBotBlockerSiteCredentialIndexes(
       { siteId: 1 },
       {
         unique: true,
-        partialFilterExpression: { revokedAt: { $exists: false } },
+        partialFilterExpression: { active: true },
       },
     ),
     credentials.createIndex({
@@ -57,7 +64,7 @@ export class BotBlockerSiteCredentialPersistence {
   findActiveByHash(credentialHash: string) {
     return this.#credentials.findOne({
       credentialHash,
-      revokedAt: { $exists: false },
+      active: true,
     });
   }
 
@@ -83,12 +90,13 @@ export class BotBlockerSiteCredentialPersistence {
       ...scope,
       ...value,
       createdAt: now,
+      active: true,
     };
     await this.#client.withSession(async (session) => {
       await session.withTransaction(async () => {
         await this.#credentials.updateMany(
-          { ...scope, revokedAt: { $exists: false } },
-          { $set: { revokedAt: now } },
+          { ...scope, active: true },
+          { $set: { revokedAt: now }, $unset: { active: "" } },
           { session },
         );
         await this.#credentials.insertOne(document, { session });
