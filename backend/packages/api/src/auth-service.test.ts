@@ -12,6 +12,7 @@ import type {
   SessionDocument,
   UserDocument,
 } from "./persistence.js";
+import { hashToken } from "./security.js";
 
 const config = {
   SESSION_HASH_SECRET: "session-hash-secret-at-least-32-characters!",
@@ -126,5 +127,25 @@ describe("AuthService email encryption", () => {
     const second = await auth.register({ email: "customer@example.com", password: "Different-Horse-456!" });
 
     assert.equal(first.userId, second.userId);
+  });
+});
+
+describe("AuthService CSRF validation", () => {
+  const token = "csrf-token";
+  const session = {
+    csrfHash: hashToken(token, config.SESSION_HASH_SECRET),
+  } as SessionDocument;
+
+  it("accepts the token bound to the authenticated session", () => {
+    const { db } = createFakeDb();
+    const auth = new AuthService(db, config, fakeEmailService());
+    assert.doesNotThrow(() => auth.verifyCsrf(session, token));
+  });
+
+  it("rejects missing and mismatched tokens", () => {
+    const { db } = createFakeDb();
+    const auth = new AuthService(db, config, fakeEmailService());
+    assert.throws(() => auth.verifyCsrf(session, undefined), /invalid_csrf_token/);
+    assert.throws(() => auth.verifyCsrf(session, "wrong-token"), /invalid_csrf_token/);
   });
 });

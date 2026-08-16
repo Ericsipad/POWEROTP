@@ -776,7 +776,8 @@ was read, printed, or modified.
 - `npm run test -w @powerotp/api`: 167 tests / 48 suites, 0 failures. The five new service
   tests cover durable default creation, idempotent reads, audited updates, and cross-tenant
   read/mutation isolation.
-- `npm run build -w @powerotp/api` and `npm run typecheck -w @powerotp/web`: passed.
+- Backend API build and frontend typecheck passed (current commands:
+  `npm --prefix backend run build -w @powerotp/api` and `npm --prefix frontend run typecheck`).
 - `npm run verify`: exit code 0. The full monorepo build, lint/typecheck, and test sequence
   passed, including the Next.js production build.
 - `npm audit`: 0 vulnerabilities.
@@ -788,7 +789,7 @@ existing projects receive their disabled default row on first authorized GET/PAT
 was deployed and no production configuration was changed in this phase. Deployment remains
 insufficient to activate BotBlocker because no customer-traffic consumer exists.
 
-**Findings and unresolved risks.**
+**Historical Phase 7 findings and unresolved risks (recorded before Phase 8).**
 
 - The existing Next.js route layer already centralizes customer-session authentication, CSRF
   verification, correlation IDs, error mapping, and server context. Phase 5 reused those
@@ -973,8 +974,8 @@ created.
 - `backend/packages/api/src/botblocker-policy-service.test.ts` (new)
 - `backend/packages/api/src/botblocker-site-persistence.ts`
 - `backend/packages/api/src/persistence.ts`
-- `frontend/lib/botblocker-policy-http.ts` (new)
-- `frontend/lib/http-etag.ts` (new)
+- `backend/apps/server/lib/botblocker-policy-http.ts` (new)
+- `backend/apps/server/lib/http-etag.ts` (new)
 - `backend/apps/server/lib/server-context.ts`
 - `backend/apps/server/app/v1/botblocker/policy/[siteId]/route.ts` (new)
 - `backend/apps/server/app/v1/botblocker/policy-route.test.ts` (new)
@@ -1050,8 +1051,9 @@ printed, written, or documented.
   tampering, wrong audience/site, protocol mismatch, future activation, exact expiry, version
   regression, disabled sites, verification-key references, last-known-good-compatible
   selection, rollback refusal, unavailable behavior, and ETag changes.
-- `@powerotp/web`: 5 tests / 2 suites, 0 failures. New tests cover exact/weak/list/wildcard ETag
-  matching and the `200`/`304`/`404`/`503` bodies and cache headers.
+- Backend Next.js route layer: 5 tests / 2 suites, 0 failures. New tests cover
+  exact/weak/list/wildcard ETag matching and the `200`/`304`/`404`/`503` bodies and cache
+  headers.
 - `npm run verify`: passed, including all workspace build/lint/test steps and the Next.js
   production route build for `/v1/botblocker/policy/[siteId]`. No OneDrive retry was needed.
 - `npm audit`: 0 vulnerabilities. `git diff --check`: clean.
@@ -1066,9 +1068,10 @@ surface before any release can exist; those actions were deliberately not perfor
 
 **Findings and unresolved risks.**
 
-- The service-level publication primitive is intentionally not an HTTP surface. Phase 8 must
-  add authenticated, authorized, audited admin release-management routes without accepting
-  caller signatures or allowing in-place release edits.
+- At the end of Phase 7, the service-level publication primitive was intentionally not an
+  HTTP surface; Phase 8 subsequently added authenticated, authorized, audited admin
+  release-management routes without accepting caller signatures or allowing in-place
+  release edits.
 - Unit tests exercise transactional outcomes with a MongoDB-compatible fake; no remote
   transaction or production database mutation was performed in this phase.
 - Adapter-side schema/signature verification, ETag caching, last-known-good storage, and local
@@ -1082,19 +1085,21 @@ surface before any release can exist; those actions were deliberately not perfor
   sensor, gate shell, middleware, OTP orchestration, Passport, PaidTokenPass, billing,
   metering, or CleanDataPage behavior was added.
 
-**Phase 8 prerequisites.** Build the remaining central API surface and authenticated policy
-release administration against these contracts and persistence boundaries. Reuse the existing
-correlation-ID/error patterns; require customer/project/site ownership or platform-admin
-authorization as applicable; return typed unavailable responses for unbacked services; never
-fabricate decisions, scores, challenge success, entitlements, or release signatures. Phase 8
-must not activate customer traffic, implement adapters/sensors/scoring/real ingestion, expose
-private signing material, reuse OTP secrets, or begin CleanDataPage work.
+**Historical Phase 8 handoff.** The following was the Phase 7 exit requirement, now
+satisfied by the Phase 8 entry below: build the remaining central API surface and
+authenticated policy release administration against these contracts and persistence
+boundaries. The restriction against activating customer traffic, fabricating results,
+exposing private signing material, reusing OTP secrets, or beginning later-phase
+scoring/ingestion/CleanDataPage work remained in force.
 
 ## 2026-08-13 — Phase 8: Complete central API surface
 
-**Outcome.** Complete in code and intentionally inactive in production. The permanent runtime
-origin is `https://verify.powerotp.com/v1/botblocker/*`; DigitalOcean remains the origin until
-Phase 27 can move that same hostname to Cloudflare without changing adapter paths. Platform
+**Outcome.** Complete in code and intentionally inactive in production. The planned primary
+runtime origin is `https://verify.powerotp.com/v1/botblocker/*`; it is not deployed yet and
+Phase 27 will deploy it on Cloudflare Workers. The Worker will retain at least 30 days of
+current user-intelligence, denylisted-IP, and fingerprint data.
+`https://api.powerotp.com` remains the authoritative full-history master-data service and
+fallback rapid-check origin when the Worker is unavailable. Platform
 operator routes use `/v1/control/botblocker/*` and retain the existing platform-admin session,
 CSRF, IP-allowlisted login, rate-limit, correlation-ID, and error controls. No route name is
 treated as authorization.
@@ -1127,8 +1132,9 @@ returned or persisted.
   `backend/packages/api/src/botblocker-operations-service.test.ts`,
   `backend/packages/api/src/botblocker-policy-persistence.ts`, and
   `backend/packages/api/src/botblocker-policy-control-service.ts`.
-- Shared web wiring: `frontend/lib/api-errors.ts`,
-  `frontend/lib/botblocker-http.ts`, `frontend/lib/botblocker-responses.ts`,
+- Shared backend wiring: `backend/apps/server/lib/api-errors.ts`,
+  `backend/apps/server/lib/botblocker-http.ts`,
+  `backend/apps/server/lib/botblocker-responses.ts`,
   and `backend/apps/server/lib/server-context.ts`.
 - Runtime/customer routes:
   `backend/apps/server/app/v1/botblocker/rapid-auth/route.ts`,
@@ -1195,7 +1201,7 @@ returned or persisted.
 - `BOTBLOCKER_SITE_CREDENTIAL_HASH_SECRET`: optional independent secret for hashing site
   credentials; never reuse `API_KEY_HASH_SECRET` or any OTP/signing secret.
 - `BOTBLOCKER_RUNTIME_ORIGIN`: optional exact HTTPS runtime origin; intended value is configured
-  operationally only when `verify.powerotp.com` is routed.
+  operationally only when the `verify.powerotp.com` Cloudflare Worker is deployed.
 - Existing `BOTBLOCKER_ED25519_*`, `BOTBLOCKER_CLOCK_SKEW_MS`, `MONGODB_URI`, and `VALKEY_URL`
   remain unchanged. No `.env` or DigitalOcean value was read, printed, or modified.
 
@@ -1211,8 +1217,8 @@ returned or persisted.
   independent hashing, tenant isolation, exact host/site/audience and timestamp binding,
   idempotency conflict, nonce replay, fail-closed Valkey errors, data-minimized visitors,
   audited traces, and real degraded health.
-- `@powerotp/web`: typecheck passed; 8 tests / 3 suites, 0 failures. New tests cover strict
-  unavailable/authentication/replay/rate-limit response bodies.
+- Backend Next.js route layer: typecheck passed; 8 tests / 3 suites, 0 failures. New tests
+  cover strict unavailable/authentication/replay/rate-limit response bodies.
 - `npm run verify`: passed, including the Next.js production build and every new
   `/v1/botblocker/*`, `/v1/control/botblocker/*`, visitor, and credential-rotation route. No
   OneDrive retry was needed.
@@ -1220,8 +1226,8 @@ returned or persisted.
 
 **Manual/migration/deployment steps.** Normal startup creates the new indexes; there is no
 one-off migration and no seeded record. Before any future activation, an operator must
-independently configure the credential hash secret/runtime origin, route
-`verify.powerotp.com` to the application, configure a real BotBlocker signing key, rotate a
+independently configure the credential hash secret/runtime origin, deploy and route the
+`verify.powerotp.com` Cloudflare Worker, configure a real BotBlocker signing key, rotate a
 customer site credential through its authenticated route, and publish an approved policy.
 None of those actions is authorized or performed by this phase.
 

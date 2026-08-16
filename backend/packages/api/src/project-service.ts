@@ -13,6 +13,7 @@ import {
   type AuditDocument,
   type ProjectDocument,
 } from "./persistence.js";
+import { projectVerificationUrl } from "./public-urls.js";
 import {
   createId,
   createSecret,
@@ -302,10 +303,7 @@ export class ProjectService {
       id: project._id,
       name: project.name,
       slug: project.slug,
-      apiUrl: new URL(
-        `/v1/projects/${project.slug}/verifications`,
-        this.config.PUBLIC_API_URL,
-      ).toString(),
+      apiUrl: projectVerificationUrl(this.config.PUBLIC_API_URL, project.slug),
       enabledMethods: project.enabledMethods,
       allowedOrigins: project.allowedOrigins,
       callbackUrl: project.callbackUrl,

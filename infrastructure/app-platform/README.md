@@ -7,8 +7,8 @@ source directory, manifest, lockfile, and dependencies.
 ## Repository selection
 
 - Repository: `Ericsipad/POWEROTP`
-- Branch: `main` after cutover. Deploy the backend from the separation feature branch
-  first so it can be verified without changing the production frontend.
+- Branch: `main` for both production components. Feature branches are for review/test
+  deployments only, not production deployment guidance.
 - Auto-detected environment: Node.js
 
 Configure the components exactly as follows:
@@ -68,9 +68,11 @@ repository `.env` file.
   `API_KEY_HASH_SECRET` and every OTP/signing secret. It keys hashes of server-only
   `potp_bb_*` site credentials.
 - `BOTBLOCKER_RUNTIME_ORIGIN`: optional exact HTTPS origin for the runtime API. The
-  permanent public origin is `https://verify.powerotp.com`; leave it unset until that
-  hostname is routed to the DigitalOcean application. Phase 27 may move the hostname to
-  Cloudflare without changing `/v1/botblocker/*` paths.
+  planned primary public origin is `https://verify.powerotp.com`; leave it unset until
+  the Cloudflare Worker is deployed. The Worker will retain at least 30 days of current
+  user-intelligence, denylisted-IP, and fingerprint data. `https://api.powerotp.com`
+  remains the authoritative full-history master-data service and fallback rapid-check
+  origin when the Worker is unavailable.
 - `INTERACTION_TOKEN_SECRET`: at least 32 random bytes
 - `CONFIG_ENCRYPTION_KEY`: at least 32 random bytes, independent from the token secret
 - `SESSION_HASH_SECRET`: at least 32 random bytes, independent from other secrets
@@ -118,6 +120,8 @@ repository `.env` file.
   `/admin`, not via an env var — see that section.
 - `PUBLIC_APP_URL=https://powerotp.com`
 - `PUBLIC_API_URL=https://api.powerotp.com`
+  The backend uses `PUBLIC_API_URL` for API links and `PUBLIC_APP_URL` for modal/widget,
+  email, and Stripe return UI links.
 - `DEMO_PROJECT_SLUG`: optional; slug of the project backing the public "try it now"
   widget on the marketing site — use `demo`. After deploy, sign in at `/admin` and click
   "Provision demo project" once to create it at that exact slug. Leave the variable

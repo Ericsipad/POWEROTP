@@ -21,7 +21,7 @@ import {
  * The public, anonymous, read-only MCP integration guide. This module only
  * builds the server and its request handler; process bootstrap (listening
  * on a port) lives in `server.ts` for standalone/local use, or is embedded
- * directly into the unified production server.
+ * directly into the production backend Next.js component.
  */
 export function createMcpApp() {
   const mcp = new McpServer({

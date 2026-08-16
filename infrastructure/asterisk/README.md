@@ -18,7 +18,8 @@ droplet" sections) for the ground truth of what is actually installed on
   from `GET /v1/nodes/config` on every poll. See `backend/packages/contracts/src/nodes.ts` and
   `backend/packages/api/src/node-service.ts`.
 - No customer-facing API, public ARI/AMI, Docker, or Portainer.
-- Media synchronization from private Spaces is not built yet (Phase 5).
+- Media synchronization from private Spaces is implemented but remains inactive until
+  the Spaces and media-manifest environment variables are configured.
 - `apps/telephony-agent` now places real outbound calls for `call_reachability`,
   `voice_code`, and `voice_challenge` over local ARI (see `docs/AS_BUILT.md`'s "Phase 4
   ARI call-control" and "Phase 5" sections) — no dialplan/`extensions.conf` change is

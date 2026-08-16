@@ -65,6 +65,10 @@ providing process-level failure isolation and independent horizontal scaling.
 - Domains: frontend `powerotp.com`; backend `api.powerotp.com`.
   `PUBLIC_APP_URL=https://powerotp.com` and
   `PUBLIC_API_URL=https://api.powerotp.com`.
+- Frontend browser calls use `NEXT_PUBLIC_API_URL=https://api.powerotp.com`.
+  Backend-generated API links use `PUBLIC_API_URL`; modal/widget, email, and Stripe
+  return UI links use `PUBLIC_APP_URL`. Stripe's webhook is
+  `https://api.powerotp.com/v1/billing/stripe/webhook`.
 - Frontend health check: `/api/health`. Backend health/readiness: `/health`, `/ready`.
 - Verify the backend by hitting `https://api.powerotp.com/v1/capabilities` — if it returns the
   Next.js 404 HTML instead of JSON, the deploy is broken (this exact failure mode is
@@ -100,11 +104,12 @@ providing process-level failure isolation and independent horizontal scaling.
 - **Droplet auto-deploy**: as of this session, `powerotpvoip1` redeploys itself
   automatically on every push to `main` (once `verify` passes), the same as
   `frontend` already does on App Platform — see `.github/workflows/verify.yml`'s
-  `deploy-droplet` job and `infrastructure/asterisk/README.md`. It uses three
-  GitHub Actions secrets (`DROPLET_HOST`/`DROPLET_SSH_USER`/`DROPLET_SSH_KEY`,
-  the same key as the local `ssh powerotp` alias) to run the identical
-  archive/`scp`/`npm ci`/build/restart sequence the manual runbook always
-  used. **A future schema/contract change that the old agent can't parse
+  `deploy-droplet` job and `infrastructure/asterisk/README.md`. It uses four
+  GitHub Actions secrets (`DROPLET_HOST`, `DROPLET_SSH_USER`,
+  `DROPLET_SSH_KEY`, and pinned `DROPLET_SSH_HOST_KEY`). The CI key is
+  separate from the local `ssh powerotp` key and is restricted to the
+  forced `potp-deploy` command; the archive is streamed on stdin rather
+  than copied with unrestricted SSH. **A future schema/contract change that the old agent can't parse
   (like the trunk-pool redesign two sessions ago) is no longer a "redeploy in
   the same sitting" manual reminder — it just happens automatically the
   moment the commit reaches `main`.** First-time node provisioning
@@ -152,13 +157,13 @@ providing process-level failure isolation and independent horizontal scaling.
 - **Phase 3 (verification core)**: implemented — idempotent creation, durable state
   machine, events, BullMQ queues, signed HMAC callbacks with SSRF guarding, single-use
   interaction tokens, status endpoint, dashboard timeline. Verified end-to-end against
-  real production Mongo/Valkey. Since no real telephony/SMS transport exists yet, every
-  verification currently resolves `queued → dispatching → failed` with reason
-  `method_not_available` — this is expected, not a bug, until Phase 4 lands.
+  real production Mongo/Valkey. Real transports were added in later phases; each method
+  still fails closed with `method_not_available` when its required live credentials are
+  absent.
 - **Public demo widget**: added ahead of Phase 4 (not in the original phase list) — a
   "try it now" widget on the marketing homepage hero, backed by the anonymous, tightly
   scoped `/v1/demo/verifications` endpoints and the `prj_demo` project above.
-- **Phase 4 (voice types 1 and 2 / telephony)**: **in progress, both types now have
+- **Phase 4 (voice types 1 and 2 / telephony)**: **implemented, both types have
   real call-control logic** (`voice_code` added after `call_reachability` was proven
   live — see "Phase 4 ARI call-control" below for both). Node identity (one
   shared `NODE_SECRET`, not mTLS or a per-node enrollment secret — see "Phase 4 node
@@ -171,9 +176,10 @@ providing process-level failure isolation and independent horizontal scaling.
   `queued -> dispatching -> calling -> succeeded` (`reasonCode: "answered"`) after the
   droplet actually originated the call over VoIP.ms, detected the answer via ARI's
   `StasisStart`, and reported it back through the control plane's real transition/event
-  machinery. Not yet done: live credentials for the other methods and
-  `voice_challenge`'s media/call-control; a busy/no-answer/rejected outcome hasn't been observed
-  live yet (only the cause-code mapping is unit-tested), and there is no automated
+  machinery. `voice_code` uses the same live node path. `voice_challenge` call-control
+  and media synchronization are implemented, but remain operationally unavailable until
+  Spaces/media configuration exists. A busy/no-answer/rejected outcome has not been
+  observed live (only the cause-code mapping is unit-tested), and there is no automated
   canary test for this — it was exercised manually once.
   **Observed nuance, not a bug**: on that canary call the callee's phone was never
   tapped to answer (recipient hit "Ignore" on an Apple Watch, which only silences the
@@ -194,11 +200,12 @@ providing process-level failure isolation and independent horizontal scaling.
   end — admin recording upload/normalization, immutable challenge authoring, per-
   interaction opaque option materialization and grading, signed media manifest, node
   media sync, and ARI recording playback. See "Phase 5 recording/challenge pipeline"
-  below. Live Spaces credentials are deliberately deferred, same as Phase 4/6 — trunk
-  credentials themselves are shared with the other voice methods via the pool (see
+  below. Live Spaces credentials remain deliberately deferred; trunk credentials
+  themselves are shared with the other voice methods via the pool (see
   "Outbound trunk pool: rotation and failover").
-- **Phase 6 (SMS)**: provider adapter implemented and unit-tested; live VoIP.ms SMS API
-  credentials are deliberately deferred until the combined validation pass.
+- **Phase 6 (SMS)**: provider adapter implemented, unit-tested, and confirmed live
+  end-to-end with VoIP.ms; it still fails closed when the SMS API credentials or a
+  configured sender DID are absent.
 - **Phase 7**: implemented — see "Phase 7: usage counters, callback
   diagnostics, alerting, retention" below.
 - **Phase 8 (integration surface)**: substantially implemented this
@@ -230,7 +237,7 @@ no recovery flow: changing the password or IP allowlist is editing env vars and
 redeploying.
 
 `isIpAllowed()` in `backend/packages/api/src/ip-allowlist.ts` reads the client IP from
-`clientIp()` in `frontend/lib/api-route.ts`, which prefers Cloudflare's
+`clientIp()` in `backend/apps/server/lib/api-route.ts`, which prefers Cloudflare's
 `cf-connecting-ip` header (Cloudflare sits in front of App Platform) over
 `x-forwarded-for`.
 
@@ -282,8 +289,9 @@ Platform and redeploying every node with the new value — identical in spirit t
   Asterisk to `pjsip reload` — but only when the rendered config actually changed since
   the last poll (including the very first poll right after the process starts), so an
   idle node doesn't reload Asterisk every interval for no reason. Dialplan/ARI
-  call-control logic is intentionally not built yet — there is no real trunk to test it
-  against until VoIP.ms credentials are entered.
+  At the time this identity/config-polling slice landed, dialplan/ARI call-control was
+  intentionally not part of it; the later "Phase 4 ARI call-control" section records
+  the subsequently implemented live behavior.
 - The droplet's `/etc/powerotp/agent.env` holds only non-secret, unchanging deployment
   constants (`CONTROL_PLANE_URL`, `ASTERISK_PJSIP_TRUNKS_PATH`, `POLL_INTERVAL_MS`) plus
   `NODE_SECRET` itself, which the agent was deployed with directly — the operator never
@@ -1432,7 +1440,7 @@ normally."
   `AuthService#decryptEmail` helper, in exactly two places: sending the
   verification email (`AuthService#register`, which already has the
   plaintext from the request body, never round-trips through the DB for
-  this) and `frontend/lib/session-cookies.ts#sessionUser`, which returns it
+  this) and `backend/apps/server/lib/session-cookies.ts#sessionUser`, which returns it
   to the account itself in a session response. Two independent new secrets
   by design — a leak of either one alone should never compromise the
   other (encryption vs. lookup-indexing are different concerns, matching
@@ -1833,7 +1841,7 @@ code/challenge UI or handle a phone number at all. "API documentation" and
 "copy this to your AI" were confirmed to already be covered by the existing
 MCP server (deepened this session, see below) rather than needing a new
 artifact — the user's own words: "all the instructions are on the mcp and
-clients read powerotp.com/mcp ... the actual account connection is done
+clients read api.powerotp.com/mcp ... the actual account connection is done
 when the user enters the API creds in their site."
 
 - **Why a new "session" concept was needed**: today's
@@ -2021,7 +2029,8 @@ modal.
   real functional gap the new "show the actual modal in the demo" request
   exposed, not just a UI change. Scoped exactly like the existing demo
   create/status routes (anonymous, but only for the one
-  operator-configured demo project — `frontend/lib/demo-project.ts#requireDemoProject`,
+  operator-configured demo project —
+  `backend/apps/server/lib/demo-project.ts#requireDemoProject`,
   extracted this session so a third demo route didn't triplicate that
   same project-lookup logic). Reuses `VerificationService#submitCode`/
   `#submitChallenge` unchanged — same grading logic as the real,
@@ -2051,7 +2060,7 @@ POWEROTP, as opposed to a customer's backend) and stored as new optional
 customer's own server, not the end user, so an "IP" captured there would
 just be that server's IP, not a meaningful signal, and never trusted from a
 header a caller could set itself (only ever read via
-`frontend/lib/api-route.ts#clientIp`, the same Cloudflare-aware helper used
+`backend/apps/server/lib/api-route.ts#clientIp`, the same Cloudflare-aware helper used
 everywhere else).
 
 Surfaced read-only on `/admin` via a new "Widget interactions" panel

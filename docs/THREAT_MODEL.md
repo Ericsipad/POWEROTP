@@ -20,7 +20,8 @@ BotBlocker's.
 1. Customer server to public API
 2. Customer UI or hosted iframe to public API
 3. App Platform services to Atlas, Valkey, and Spaces
-4. Telephony agent to the central node API over mTLS
+4. Telephony agent to `https://api.powerotp.com` over HTTPS with shared
+   `NODE_SECRET` bearer authentication
 5. Telephony agent to localhost-only Asterisk ARI
 6. Asterisk to VoIP.ms SIP trunks
 7. POWEROTP API background processor to customer-controlled HTTPS endpoints
@@ -32,7 +33,8 @@ BotBlocker's.
 
 - Hash project API keys; display them once and support rotation/revocation.
 - Encrypt provider credentials with a master key held in App Platform.
-- Use unique node certificates, short-lived enrollment tokens, and central revocation.
+- Keep `NODE_SECRET` only in encrypted backend configuration and the droplet service
+  environment; rotate it by updating the backend and redeploying every node.
 - Redact authorization, cookies, codes, tokens, SIP secrets, and answers from logs.
 - Restrict platform admin login to an IP allowlist and shorter sessions; admin identity
   (email/password) lives in environment variables, not a self-service registered account.
@@ -145,10 +147,13 @@ in [`POWEROTP_BOTBLOCKER_AS_BUILT.md`](POWEROTP_BOTBLOCKER_AS_BUILT.md) says so.
     exchange and viewing surface.
 14. Customer dashboard to project-scoped CleanDataPage configuration/content storage.
 
-The canonical authenticated BotBlocker runtime boundary is
-`https://verify.powerotp.com/v1/botblocker/*`. The DigitalOcean application owns that origin
-until the Phase 27 Cloudflare Worker takeover; the takeover must preserve the origin and its
-authentication/audience semantics. Operator traffic crosses a distinct, authenticated
+The planned primary BotBlocker rapid-check boundary is
+`https://verify.powerotp.com/v1/botblocker/*`. It is not deployed yet. It will run on
+Cloudflare Workers and retain at least 30 days of current user-intelligence, denylisted-IP,
+and fingerprint data. `https://api.powerotp.com` remains the authoritative full-history
+master-data service and the fallback rapid-check origin when the Worker is unavailable.
+The Worker must preserve the existing authentication/audience semantics. Operator traffic
+crosses a distinct, authenticated
 `/v1/control/botblocker/*` boundary and must never be authorized by a runtime site credential.
 
 ### State-publication and customer-control boundary

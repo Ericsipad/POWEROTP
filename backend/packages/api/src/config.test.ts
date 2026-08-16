@@ -17,7 +17,7 @@ const requiredEnv = {
   BREVO_API_KEY: "brevo-key",
   EMAIL_FROM: "no-reply@example.com",
   PUBLIC_APP_URL: "https://powerotp.com",
-  PUBLIC_API_URL: "https://powerotp.com",
+  PUBLIC_API_URL: "https://api.powerotp.com",
 };
 
 function encodedEd25519Keys() {
@@ -35,7 +35,9 @@ function encodedEd25519Keys() {
 
 describe("loadConfig", () => {
   it("parses when every optional field is genuinely absent", () => {
-    assert.doesNotThrow(() => loadConfig(requiredEnv));
+    const configuration = loadConfig(requiredEnv);
+    assert.equal(configuration.PUBLIC_APP_URL, "https://powerotp.com");
+    assert.equal(configuration.PUBLIC_API_URL, "https://api.powerotp.com");
   });
 
   it("treats an env var present but set to an empty string as unset", () => {

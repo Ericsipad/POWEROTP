@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { describe, it } from "node:test";
 
+import { getBotBlockerArchitectureOverview } from "./architecture.js";
 import { allBotBlockerEnvVarNames } from "./env.js";
 import { buildAllBotBlockerManifests, buildBotBlockerManifest } from "./manifest.js";
 import { AdapterManifestSchema } from "./schemas.js";
@@ -71,8 +72,9 @@ describe("BotBlocker MCP manifests", () => {
         );
         assert.ok(
           requiredNames.includes("POWEROTP_SITE_ID") &&
-            requiredNames.includes("POWEROTP_SITE_CREDENTIAL"),
-          "expected the two intended-design env var names to appear",
+            requiredNames.includes("POWEROTP_SITE_CREDENTIAL") &&
+            requiredNames.includes("POWEROTP_AUDIENCE"),
+          "expected every active integration env var name to appear",
         );
       });
 
@@ -115,5 +117,13 @@ describe("BotBlocker MCP manifests", () => {
         assert.doesNotMatch(file.contents, /POWEROTP_SITE_CREDENTIAL\s*=\s*["'][^"']+["']/);
       }
     }
+  });
+
+  it("describes the planned rapid edge and authoritative backend fallback", () => {
+    const origins = getBotBlockerArchitectureOverview().runtimeOrigins;
+    assert.match(origins.primary, /https:\/\/verify\.powerotp\.com/);
+    assert.match(origins.primary, /not yet deployed/i);
+    assert.match(origins.authoritativeFallback, /https:\/\/api\.powerotp\.com/);
+    assert.match(origins.authoritativeFallback, /full-history master/i);
   });
 });

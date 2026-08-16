@@ -47,7 +47,7 @@ flowchart LR
   Api --> Mongo[MongoDBAtlas]
   Api --> Valkey[ManagedValkey]
   Api -->|"Durable background jobs"| Valkey
-  NodeAgent[DropletAgent] -->|"Outbound mTLS"| NodeApi[CentralNodeAPI]
+  NodeAgent[DropletAgent] -->|"HTTPS + NODE_SECRET bearer"| NodeApi[CentralNodeAPI]
   NodeApi --> Valkey
   NodeAgent -->|"Local ARI"| Asterisk[Asterisk]
   Asterisk --> VoipMs[VoIPms]
@@ -61,8 +61,10 @@ flowchart LR
 - MongoDB Atlas is durable storage. Valkey holds queues, leases, rate limits, and short-lived state.
 - Asterisk and its agent run natively under hardened `systemd` units. Portainer and
   containerized Asterisk are intentionally excluded.
-- App Platform holds master secrets. Every droplet enrolls once, receives a unique
-  revocable mTLS identity, and pulls only its assigned encrypted configuration.
+- App Platform holds master secrets. Every droplet calls
+  `CONTROL_PLANE_URL=https://api.powerotp.com` with the shared `NODE_SECRET` bearer
+  credential and pulls configuration from the backend. There is no mTLS or per-node
+  enrollment/revocation in the implemented design.
 - Canonical recordings live in private DigitalOcean Spaces and are checksum-synchronized
   to local droplet storage.
 
@@ -86,8 +88,8 @@ consumed after submission or a terminal result.
 ## MCP
 
 `https://api.powerotp.com/mcp` is a public, anonymous, read-only Streamable HTTP MCP
-server (routed by path on the single shared domain; there is no separate `mcp.`
-subdomain today). It teaches Cursor, Claude, and other clients how to implement the
+server on the backend domain (there is no separate `mcp.` subdomain today). It teaches
+Cursor, Claude, and other clients how to implement the
 API. It has no project access, credentials, customer data, or billable tools and cannot
 originate calls or SMS.
 
@@ -100,12 +102,13 @@ originate calls or SMS.
 - Confirm VoIP.ms trunks, concurrency, caller IDs, codecs, SMS capability, and acceptable use.
 - Approve the threat model, provider checklist, and MVP acceptance criteria.
 
-### Phase 1 — Production foundation
+### Phase 1 — Production foundation (historical plan)
 
-- Create the TypeScript monorepo, Next.js site, Fastify API with durable background
-  processing, MCP server, telephony-agent boundary, shared contracts, tests, and CI.
-- Add one production App Platform specification with encrypted variable declarations,
-  health checks, canary controls, and rollback documentation.
+- The original plan called for a Fastify API and one App Platform specification. The
+  implemented production shape instead uses separate self-contained frontend and backend
+  Next.js components configured in the App Platform UI, with no App Spec YAML.
+- Create durable background processing, the MCP server, telephony-agent boundary, shared
+  contracts, tests, and CI.
 - Establish the exact folder and build commands used by App Platform.
 
 ### Phase 2 — Accounts and projects
@@ -120,10 +123,11 @@ originate calls or SMS.
 - Transports for real telephony/SMS are intentionally deferred to Phases 4–6; Phase 3
   ships the shared machinery plus a test-only fake transport for automated coverage.
 
-### Phase 4 — Voice types 1 and 2
+### Phase 4 — Voice types 1 and 2 (implemented design supersedes original identity plan)
 
-- Provision native Asterisk, PJSIP, local ARI, agent watchdogs, mTLS enrollment, health,
-  leasing, failover, VoIP.ms trunk routing, and composable digit playback.
+- Provision native Asterisk, PJSIP, local ARI, agent watchdogs, health, leasing, failover,
+  VoIP.ms trunk routing, and composable digit playback. The original mTLS enrollment
+  intent was replaced by HTTPS with shared `NODE_SECRET` bearer authentication.
 
 ### Phase 5 — Voice challenges (implemented)
 

@@ -1,5 +1,6 @@
 import { parseBody } from "@powerotp/api/errors.js";
 import { authenticateProjectApiKey } from "@powerotp/api/project-api-auth.js";
+import { modalSessionUrl } from "@powerotp/api/public-urls.js";
 import { ModalSessionCreateSchema, type ModalSessionAccepted } from "@powerotp/contracts";
 import { NextResponse } from "next/server";
 
@@ -43,7 +44,7 @@ export const POST = apiRoute<RouteParams>(async (request, { params }) => {
 
   const body: ModalSessionAccepted = {
     sessionId: session._id,
-    modalUrl: new URL(`/widget/${session._id}`, config.PUBLIC_APP_URL).toString(),
+    modalUrl: modalSessionUrl(config.PUBLIC_APP_URL, session._id),
     expiresAt: session.expiresAt.toISOString(),
   };
   const response = NextResponse.json(body, { status: 202 });

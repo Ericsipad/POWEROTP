@@ -6,8 +6,13 @@
 - DigitalOcean Managed Valkey TLS connection
 - Brevo transactional-email API key and verified sender
 - The frontend App Platform component serving `powerotp.com`
-- The backend App Platform component serving `api.powerotp.com` (`/v1`, `/mcp`, and
-  durable workers)
+- The backend App Platform component serving `api.powerotp.com` (`/v1/*`, `/mcp`,
+  `/health`, `/ready`, and durable workers)
+
+Frontend browser calls use `NEXT_PUBLIC_API_URL=https://api.powerotp.com`. On the
+backend, `PUBLIC_API_URL=https://api.powerotp.com` emits API links and
+`PUBLIC_APP_URL=https://powerotp.com` emits modal/widget, email, and Stripe return UI
+links.
 
 Enter secrets on the backend component only. Generate each cryptographic secret
 independently with at least 32 random bytes.

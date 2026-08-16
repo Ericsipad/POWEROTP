@@ -21,6 +21,20 @@ describe("MCP integration content", () => {
   it("documents the real /v1-prefixed creation path", () => {
     assert.match(integrationOverview.creation, /^POST \/v1\/projects/);
   });
+
+  it("keeps every server API example on the backend hostname", () => {
+    const examples = [
+      buildExample("voice_code", "curl"),
+      buildExample("voice_code", "typescript"),
+      buildModalSessionExample("curl"),
+      buildModalSessionExample("typescript"),
+    ].join("\n");
+
+    assert.equal(integrationOverview.apiBaseUrl, "https://api.powerotp.com/v1");
+    assert.match(examples, /https:\/\/api\.powerotp\.com\/v1\//);
+    assert.doesNotMatch(examples, /https:\/\/powerotp\.com\/v1\//);
+    assert.match(examples, /https:\/\/powerotp\.com\/widget\//);
+  });
 });
 
 describe("buildModalSessionExample", () => {

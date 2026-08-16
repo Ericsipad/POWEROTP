@@ -24,7 +24,15 @@ lockfiles, dependencies, and build commands; neither reads outside its own direc
 - `libraries/widget-loader` — hosted-widget loader foundation
 - `docs` — product plan, specification, threat model, and acceptance criteria;
   [`docs/AS_BUILT.md`](docs/AS_BUILT.md) is the ground-truth log of what's actually
-  deployed — read it first when starting a new session
+  deployed — read it first when starting a new session. The complete route, auth,
+  consumer, and production-origin catalog is
+  [`docs/API_ROUTE_INVENTORY.md`](docs/API_ROUTE_INVENTORY.md)
+
+Browser requests from the frontend use `NEXT_PUBLIC_API_URL=https://api.powerotp.com`.
+The backend uses `PUBLIC_API_URL=https://api.powerotp.com` when it emits API URLs and
+`PUBLIC_APP_URL=https://powerotp.com` for modal, widget, email, and Stripe return UI.
+Stripe sends webhooks directly to
+`https://api.powerotp.com/v1/billing/stripe/webhook`.
 
 There are separate frontend and backend App Platform components. See
 [`infrastructure/app-platform/README.md`](infrastructure/app-platform/README.md).

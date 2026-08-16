@@ -157,11 +157,12 @@ adapter-side client that consumes it.
 
 ### Phase 8 — Complete central API surface
 
-The canonical authenticated runtime origin is
-`https://verify.powerotp.com/v1/botblocker/*`. DigitalOcean serves that origin through
-Phase 26; Phase 27 moves its implementation to the global Cloudflare Worker without changing
-the public URL. Operator routes are separately authenticated under
-`/v1/control/botblocker/*`.
+The planned primary authenticated rapid-check origin is
+`https://verify.powerotp.com/v1/botblocker/*`. It is not deployed yet. Phase 27 deploys
+it on Cloudflare Workers with at least 30 days of current user-intelligence,
+denylisted-IP, and fingerprint data. `https://api.powerotp.com` remains the
+authoritative full-history master-data service and fallback rapid-check origin.
+Operator routes are separately authenticated under `/v1/control/botblocker/*`.
 
 Create permanent authenticated/rate-limited route handlers for:
 
@@ -412,7 +413,9 @@ out of the edge hot path.
 
 Implement globally distributed auth/replay checks, edge-local known decisions, unknown
 escalation, signed responses, asynchronous event delivery, latency measurement, circuit
-breakers, DigitalOcean fallback, canary, and rollback without customer reinstall.
+breakers, `https://api.powerotp.com` fallback, canary, and rollback without customer
+reinstall. Retain at least 30 days of current user-intelligence, denylisted-IP, and
+fingerprint data at the edge; authoritative full history remains on the backend.
 
 ### Phase 28 — Shopify integration
 

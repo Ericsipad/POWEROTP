@@ -45,6 +45,14 @@ export const BOTBLOCKER_ENV_VARS: readonly PowerOtpEnvVar[] = [
       "server-to-server and request a scoped visitor session token; never resent afterward, " +
       "never sent to a browser, and never logged.",
   },
+  {
+    name: "POWEROTP_AUDIENCE",
+    required: true,
+    description:
+      "Canonical HTTPS origin of the protected customer application (for example, " +
+      "https://your-app.example). It binds signed browser/session material to that origin; " +
+      "set it explicitly in production rather than relying on a generated template placeholder.",
+  },
 ];
 
 /**

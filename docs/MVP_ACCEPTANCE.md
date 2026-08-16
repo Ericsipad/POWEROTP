@@ -65,7 +65,9 @@
 ## Telephony operations
 
 - ARI is reachable only on localhost and customer traffic never reaches a droplet directly.
-- A node enrolls with a unique mTLS identity and can be drained or revoked centrally.
+- A node authenticates to `https://api.powerotp.com` with the shared `NODE_SECRET`
+  bearer credential. Rotating node access requires updating the backend and redeploying
+  every node; individual enrollment/revocation is not supported.
 - `systemd` restarts failed Asterisk/agent processes and reports unhealthy nodes centrally.
 - New work routes away from a failed node; retry policy avoids uncontrolled duplicate calls.
 - A second geo node can join without changing customer API configuration.

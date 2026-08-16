@@ -27,8 +27,10 @@ assigns them to specific telephony nodes.
   (Node.js auto-detected from `package.json`; no App Spec YAML involved), documented in
   [`infrastructure/app-platform/README.md`](../infrastructure/app-platform/README.md)
 - Production branch and auto-deploy policy
-- One component; environment variables entered directly in the App Platform UI
-- One public domain (`powerotp.com`) serving web, `/v1` API, and `/mcp`
+- Two independently scalable components; environment variables entered directly in the
+  App Platform UI
+- `powerotp.com` serves the frontend; `api.powerotp.com` serves `/v1/*`, `/mcp`,
+  `/health`, and `/ready`
 - Health checks, logs, alerts, and rollback access
 - Outbound network access to Atlas, Valkey, Spaces, callbacks, and telephony nodes
 
@@ -73,7 +75,7 @@ Do not send credentials until Phase 4 begins. Required handoff:
 - Droplet IP, Ubuntu version, region, and VPC
 - Non-root sudo SSH user with key authentication
 - Approved canary destination numbers
-- One-time node enrollment token delivered through a secure channel
+- Shared `NODE_SECRET` supplied securely during deployment; no per-node enrollment token
 - Node name, region, call capacity, and assigned VoIP.ms account
 
 Provisioning will install native Asterisk and the agent under `systemd`; it will not

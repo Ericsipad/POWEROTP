@@ -7,7 +7,7 @@
     "dev": "next dev",
     "lint": "tsc --noEmit",
     "start": "next start",
-    "test": "node --import tsx --test \"app/health/route.test.ts\" \"app/v1/botblocker/phase8-http.test.ts\" \"app/v1/botblocker/policy-route.test.ts\" \"lib/**/*.test.ts\"",
+    "test": "node --import tsx --test \"app/health/route.test.ts\" \"app/route-inventory.test.ts\" \"app/v1/botblocker/phase8-http.test.ts\" \"app/v1/botblocker/policy-route.test.ts\" \"lib/**/*.test.ts\"",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

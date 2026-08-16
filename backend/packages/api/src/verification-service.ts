@@ -10,6 +10,7 @@ import type { Db } from "mongodb";
 import type { ChallengeService } from "./challenge-service.js";
 import type { ProductionConfig } from "./config.js";
 import type { ProjectDocument } from "./persistence.js";
+import { verificationStatusUrl } from "./public-urls.js";
 import {
   createFiveDigitCode,
   createSortableId,
@@ -606,10 +607,7 @@ export class VerificationService {
     return {
       interactionId: verification._id,
       state: initialVerificationState,
-      statusUrl: new URL(
-        `/v1/verifications/${verification._id}`,
-        this.config.PUBLIC_API_URL,
-      ).toString(),
+      statusUrl: verificationStatusUrl(this.config.PUBLIC_API_URL, verification._id),
       expiresAt: verification.expiresAt.toISOString(),
     };
   }

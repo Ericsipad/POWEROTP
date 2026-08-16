@@ -584,11 +584,12 @@ adapter.
 
 ## API surface
 
-The canonical authenticated runtime origin is
-`https://verify.powerotp.com/v1/botblocker/*`. That stable public origin is served by the
-DigitalOcean application through Phase 26; the Phase 27 Cloudflare Worker takeover changes
-the serving layer, not customer URLs. Operator-only routes use the separately authenticated
-`/v1/control/botblocker/*` namespace.
+The planned primary authenticated rapid-check origin is
+`https://verify.powerotp.com/v1/botblocker/*`. It is not deployed yet and will run on
+Cloudflare Workers, retaining at least 30 days of current user-intelligence, denylisted-IP,
+and fingerprint data. `https://api.powerotp.com` owns authoritative full-history master
+data and is the fallback rapid-check origin when the Worker is unavailable. Operator-only
+routes use the separately authenticated `/v1/control/botblocker/*` namespace on the backend.
 
 - `POST /v1/botblocker/rapid-auth`
 - `POST /v1/botblocker/browser-assessment`

@@ -1,4 +1,5 @@
 import { parseBody } from "@powerotp/api/errors.js";
+import { demoVerificationStatusUrl } from "@powerotp/api/public-urls.js";
 import { DemoVerificationRequestSchema, type VerificationAccepted } from "@powerotp/contracts";
 import { NextResponse } from "next/server";
 
@@ -35,10 +36,10 @@ export const POST = apiRoute(async (request, _context, correlationId) => {
   const body: VerificationAccepted = {
     interactionId: accepted.interactionId,
     state: "queued",
-    statusUrl: new URL(
-      `/v1/demo/verifications/${accepted.interactionId}`,
-      context.config.PUBLIC_APP_URL,
-    ).toString(),
+    statusUrl: demoVerificationStatusUrl(
+      context.config.PUBLIC_API_URL,
+      accepted.interactionId,
+    ),
     expiresAt: accepted.expiresAt,
   };
   const response = NextResponse.json(body, { status: 202 });

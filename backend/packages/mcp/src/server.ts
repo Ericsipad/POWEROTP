@@ -7,9 +7,9 @@ import { createMcpHandler } from "./mcp-app.js";
 
 /**
  * Standalone bootstrap for local development only. In production this
- * logic is embedded directly into the single unified server (see
- * `@powerotp/api`'s `unified-server.ts`) so DigitalOcean deploys one
- * component instead of a separate MCP service.
+ * logic is embedded in the backend Next.js component at
+ * `backend/apps/server/app/mcp/route.ts`. The frontend is a separate
+ * DigitalOcean component; MCP is not deployed as a third service.
  */
 const config = z
   .object({

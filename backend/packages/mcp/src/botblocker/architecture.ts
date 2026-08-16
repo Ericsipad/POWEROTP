@@ -29,6 +29,19 @@ export function getBotBlockerArchitectureOverview() {
       "@powerotp/gate-node is the single server authority behind all three wrappers " +
       "(raw Node HTTP, Express, Next.js). Express and Next.js delegate to it rather than " +
       "reimplementing verification, session, or decision logic.",
+    runtimeOrigins: {
+      primary:
+        "Planned, not yet deployed: https://verify.powerotp.com is the Cloudflare Workers " +
+        "rapid-check origin adapters will contact first. Its short-lived edge intelligence " +
+        "covers at least the most recent 30 days of denylisted IP and fingerprint signals.",
+      authoritativeFallback:
+        "https://api.powerotp.com remains the authoritative backend and full-history master " +
+        "store. It is the fallback rapid-check origin when the Worker cannot be reached and " +
+        "owns control-plane, policy, and durable history APIs.",
+      deploymentBoundary:
+        "BOTBLOCKER_RUNTIME_ORIGIN is backend deployment configuration, not a customer " +
+        "application secret. Leave it unset until verify.powerotp.com is actually routed.",
+    },
     otpOpener:
       "gate.openOtp() takes no arguments — no OTP type, method, policy, or content. POWEROTP " +
       "resolves the authenticated site/session decision server-side and returns only short-lived " +
