@@ -191,21 +191,33 @@ Create permanent authenticated/rate-limited route handlers for:
 
 Unimplemented services return typed unavailable responses, never synthetic outcomes. The
 historical Phase 8 implementation left every route above at one fixed, unscoped global URL per
-operation; Phase 8A corrects that boundary.
+operation; Phase 8A must correct that boundary.
 
 ### Phase 8A — Site-scoped webhook endpoint routing
 
-Corrective phase: the routes above originally shared one fixed, unscoped global URL per
-operation, distinguished only by the Bearer site credential. Require a project-scoped
-`webhookId` path segment — generated automatically the moment a project is created, distinct
-from `siteId`, and not itself an authorization boundary — on every site-credential-authenticated
-runtime route (`rapid-auth`, `browser-assessment`, `risk-events`, `challenges` create/read/
-complete, `passports/register`, `passports/assert`, `paid-passes/assert`,
-`agent/entitlements`). A `webhookId` that does not resolve to a real, currently provisioned site
-returns a bare 404 before any body parsing or credential/idempotency work runs. `GET
-/v1/botblocker/policy/{siteId}` is unaffected: it is already scoped by the public `siteId` and
-has no credential to protect. See `docs/POWEROTP_BOTBLOCKER_PLAN.md`'s "Project-scoped webhook
-endpoint" section and `docs/THREAT_MODEL.md`'s "Site-scoped webhook endpoint routing" section.
+**Status: complete (2026-08-16).** The as-built entry records the focused corrections and the
+exact verification sequence, including the initial full-command failure and successful
+workspace-level corrections; it does not claim that failed command exited successfully.
+
+Replace the fixed runtime URLs with an immutable, cryptographically self-validating
+project/site-scoped endpoint token. Its HMAC binds format version, random endpoint ID, project
+ID, and site ID under a dedicated server secret. Reject malformed or forged tokens with a bare
+404 before Valkey, MongoDB, request-body parsing, credential authentication, nonce/idempotency,
+or business logic. Only a locally valid token may resolve its exact project/site record.
+
+Project creation must generate the project ID, project API key, BotBlocker site ID, endpoint
+token, independent webhook signing secret, encrypted signing-secret record, and required audit
+records in one MongoDB transaction. Any failure aborts the whole transaction; there is no
+cleanup-hook substitute and no migration/backfill because there are no production BotBlocker
+records.
+
+Initial runtime contact uses the site credential, creates the visitor session, and returns a
+30-minute token bound to project/site/session/audience. Every subsequent visitor report,
+challenge, Passport, paid-pass, or entitlement call uses that visitor token instead of the site
+credential. Inactive project/site readiness returns typed `offline`; adapters fail open, stop
+ordinary runtime calls while offline, and use bounded readiness polling. `offline` and
+`fail_open` remain lifecycle states, never decisions. `GET /v1/botblocker/policy/{siteId}` and
+dashboard/customer APIs retain their existing boundaries.
 
 ### Phase 9 — Framework-neutral browser gate
 

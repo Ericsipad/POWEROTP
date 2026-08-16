@@ -39,4 +39,5 @@ describe("Phase 8 BotBlocker HTTP responses", () => {
     assert.equal(response.status, 429);
     assert.equal(body.retryable, true);
   });
+
 });

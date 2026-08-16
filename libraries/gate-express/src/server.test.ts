@@ -25,6 +25,7 @@ import {
 } from "./index.js";
 
 const siteId = "site_1234567890123456";
+const webhookId = `bwh_${"A".repeat(120)}.${"B".repeat(43)}`;
 const audience = "https://customer.example";
 const siteCredential = "potp_bb_secret_that_stays_server_side_123456";
 const keyPair = generateKeyPairSync("ed25519");
@@ -336,6 +337,7 @@ function baseOptions(
 ): GateExpressOptions {
   return {
     siteId,
+    webhookId,
     audience,
     siteCredential,
     verificationKeys,

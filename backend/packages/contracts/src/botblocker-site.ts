@@ -10,7 +10,7 @@ import {
 /**
  * Customer-visible, project-scoped BotBlocker settings. Site credentials,
  * signing keys, and other server-only configuration are intentionally absent.
- * `webhookId` is the opaque path segment every runtime route requires (see
+ * `webhookId` is the immutable self-validating path token every runtime route requires (see
  * `BotBlockerWebhookIdSchema`); it is provisioned automatically the moment
  * the project exists and is safe to display to the customer immediately.
  */

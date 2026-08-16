@@ -72,6 +72,18 @@ test("browser bridge derives sensor sequence from trusted bootstrap and applies 
         sensorVersion: "sensor-v1",
         automationIndicators: ["webdriver"],
       },
+      pageView: {
+        durationMs: (reports[0] as {
+          evidence: { pageView: { durationMs: number } };
+        }).evidence.pageView.durationMs,
+        activeDurationMs: (reports[0] as {
+          evidence: { pageView: { activeDurationMs: number } };
+        }).evidence.pageView.activeDurationMs,
+        documentWidth: 1,
+        documentHeight: 1,
+        pointerHeatmap: { gridSize: 32, bins: [] },
+        navigationTargetPath: "/next",
+      },
     },
   });
   assert.ok(calls.every((call) => call.marker === "1"));

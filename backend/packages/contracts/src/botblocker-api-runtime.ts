@@ -15,6 +15,7 @@ import {
   SiteCredentialSchema,
   SiteIdSchema,
 } from "./botblocker.js";
+import { InitialBrowserProofEvidenceSchema } from "./botblocker-browser.js";
 
 const OpaqueIdSchema = z.string().min(16).max(128);
 const AudienceSchema = z.string().min(1).max(2_048);
@@ -27,6 +28,7 @@ export const BotBlockerRuntimeRequestEnvelopeSchema = z
   .object({
     protocolVersion: BotBlockerProtocolVersionSchema,
     siteId: SiteIdSchema,
+    gateSessionId: OpaqueIdSchema,
     audience: AudienceSchema,
     nonce: NonceSchema,
     issuedAt: z.number().int().positive(),
@@ -39,6 +41,7 @@ function runtimeRequest<T extends z.ZodType>(
 ): z.ZodObject<{
   protocolVersion: typeof BotBlockerProtocolVersionSchema;
   siteId: typeof SiteIdSchema;
+  gateSessionId: typeof OpaqueIdSchema;
   audience: typeof AudienceSchema;
   nonce: typeof NonceSchema;
   issuedAt: z.ZodNumber;
@@ -48,6 +51,7 @@ function runtimeRequest<T extends z.ZodType>(
     .object({
       protocolVersion: BotBlockerProtocolVersionSchema,
       siteId: SiteIdSchema,
+      gateSessionId: OpaqueIdSchema,
       audience: AudienceSchema,
       nonce: NonceSchema,
       issuedAt: z.number().int().positive(),
@@ -57,7 +61,11 @@ function runtimeRequest<T extends z.ZodType>(
 }
 
 export const RapidAuthPayloadSchema = z
-  .object({ request: RequestContextSchema })
+  .object({
+    gateSessionId: OpaqueIdSchema,
+    request: RequestContextSchema,
+    browser: InitialBrowserProofEvidenceSchema,
+  })
   .strict();
 export const RapidAuthRequestSchema = runtimeRequest(RapidAuthPayloadSchema).superRefine(
   (request, context) => {
@@ -66,6 +74,16 @@ export const RapidAuthRequestSchema = runtimeRequest(RapidAuthPayloadSchema).sup
         code: "custom",
         message: "Request context siteId must match the authenticated envelope",
         path: ["payload", "request", "siteId"],
+      });
+    }
+    if (
+      request.payload.gateSessionId !== request.gateSessionId ||
+      request.payload.browser.protocolVersion !== request.protocolVersion
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "Initial session scope must match the authenticated envelope",
+        path: ["payload"],
       });
     }
   },
@@ -77,7 +95,10 @@ export const BrowserAssessmentPayloadSchema = z
 export const BrowserAssessmentRequestSchema = runtimeRequest(
   BrowserAssessmentPayloadSchema,
 ).superRefine((request, context) => {
-  if (request.payload.report.protocolVersion !== request.protocolVersion) {
+  if (
+    request.payload.report.protocolVersion !== request.protocolVersion ||
+    request.payload.report.sequence.gateSessionId !== request.gateSessionId
+  ) {
     context.addIssue({
       code: "custom",
       message: "Behavior report protocolVersion must match the authenticated envelope",
@@ -93,7 +114,8 @@ export const RiskEventsRequestSchema = runtimeRequest(RiskEventsPayloadSchema).s
   (request, context) => {
     if (
       request.payload.batch.siteId !== request.siteId ||
-      request.payload.batch.protocolVersion !== request.protocolVersion
+      request.payload.batch.protocolVersion !== request.protocolVersion ||
+      request.payload.batch.sequence.gateSessionId !== request.gateSessionId
     ) {
       context.addIssue({
         code: "custom",

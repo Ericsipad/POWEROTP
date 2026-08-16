@@ -88,6 +88,12 @@ describe("public recommendation snapshots", () => {
         otpOpen: false,
       },
       {
+        lifecycle: "offline",
+        recommendation: "full_access",
+        decisionPending: false,
+        otpOpen: false,
+      },
+      {
         lifecycle: "observing",
         recommendation: "full_access",
         decision: "allow",

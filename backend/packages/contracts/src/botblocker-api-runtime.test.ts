@@ -22,6 +22,7 @@ const GATE_ID = "gate_0123456789abcdef";
 const base = {
   protocolVersion: 1,
   siteId: SITE_ID,
+  gateSessionId: GATE_ID,
   audience: "https://customer.example",
   nonce: "nonce_0123456789abcdef",
   issuedAt: NOW,
@@ -34,6 +35,7 @@ const evidence = {
   scroll: { smoothnessScore: 0.8, highSpeedEventCount: 0 },
   honeypotActivations: [],
 };
+const browser = { protocolVersion: 1, evidence, proofs: {} };
 const passport = {
   assertionId: "assertion_0123456789",
   siteId: SITE_ID,
@@ -58,7 +60,14 @@ describe("Phase 8 runtime route contracts", () => {
   it("accepts each runtime route payload in the common envelope", () => {
     const cases: Array<[unknown, { safeParse(value: unknown): { success: boolean } }]> = [
       [
-        { ...base, payload: { request: { siteId: SITE_ID, method: "GET", path: "/" } } },
+        {
+          ...base,
+          payload: {
+            gateSessionId: GATE_ID,
+            request: { siteId: SITE_ID, method: "GET", path: "/" },
+            browser,
+          },
+        },
         RapidAuthRequestSchema,
       ],
       [
@@ -129,6 +138,7 @@ describe("Phase 8 runtime route contracts", () => {
     for (const field of [
       "protocolVersion",
       "siteId",
+      "gateSessionId",
       "audience",
       "nonce",
       "issuedAt",
@@ -147,6 +157,8 @@ describe("Phase 8 runtime route contracts", () => {
       RapidAuthRequestSchema.safeParse({
         ...base,
         payload: {
+          gateSessionId: GATE_ID,
+          browser,
           request: {
             siteId: "site_other_012345678",
             method: "GET",

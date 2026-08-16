@@ -66,6 +66,8 @@ function dataDb() {
   const site: BotBlockerSiteDocument = {
     _id: SITE_ID,
     ...scope,
+    webhookId: `bwh_${"A".repeat(120)}.${"B".repeat(43)}`,
+    webhookSigningSecretEncrypted: "encrypted.secret.value",
     enabled: false,
     decisionTimeoutMs: 200,
     createdAt: new Date(NOW),

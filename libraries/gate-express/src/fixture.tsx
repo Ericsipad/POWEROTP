@@ -26,6 +26,7 @@ export function GateExpressReactFixture(
 
 export function createGateExpressFixture(options: {
   siteId: string;
+  webhookId: string;
   siteCredential: string;
   audience: string;
   verificationKeys: GateExpressOptions["verificationKeys"];

@@ -1,5 +1,6 @@
 import {
   BOTBLOCKER_PROTOCOL_VERSION,
+  BotBlockerOfflineResponseSchema,
   BotBlockerUnavailableResponseSchema,
   type BotBlockerUnavailableResponse,
   type DecisionRevisionEnvelope,
@@ -11,6 +12,7 @@ import { validateVerifiedDecision } from "@powerotp/gate-core";
 import {
   checkingSnapshot,
   failOpenSnapshot,
+  offlineSnapshot,
   retainsActiveOtp,
   unavailableSnapshot,
 } from "./advisory.js";
@@ -52,7 +54,9 @@ export function beginDecision(options: {
   save(): Promise<void>;
 }): Promise<DecisionServiceResult> {
   if (options.session.pendingDecision) return options.session.pendingDecision;
-  options.session.recommendation = checkingSnapshot(true, options.session.lastApplied);
+  if (options.session.recommendation?.lifecycle !== "offline") {
+    options.session.recommendation = checkingSnapshot(true, options.session.lastApplied);
+  }
   const timeout = setTimeout(() => {
     if (
       options.session.pendingDecision &&
@@ -75,6 +79,27 @@ export function beginDecision(options: {
       ),
     )
     .then(async (result): Promise<DecisionServiceResult> => {
+      if (result.status === "offline") {
+        const parsed = BotBlockerOfflineResponseSchema.safeParse(result);
+        if (!parsed.success) return UNAVAILABLE;
+        if (!retainsActiveOtp(options.session)) {
+          options.session.visitorToken = undefined;
+          options.session.offlineUntil = Date.now() + parsed.data.retryAfterMs;
+          options.session.recommendation = offlineSnapshot(options.session.lastApplied);
+        }
+        await options.save();
+        return parsed.data;
+      }
+      if (result.status === "ready") {
+        if (!isScopedVisitorToken(result.visitorToken)) return UNAVAILABLE;
+        options.session.visitorToken = result.visitorToken;
+        options.session.offlineUntil = undefined;
+        if (!retainsActiveOtp(options.session)) {
+          options.session.recommendation = unavailableSnapshot(options.session.lastApplied);
+        }
+        await options.save();
+        return result.decision;
+      }
       if (result.status === "decision") {
         if (!isScopedVisitorToken(result.visitorToken)) {
           if (!retainsActiveOtp(options.session)) {
@@ -85,6 +110,7 @@ export function beginDecision(options: {
         }
         const challenge = result.challenge ? normalizeChallenge(result.challenge) : undefined;
         options.session.visitorToken = result.visitorToken;
+        options.session.offlineUntil = undefined;
         options.session.latestDecision = result.candidate;
         options.session.latestClearance = result.clearance;
         if (challenge) {
@@ -109,7 +135,11 @@ export function beginDecision(options: {
     })
     .catch(async () => {
       if (!retainsActiveOtp(options.session)) {
-        options.session.recommendation = unavailableSnapshot(options.session.lastApplied);
+        if (options.session.recommendation?.lifecycle === "offline") {
+          options.session.offlineUntil = Date.now() + 30_000;
+        } else {
+          options.session.recommendation = unavailableSnapshot(options.session.lastApplied);
+        }
       }
       await options.save();
       return UNAVAILABLE;
@@ -154,6 +184,10 @@ export async function verifyDecisionForSession(options: {
 }
 
 export function safeDecisionResult(result: DecisionServiceResult): object {
+  if (result.status === "offline") {
+    const parsed = BotBlockerOfflineResponseSchema.safeParse(result);
+    return parsed.success ? parsed.data : UNAVAILABLE;
+  }
   if (result.status === "unavailable") {
     const parsed = BotBlockerUnavailableResponseSchema.safeParse(result);
     return parsed.success ? parsed.data : UNAVAILABLE;

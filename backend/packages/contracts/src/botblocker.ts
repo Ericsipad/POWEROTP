@@ -37,7 +37,7 @@ export const BotBlockerProtocolVersionSchema = z.literal(BOTBLOCKER_PROTOCOL_VER
  * (e.g. telling apart "older contracts build, still wire-compatible" from
  * a genuine protocol break); it never gates acceptance by itself.
  */
-export const BOTBLOCKER_CONTRACT_VERSION = "2026-08-15.1";
+export const BOTBLOCKER_CONTRACT_VERSION = "2026-08-16.1";
 export const BotBlockerContractVersionSchema = z.literal(BOTBLOCKER_CONTRACT_VERSION);
 
 // ---------------------------------------------------------------------------
@@ -76,19 +76,18 @@ export const SiteIdSchema = z.string().min(16).max(64);
 
 /**
  * The opaque, project-scoped URL segment every server-to-server BotBlocker
- * runtime route (rapid-auth, browser-assessment, risk-events, challenges,
- * passports, paid-passes, agent entitlements) requires in its path, e.g.
- * `POST /v1/botblocker/browser-assessment/{webhookId}`. It is distinct from
- * `SiteIdSchema`: `siteId` identifies the site for internal binding and may
- * be rotated independently, while `webhookId` exists solely so the server
- * can reject a request whose path does not resolve to a real, currently
- * provisioned site before running any credential/body parsing — cheap
- * defense against anonymous scanning of a fixed, unscoped global URL (see
- * `docs/THREAT_MODEL.md`'s "Site-scoped webhook endpoint routing"). Like
- * `siteId`, it authorizes nothing by itself; the Bearer site credential
- * remains the actual authentication boundary.
+ * runtime route requires in its path. The `bwh_<payload>.<hmac>` value is
+ * immutable and self-validating: its signed payload binds format version,
+ * random endpoint ID, project ID, and site ID. This lets the backend reject
+ * malformed or forged paths before Valkey, MongoDB, request-body, or
+ * credential work. It routes a request but does not replace the initial site
+ * credential or a subsequent scoped visitor-session token.
  */
-export const BotBlockerWebhookIdSchema = z.string().min(16).max(64);
+export const BotBlockerWebhookIdSchema = z
+  .string()
+  .min(120)
+  .max(512)
+  .regex(/^bwh_[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{43}$/);
 
 /**
  * The site credential is server-only and must never appear in browser
@@ -457,6 +456,16 @@ export const botBlockerUnavailableReasons = [
 ] as const;
 export const BotBlockerUnavailableReasonSchema = z.enum(botBlockerUnavailableReasons);
 
+/** Stable readiness response for an inactive project/site. Offline is a
+ * fail-open lifecycle state, never a third decision outcome. */
+export const BotBlockerOfflineResponseSchema = z
+  .object({
+    status: z.literal("offline"),
+    reason: z.literal("site_inactive"),
+    retryAfterMs: z.number().int().min(5_000).max(300_000),
+  })
+  .strict();
+
 /**
  * The one typed shape every not-yet-backed or currently-failing BotBlocker
  * route returns instead of a fabricated decision, score, or approval — see
@@ -543,5 +552,6 @@ export type BotBlockerDecisionOutcome = z.infer<typeof BotBlockerDecisionOutcome
 export type DecisionRevisionEnvelope = z.infer<typeof DecisionRevisionEnvelopeSchema>;
 export type BotBlockerUnavailableReason = z.infer<typeof BotBlockerUnavailableReasonSchema>;
 export type BotBlockerUnavailableResponse = z.infer<typeof BotBlockerUnavailableResponseSchema>;
+export type BotBlockerOfflineResponse = z.infer<typeof BotBlockerOfflineResponseSchema>;
 export type BotBlockerErrorCode = z.infer<typeof BotBlockerErrorCodeSchema>;
 export type BotBlockerErrorResponse = z.infer<typeof BotBlockerErrorResponseSchema>;

@@ -19,7 +19,7 @@ export type PowerOtpHandler = (
  * this module never blocks, redirects, or rewrites the wrapped handler's
  * request or response. Your handler decides whether and how to use it.
  *
- * POWEROTP_SITE_ID/POWEROTP_SITE_CREDENTIAL identify your project; generate
+ * POWEROTP_SITE_ID/POWEROTP_WEBHOOK_ID identify your endpoint. Generate
  * the credential from POST /v1/projects/{projectId}/botblocker/
  * rotate-site-credential.
  *
@@ -31,6 +31,7 @@ export type PowerOtpHandler = (
 export function createPowerOtpListener(handle: PowerOtpHandler) {
   return createPowerOtpRequestListener({
     siteId: process.env.POWEROTP_SITE_ID!,
+    webhookId: process.env.POWEROTP_WEBHOOK_ID!,
     siteCredential: process.env.POWEROTP_SITE_CREDENTIAL!,
     audience: process.env.POWEROTP_AUDIENCE ?? "https://your-app.example",
     verificationKeys: {
@@ -128,9 +129,10 @@ export function buildNodeHttpTemplate(packageVersion: string): AdapterTemplate {
         "server entry point, replacing the listener passed to http.createServer/createServer.",
       "3. Bundle public/powerotp-client.ts (or the equivalent inline logic) into pages you want " +
         "observed; call mountPowerOtp() once on page load.",
-      "4. Generate POWEROTP_SITE_CREDENTIAL via POST /v1/projects/{projectId}/botblocker/" +
-        "rotate-site-credential, generate POWEROTP_WEBHOOK_SIGNING_SECRET, and set them plus " +
-        "POWEROTP_SITE_ID and your verification key pair server-side; never in a browser " +
+      "4. Copy POWEROTP_SITE_ID, POWEROTP_WEBHOOK_ID, and the show-once " +
+        "POWEROTP_WEBHOOK_SIGNING_SECRET from the project creation response. Generate " +
+        "POWEROTP_SITE_CREDENTIAL via POST /v1/projects/{projectId}/botblocker/" +
+        "rotate-site-credential, then set all values and your verification key pair server-side; never in a browser " +
         "bundle. See get_botblocker_environment_variables for the full list and how to obtain " +
         "each value.",
     ],
@@ -154,12 +156,14 @@ export function buildNodeHttpTemplate(packageVersion: string): AdapterTemplate {
         "bypassing it is invisible to BotBlocker.",
       "Decisions publish fail-open (full access) state whenever a fresh decision cannot be " +
         "returned before decisionTimeoutMs elapses; this never overrides an active OTP challenge.",
+      "An inactive site publishes offline/full-access state, suppresses ordinary visitor calls, " +
+        "and performs at most one readiness retry per server-provided retry interval.",
     ],
     troubleshooting: [
       {
         symptom: "Every request reports status: \"unavailable\".",
         explanation:
-          "Confirm POWEROTP_SITE_ID/POWEROTP_SITE_CREDENTIAL are set and that the process can " +
+          "Confirm POWEROTP_SITE_ID/POWEROTP_WEBHOOK_ID/POWEROTP_SITE_CREDENTIAL are set and that the process can " +
           "reach node:crypto's createPublicKey without throwing (canonical base64, SPKI DER, " +
           "Ed25519 key type) for the required verificationKeys field.",
       },

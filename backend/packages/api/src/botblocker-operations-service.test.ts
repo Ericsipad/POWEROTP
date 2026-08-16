@@ -87,6 +87,8 @@ function fixture() {
       BOTBLOCKER_ED25519_ACTIVE_KEY_ID: "key_active",
       BOTBLOCKER_INTELLIGENCE_HASH_SECRET: "i".repeat(32),
       BOTBLOCKER_SITE_CREDENTIAL_HASH_SECRET: "h".repeat(32),
+      BOTBLOCKER_VISITOR_TOKEN_SECRET: "v".repeat(32),
+      BOTBLOCKER_WEBHOOK_ENDPOINT_SECRET: "w".repeat(32),
       BOTBLOCKER_RUNTIME_ORIGIN: "https://verify.powerotp.com",
     },
   );

@@ -617,13 +617,12 @@ and fingerprint data. `https://api.powerotp.com` owns authoritative full-history
 data and is the fallback rapid-check origin when the Worker is unavailable. Operator-only
 routes use the separately authenticated `/v1/control/botblocker/*` namespace on the backend.
 
-Every site-credential-authenticated runtime route below requires a project-scoped `webhookId`
-path segment, generated automatically the moment a project is created (see "Project-scoped
-webhook endpoint" below). A request whose `webhookId` does not resolve to a real, currently
-provisioned site is rejected with a bare 404 before any body parsing or credential check runs —
-this is a routing-level defense against anonymous traffic scanning a fixed, unscoped global URL,
-not a replacement for the Bearer site credential, which remains the actual authentication
-boundary. `GET /v1/botblocker/policy/{siteId}` is intentionally exempt: it is a public,
+Every visitor runtime route below requires an immutable, self-validating project-scoped
+`webhookId` path segment (see "Project-scoped webhook endpoint" below). Malformed or forged
+tokens receive a bare 404 before Valkey, MongoDB, body parsing, credential authentication,
+nonce/idempotency, or business logic. Initial RapidAuth uses the site credential; later
+per-visitor calls use only the returned scoped visitor token. `GET
+/v1/botblocker/policy/{siteId}` is intentionally exempt: it is a public,
 anonymous, cacheable read with no credential to protect, and already uses the low-privilege
 public `siteId` for the same routing purpose.
 
@@ -668,14 +667,19 @@ API call the customer's own backend makes directly (project configuration, crede
 visitor listing) is a different traffic class and stays protected by the existing customer
 session/CSRF/project-ownership boundary instead.
 
-- `webhookId` is generated automatically the moment a project is created — never something a
-  customer requests, and never left to be lazily created on first dashboard visit.
-- `webhookId` is distinct from `siteId`: `siteId` is the site's internal identity and may be
-  rotated independently; `webhookId` exists purely as a routing/rejection key so the server can
-  drop a request whose URL does not correspond to a real, currently provisioned project before
-  running any credential check or parsing any body. Both remain low-privilege values — neither
-  authorizes anything by itself, and the Bearer site credential remains the actual authentication
-  boundary for every mutation.
+- Project creation generates the project ID, project API key, BotBlocker site ID, endpoint ID,
+  independent webhook signing secret, encrypted signing-secret record, and required audits in
+  one MongoDB transaction. Any failure aborts the operation. There is no lazy site creation,
+  cleanup-hook pseudo-rollback, migration, or backfill.
+- The endpoint uses a strict `bwh_<signed-payload>.<hmac>` form. The payload contains format
+  version, a random endpoint ID, project ID, and site ID; a dedicated server-held HMAC secret
+  binds all four. Validation is constant-time after strict local syntax/length checks.
+- `webhookId` is immutable: it has no patch, rotation, or replacement API. It is safe to expose
+  in setup configuration because it routes requests but grants no visitor or customer authority.
+- Initial contact validates the path, resolves the exact project/site, confirms readiness,
+  authenticates the site credential, creates the visitor session, and returns a 30-minute token.
+  Every later report/challenge operation must present that token with matching
+  project/site/session/audience claims.
 - Because the platform's advisory model is fail-open by design (a decision timeout or unreachable
   backend never blocks the customer's site), an attacker who can cheaply flood a fixed global
   runtime URL gains a cheap way to degrade or bypass BotBlocker for every customer at once. Site
@@ -686,6 +690,9 @@ session/CSRF/project-ownership boundary instead.
 
 - RapidAuth failure or decision timeout publishes fail-open access state, while the original
   decision remains pending. The supported customer plugin maps that state to full access.
+- An inactive project/site returns typed `offline`. The adapter publishes fail-open/pass-through,
+  stops ordinary visitor reports and decisions, and performs only bounded readiness polling
+  until reactivation. `offline` is a lifecycle state, not an `allow` decision.
 - A locally valid unexpired clearance remains usable during control-plane failure.
 - An `otp` decision never changes customer UI automatically. The customer may call only the
   argument-free `gate.openOtp()` API; server-side site/session policy selects the OTP method

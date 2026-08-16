@@ -14,6 +14,7 @@ import { BotBlockerRuntimeSecurity } from "@powerotp/api/botblocker-runtime-secu
 import { BotBlockerSiteCredentialPersistence } from "@powerotp/api/botblocker-site-credential-persistence.js";
 import { BotBlockerSiteCredentialService } from "@powerotp/api/botblocker-site-credential-service.js";
 import { BotBlockerSiteService } from "@powerotp/api/botblocker-site-service.js";
+import { BotBlockerVisitorTokenService } from "@powerotp/api/botblocker-visitor-token.js";
 import {
   createBillingDailyChargeQueue,
   createBillingDailyChargeWorker,
@@ -49,6 +50,7 @@ export interface ServerContext {
   botBlockerSites: BotBlockerSiteService;
   botBlockerSiteCredentials: BotBlockerSiteCredentialService;
   botBlockerRuntimeSecurity: BotBlockerRuntimeSecurity;
+  botBlockerVisitorTokens: BotBlockerVisitorTokenService;
   botBlockerIngestion: BotBlockerIngestionService;
   botBlockerPolicy: BotBlockerPolicyService;
   botBlockerPolicyControl: BotBlockerPolicyControlService;
@@ -128,17 +130,19 @@ async function buildServerContext(): Promise<ServerContext> {
   const botBlockerSites = new BotBlockerSiteService(dataStores.db);
   const projects = new ProjectService(
     dataStores.db,
+    dataStores.client,
     config,
     verifications,
-    (customerId, projectId) => botBlockerSites.ensure(customerId, projectId),
   );
   const botBlockerSiteCredentials = new BotBlockerSiteCredentialService(
     dataStores.db,
     new BotBlockerSiteCredentialPersistence(dataStores.db, dataStores.client),
     config,
   );
+  const botBlockerVisitorTokens = new BotBlockerVisitorTokenService(config);
   const botBlockerRuntimeSecurity = new BotBlockerRuntimeSecurity(
     botBlockerSiteCredentials,
+    botBlockerVisitorTokens,
     dataStores.rateLimitStore,
     config,
   );
@@ -202,6 +206,7 @@ async function buildServerContext(): Promise<ServerContext> {
     botBlockerSites,
     botBlockerSiteCredentials,
     botBlockerRuntimeSecurity,
+    botBlockerVisitorTokens,
     botBlockerIngestion,
     botBlockerPolicy,
     botBlockerPolicyControl,

@@ -8,6 +8,7 @@ const keys = generateKeyPairSync("ed25519");
 
 export const powerOtp = createPowerOtpNext({
   siteId: "site_1234567890123456",
+  webhookId: `bwh_${"A".repeat(120)}.${"B".repeat(43)}`,
   siteCredential: "potp_bb_fixture_server_only_123456789",
   audience: "https://customer.example",
   verificationKeys: {

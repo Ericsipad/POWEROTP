@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 
 import {
   BehaviorReportSchema,
+  BotBlockerOfflineResponseSchema,
   BotBlockerUnavailableResponseSchema,
   InitialBrowserProofEvidenceSchema,
   OtpLaunchMetadataSchema,
@@ -9,6 +10,7 @@ import {
 
 import {
   allowSnapshot,
+  offlineSnapshot,
   otpSnapshot,
   retainsActiveOtp,
   verifiedSnapshot,
@@ -96,7 +98,11 @@ export async function handleBridge(
         options.session.latestClearance = undefined;
         await options.store.set(options.session);
       }
-      sendJson(response, result.status === "decision" ? 200 : 503, safeDecisionResult(result));
+      sendJson(
+        response,
+        result.status === "decision" || result.status === "offline" ? 200 : 503,
+        safeDecisionResult(result),
+      );
       return true;
     }
     if (path === "/_powerotp/decision/verify" && request.method === "POST") {
@@ -200,6 +206,15 @@ export async function handleBridge(
       const result = await Promise.resolve()
         .then(() => options.services.assessBrowser(parsed.data, authorization, options.session))
         .catch(() => UNAVAILABLE);
+      const offline = BotBlockerOfflineResponseSchema.safeParse(result);
+      if (offline.success && !retainsActiveOtp(options.session)) {
+        options.session.visitorToken = undefined;
+        options.session.offlineUntil = options.now() + offline.data.retryAfterMs;
+        options.session.recommendation = offlineSnapshot(
+          options.session.lastApplied,
+        );
+        await options.store.set(options.session);
+      }
       if (result.status === "decision") {
         options.session.latestDecision = result.candidate;
         if (result.challenge) {
@@ -210,7 +225,11 @@ export async function handleBridge(
         await options.store.set(options.session);
       }
       await issueClearance(result, response, options);
-      sendJson(response, result.status === "decision" ? 200 : 503, safeDecisionResult(result));
+      sendJson(
+        response,
+        result.status === "decision" || result.status === "offline" ? 200 : 503,
+        safeDecisionResult(result),
+      );
       return true;
     }
     if (path === "/_powerotp/challenge/status" && request.method === "GET") {

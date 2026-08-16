@@ -4,9 +4,11 @@ import {
   BotBlockerSiteCredentialError,
 } from "@powerotp/api/botblocker-errors.js";
 import type { AuthenticatedBotBlockerSite } from "@powerotp/api/botblocker-site-credential-service.js";
+import { withVerifiedBotBlockerWebhook } from "@powerotp/api/botblocker-webhook.js";
 import type {
   BotBlockerErrorCode,
   BotBlockerRuntimeRequestEnvelope,
+  RapidAuthRequest,
 } from "@powerotp/contracts";
 import { NextResponse, type NextRequest } from "next/server";
 import type { ZodType } from "zod";
@@ -41,17 +43,92 @@ export async function unavailableRuntimeMutation<
   );
 }
 
+export async function rapidAuthMutation(
+  request: NextRequest,
+  webhookId: string,
+  schema: ZodType<RapidAuthRequest>,
+  hooks: {
+    endpointSecret?: string;
+    loadContext?: () => Promise<ServerContext>;
+  } = {},
+): Promise<NextResponse> {
+  const preflight = verifyWebhookPath(webhookId, hooks.endpointSecret);
+  if (!preflight) return notFound();
+
+  const context = await (hooks.loadContext ?? getServerContext)();
+  const runtimeSite = await context.botBlockerSites.resolveRuntimeSite({
+    projectId: preflight.projectId,
+    siteId: preflight.siteId,
+    webhookId,
+  });
+  if (!runtimeSite) return notFound();
+  if (!runtimeSite.projectActive || !runtimeSite.enabled) return offline();
+
+  try {
+    await enforceRateLimit(
+      context.dataStores.rateLimitStore,
+      `rl:botblocker:rapid-auth:ip:${clientIp(request) ?? "unknown"}`,
+      120,
+      60,
+    );
+    const rawBody = await request.json();
+    const parsed = schema.safeParse(rawBody);
+    if (!parsed.success) return botBlockerError("invalid_request", 400);
+    const body: RapidAuthRequest = parsed.data;
+    const site = await context.botBlockerRuntimeSecurity.authorizeMutation({
+      authorizationHeader:
+        request.headers.get("authorization") ?? undefined,
+      requestOrigin: request.nextUrl.origin,
+      idempotencyKey:
+        request.headers.get("idempotency-key") ?? undefined,
+      operation: "rapid-auth",
+      authentication: "site_credential",
+      runtimeSite,
+      body,
+      rawBody,
+    });
+    await enforceRateLimit(
+      context.dataStores.rateLimitStore,
+      `rl:botblocker:rapid-auth:site:${site.siteId}`,
+      600,
+      60,
+    );
+    await context.botBlockerIngestion.startSession({
+      scope: {
+        customerId: site.customerId,
+        projectId: site.projectId,
+        siteId: site.siteId,
+      },
+      gateSessionId: body.gateSessionId,
+      evidence: body.payload.browser.evidence,
+      ...(clientIp(request) ? { trustedClientIp: clientIp(request) } : {}),
+    });
+    const issued = context.botBlockerVisitorTokens.issue({
+      projectId: site.projectId,
+      siteId: site.siteId,
+      gateSessionId: body.gateSessionId,
+      audience: body.audience,
+    });
+    return NextResponse.json({
+      status: "ready",
+      visitorToken: issued.token,
+      expiresAt: issued.claims.expiresAt,
+      decision: {
+        status: "unavailable",
+        reason: "not_implemented",
+        retryable: false,
+      },
+    });
+  } catch (error) {
+    return mapBotBlockerRuntimeError(error);
+  }
+}
+
 /**
- * Every site-credential-authenticated runtime mutation is reached only
- * through its project-scoped `webhookId` URL segment, resolved and checked
- * for existence *before* any body parsing or credential/idempotency work —
- * see `docs/THREAT_MODEL.md`'s "Site-scoped webhook endpoint routing". A
- * `webhookId` that does not resolve to a real site returns a bare 404
- * immediately; it never reaches `BotBlockerRuntimeSecurity`. Once resolved,
- * the existing Bearer site-credential/envelope authentication still runs in
- * full, and the authenticated credential's own site must additionally match
- * the site the URL resolved to — a stolen/reused credential for a different
- * project cannot be replayed against this project's webhook URL.
+ * Subsequent visitor mutations first verify the immutable endpoint token
+ * locally, before loading any shared service. Only then may the exact signed
+ * project/site scope resolve, the body parse, and the scoped visitor token,
+ * rate limits, replay controls, or business logic run.
  */
 export async function runtimeMutation<
   T extends BotBlockerRuntimeRequestEnvelope,
@@ -66,9 +143,24 @@ export async function runtimeMutation<
     context: ServerContext,
   ) => Promise<void>,
   expectedChallengeId?: string,
+  hooks: {
+    endpointSecret?: string;
+    loadContext?: () => Promise<ServerContext>;
+  } = {},
 ): Promise<NextResponse> {
-  const context = await getServerContext();
-  const { botBlockerSites, botBlockerRuntimeSecurity, dataStores } = context;
+  const preflight = verifyWebhookPath(webhookId, hooks.endpointSecret);
+  if (!preflight) return notFound();
+
+  const context = await (hooks.loadContext ?? getServerContext)();
+  const { botBlockerRuntimeSecurity, dataStores } = context;
+  const runtimeSite = await context.botBlockerSites.resolveRuntimeSite({
+    projectId: preflight.projectId,
+    siteId: preflight.siteId,
+    webhookId,
+  });
+  if (!runtimeSite) return notFound();
+  if (!runtimeSite.projectActive || !runtimeSite.enabled) return offline();
+
   try {
     await enforceRateLimit(
       dataStores.rateLimitStore,
@@ -76,9 +168,6 @@ export async function runtimeMutation<
       120,
       60,
     );
-    const webhookSite = await botBlockerSites.findByWebhookId(webhookId);
-    if (!webhookSite) return notFound();
-
     const body = await request.json();
     const parsed = schema.safeParse(body);
     if (!parsed.success) return botBlockerError("invalid_request", 400);
@@ -98,12 +187,11 @@ export async function runtimeMutation<
       idempotencyKey:
         request.headers.get("idempotency-key") ?? undefined,
       operation,
+      authentication: "visitor_token",
+      runtimeSite,
       body: envelope,
       rawBody: body,
     });
-    if (site.siteId !== webhookSite._id) {
-      return botBlockerError("audience_mismatch", 403);
-    }
     await enforceRateLimit(
       dataStores.rateLimitStore,
       `rl:botblocker:${operation}:site:${site.siteId}`,
@@ -122,14 +210,26 @@ export async function unavailableChallengeRead(
   webhookId: string,
   challengeId: string,
 ): Promise<NextResponse> {
+  const preflight = verifyWebhookPath(webhookId);
+  if (!preflight) return notFound();
+
   const envelope = {
     siteId: request.headers.get("x-botblocker-site-id") ?? "",
+    gateSessionId:
+      request.headers.get("x-botblocker-gate-session-id") ?? "",
     audience: request.headers.get("x-botblocker-audience") ?? "",
     nonce: request.headers.get("x-botblocker-nonce") ?? "",
     issuedAt: Number(request.headers.get("x-botblocker-issued-at")),
   };
   const { botBlockerSites, botBlockerRuntimeSecurity, dataStores } =
     await getServerContext();
+  const runtimeSite = await botBlockerSites.resolveRuntimeSite({
+    projectId: preflight.projectId,
+    siteId: preflight.siteId,
+    webhookId,
+  });
+  if (!runtimeSite) return notFound();
+  if (!runtimeSite.projectActive || !runtimeSite.enabled) return offline();
   try {
     await enforceRateLimit(
       dataStores.rateLimitStore,
@@ -137,20 +237,16 @@ export async function unavailableChallengeRead(
       300,
       60,
     );
-    const webhookSite = await botBlockerSites.findByWebhookId(webhookId);
-    if (!webhookSite) return notFound();
     if (challengeId.length < 16) {
       return botBlockerError("invalid_request", 400);
     }
-    const site = await botBlockerRuntimeSecurity.authorizeRead({
+    await botBlockerRuntimeSecurity.authorizeRead({
       authorizationHeader:
         request.headers.get("authorization") ?? undefined,
       requestOrigin: request.nextUrl.origin,
+      runtimeSite,
       body: envelope,
     });
-    if (site.siteId !== webhookSite._id) {
-      return botBlockerError("audience_mismatch", 403);
-    }
     return botBlockerUnavailable("not_implemented", false);
   } catch (error) {
     return mapBotBlockerRuntimeError(error);
@@ -162,6 +258,28 @@ function notFound(): NextResponse {
     status: 404,
     headers: { "cache-control": "no-store" },
   });
+}
+
+function verifyWebhookPath(webhookId: string, secret?: string) {
+  return withVerifiedBotBlockerWebhook(
+    webhookId,
+    secret ?? process.env.BOTBLOCKER_WEBHOOK_ENDPOINT_SECRET,
+    (claims) => claims,
+  );
+}
+
+function offline(): NextResponse {
+  return NextResponse.json(
+    {
+      status: "offline",
+      reason: "site_inactive",
+      retryAfterMs: 30_000,
+    },
+    {
+      status: 200,
+      headers: { "cache-control": "no-store" },
+    },
+  );
 }
 
 function mapBotBlockerRuntimeError(error: unknown): NextResponse {

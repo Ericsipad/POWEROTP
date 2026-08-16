@@ -1,6 +1,9 @@
 import { z } from "zod";
 
-import { ProjectSchema } from "./projects.js";
+import {
+  BotBlockerProjectSetupSchema,
+  ProjectSchema,
+} from "./projects.js";
 
 export const EmailSchema = z.string().trim().toLowerCase().email().max(254);
 export const PasswordSchema = z
@@ -52,6 +55,7 @@ export const SignupResponseSchema = z.object({
   status: z.enum(["verification_email_queued", "already_registered"]),
   project: ProjectSchema.optional(),
   apiKey: z.string().optional(),
+  botBlocker: BotBlockerProjectSetupSchema.optional(),
 });
 
 export const CustomerLoginSchema = z.object({

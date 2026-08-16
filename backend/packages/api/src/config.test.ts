@@ -68,6 +68,8 @@ describe("loadConfig", () => {
         BOTBLOCKER_ED25519_PREVIOUS_VERIFY_UNTIL_MS: "",
         BOTBLOCKER_ED25519_REVOKED_KEY_IDS: "",
         BOTBLOCKER_SITE_CREDENTIAL_HASH_SECRET: "",
+        BOTBLOCKER_WEBHOOK_ENDPOINT_SECRET: "",
+        BOTBLOCKER_VISITOR_TOKEN_SECRET: "",
         BOTBLOCKER_INTELLIGENCE_HASH_SECRET: "",
         BOTBLOCKER_RUNTIME_ORIGIN: "",
       }),
@@ -148,12 +150,26 @@ describe("loadConfig", () => {
     assert.throws(() =>
       loadConfig({
         ...requiredEnv,
+        BOTBLOCKER_WEBHOOK_ENDPOINT_SECRET: "short",
+      }),
+    );
+    assert.throws(() =>
+      loadConfig({
+        ...requiredEnv,
+        BOTBLOCKER_VISITOR_TOKEN_SECRET: "short",
+      }),
+    );
+    assert.throws(() =>
+      loadConfig({
+        ...requiredEnv,
         BOTBLOCKER_RUNTIME_ORIGIN: "http://verify.powerotp.com",
       }),
     );
     const configuration = loadConfig({
       ...requiredEnv,
       BOTBLOCKER_SITE_CREDENTIAL_HASH_SECRET: "h".repeat(32),
+      BOTBLOCKER_WEBHOOK_ENDPOINT_SECRET: "w".repeat(32),
+      BOTBLOCKER_VISITOR_TOKEN_SECRET: "v".repeat(32),
       BOTBLOCKER_INTELLIGENCE_HASH_SECRET: "i".repeat(32),
       BOTBLOCKER_RUNTIME_ORIGIN: "https://verify.powerotp.com",
     });

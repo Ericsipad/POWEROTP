@@ -40,6 +40,8 @@ export class BotBlockerOperationsService {
       | "BOTBLOCKER_ED25519_ACTIVE_KEY_ID"
       | "BOTBLOCKER_INTELLIGENCE_HASH_SECRET"
       | "BOTBLOCKER_SITE_CREDENTIAL_HASH_SECRET"
+      | "BOTBLOCKER_VISITOR_TOKEN_SECRET"
+      | "BOTBLOCKER_WEBHOOK_ENDPOINT_SECRET"
       | "BOTBLOCKER_RUNTIME_ORIGIN"
     >,
   ) {
@@ -140,6 +142,8 @@ export class BotBlockerOperationsService {
     ]);
     const credentialAuthentication = Boolean(
       this.config.BOTBLOCKER_SITE_CREDENTIAL_HASH_SECRET &&
+        this.config.BOTBLOCKER_VISITOR_TOKEN_SECRET &&
+        this.config.BOTBLOCKER_WEBHOOK_ENDPOINT_SECRET &&
         this.config.BOTBLOCKER_RUNTIME_ORIGIN,
     );
     const policySigning = Boolean(

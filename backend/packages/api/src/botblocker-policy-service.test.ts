@@ -65,6 +65,8 @@ function fakePersistence() {
     _id: SITE_ID,
     customerId: "usr_0123456789abcdef",
     projectId: "prj_0123456789abcdef",
+    webhookId: `bwh_${"A".repeat(120)}.${"B".repeat(43)}`,
+    webhookSigningSecretEncrypted: "encrypted.secret.value",
     enabled: true,
     decisionTimeoutMs: 200,
     createdAt: new Date(NOW),

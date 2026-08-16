@@ -16,7 +16,7 @@ import {
 const validConfiguration: BotBlockerSiteConfiguration = {
   siteId: "bbs_1234567890123456",
   projectId: "prj_1234567890123456",
-  webhookId: "bwh_1234567890123456",
+  webhookId: `bwh_${"A".repeat(120)}.${"B".repeat(43)}`,
   enabled: false,
   decisionTimeoutMs: BOTBLOCKER_TIMEOUT_DEFAULT_MS,
   createdAt: "2026-08-13T00:00:00.000Z",
@@ -64,6 +64,12 @@ describe("BotBlocker site configuration contracts", () => {
     assert.equal(UpdateBotBlockerSiteConfigurationSchema.safeParse({}).success, false);
     assert.equal(
       UpdateBotBlockerSiteConfigurationSchema.safeParse({ active: true }).success,
+      false,
+    );
+    assert.equal(
+      UpdateBotBlockerSiteConfigurationSchema.safeParse({
+        webhookId: validConfiguration.webhookId,
+      }).success,
       false,
     );
   });

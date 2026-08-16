@@ -19,10 +19,18 @@ export const BOTBLOCKER_ENV_VARS: readonly PowerOtpEnvVar[] = [
       "it authorizes nothing by itself.",
   },
   {
+    name: "POWEROTP_WEBHOOK_ID",
+    required: true,
+    description:
+      "Immutable self-validating endpoint identifier returned in the one-time project creation " +
+      "setup response. Safe in server configuration and URLs; it routes requests but does not " +
+      "replace the site credential or scoped visitor token.",
+  },
+  {
     name: "POWEROTP_SITE_CREDENTIAL",
     required: true,
     description:
-      "Server-only project API key. Generate it (and rotate it any time) with " +
+      "Server-only site credential. Generate it (and rotate it any time) with " +
       "POST /v1/projects/{projectId}/botblocker/rotate-site-credential, which returns the raw " +
       "value exactly once. Used by the adapter to authenticate server-to-server and request a " +
       "scoped visitor session token; never resent afterward, never sent to a browser, and " +
@@ -39,8 +47,8 @@ export const BOTBLOCKER_ENV_VARS: readonly PowerOtpEnvVar[] = [
     name: "POWEROTP_WEBHOOK_SIGNING_SECRET",
     required: true,
     description:
-      "Independent 256-bit secret, generated per project and shown once at rotation, with " +
-      "overlap support for replacement. Verifies the signed timestamp and body of the " +
+      "Independent 256-bit secret returned exactly once in the atomic project creation setup " +
+      "response and stored encrypted by PowerOTP. Verifies the signed timestamp and body of the " +
       "challenge-status callback POWEROTP sends to /_powerotp/webhooks/challenge-status, using " +
       "the same powerotp-signature: t=<unix-ms>,v1=<base64url HMAC-SHA256 of `${t}.${rawBody}`> " +
       "header scheme as other PowerOTP callbacks. Verify the signature and a recent timestamp " +

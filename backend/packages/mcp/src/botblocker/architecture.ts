@@ -13,12 +13,13 @@ export function getBotBlockerArchitectureOverview() {
     backendDecisions: {
       only: ["allow", "otp"] as const,
       note:
-        "Exactly two backend decisions exist. `checking`, `fail_open`, `unavailable`, and " +
+        "Exactly two backend decisions exist. `checking`, `fail_open`, `offline`, `unavailable`, and " +
         "`observing` are lifecycle states, never a third decision.",
     },
     lifecycleToRecommendation: {
       checking: "restricted",
       fail_open: "full_access",
+      offline: "full_access",
       unavailable: "full_access",
       allow: "full_access",
       otp: "otp_required",
@@ -59,8 +60,12 @@ export function getBotBlockerArchitectureOverview() {
 export function getBotBlockerDataBoundary() {
   return {
     credentialBoundary: {
+      webhookEndpoint:
+        "An immutable self-validating endpoint identifier returned at project creation. Its " +
+        "server-verified HMAC binds version, endpoint, project, and site before any shared-state " +
+        "lookup. It is configuration, not an authentication credential.",
       siteCredential:
-        "Server-only project API key (`potp_bb_*`), shown once at rotation " +
+        "Server-only site API credential (`potp_bb_*`), shown once at rotation " +
         "(POST /v1/projects/{projectId}/botblocker/rotate-site-credential), stored only hashed " +
         "thereafter. Used once per new visitor for first-contact session creation. Never sent " +
         "to a browser, logged, placed in a URL, or accepted as an MCP tool argument.",
@@ -69,7 +74,8 @@ export function getBotBlockerDataBoundary() {
         "in the server-side gate session. Every later per-visitor call (assessment, challenge " +
         "launch, polling) forwards only this token — the site credential is never resent.",
       webhookSigningSecret:
-        "Independent 256-bit secret per project, shown once at rotation. Verifies the signed " +
+        "Independent 256-bit secret per project, shown once in the atomic project creation response " +
+        "and stored encrypted at rest. Verifies the signed " +
         "timestamp and body of the challenge-status callback sent to " +
         "/_powerotp/webhooks/challenge-status before your server trusts it.",
       returningVisitorInstantAllowCookie:

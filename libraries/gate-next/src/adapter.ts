@@ -133,7 +133,7 @@ function isAdvisoryRequestState(value: unknown): value is AdvisoryRequestState {
   }
   if (
     state.advisory !== true ||
-    !["checking", "clearance", "fail_open", "allow", "otp", "unavailable"].includes(
+    !["checking", "clearance", "fail_open", "offline", "allow", "otp", "unavailable"].includes(
       String(state.status),
     ) ||
     !isRecommendation(state.recommendation)
@@ -147,7 +147,7 @@ function isRecommendation(value: unknown): boolean {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const snapshot = value as Record<string, unknown>;
   return (
-    ["checking", "fail_open", "unavailable", "observing", "otp_required", "verified"].includes(
+    ["checking", "fail_open", "offline", "unavailable", "observing", "otp_required", "verified"].includes(
       String(snapshot.lifecycle),
     ) &&
     ["restricted", "full_access", "otp_required"].includes(String(snapshot.recommendation)) &&

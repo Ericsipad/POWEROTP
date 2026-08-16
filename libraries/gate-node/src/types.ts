@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 
 import type {
   BehaviorReport,
+  BotBlockerOfflineResponse,
   BotBlockerUnavailableResponse,
   DecisionRevisionEnvelope,
   GateRecommendationSnapshot,
@@ -33,6 +34,7 @@ export interface GateSession {
   pendingDecision?: Promise<DecisionServiceResult>;
   initialBrowser?: InitialBrowserProofEvidence;
   visitorToken?: string;
+  offlineUntil?: number;
   recommendation?: GateRecommendationSnapshot;
   clearanceVerified?: boolean;
   latestDecision?: unknown;
@@ -55,15 +57,24 @@ export interface DecisionResult {
 
 export type DecisionServiceResult =
   | DecisionResult
-  | BotBlockerUnavailableResponse;
+  | BotBlockerUnavailableResponse
+  | BotBlockerOfflineResponse;
 
 export interface InitialDecisionResult extends DecisionResult {
   visitorToken: string;
 }
 
+export interface InitialSessionReadyResult {
+  status: "ready";
+  visitorToken: string;
+  decision: BotBlockerUnavailableResponse;
+}
+
 export type InitialDecisionServiceResult =
   | InitialDecisionResult
-  | BotBlockerUnavailableResponse;
+  | InitialSessionReadyResult
+  | BotBlockerUnavailableResponse
+  | BotBlockerOfflineResponse;
 
 export interface InitialDecisionRequest {
   siteCredential: string;
@@ -92,12 +103,16 @@ export interface GateNodeServices {
   launchChallenge(
     authorization: ScopedVisitorAuthorization,
     session: Readonly<GateSession>,
-  ): Promise<ChallengeMetadata | BotBlockerUnavailableResponse>;
+  ): Promise<
+    ChallengeMetadata | BotBlockerUnavailableResponse | BotBlockerOfflineResponse
+  >;
   pollChallenge(
     challenge: ChallengeMetadata,
     authorization: ScopedVisitorAuthorization,
     session: Readonly<GateSession>,
-  ): Promise<AuthoritativeGateStatus | BotBlockerUnavailableResponse>;
+  ): Promise<
+    AuthoritativeGateStatus | BotBlockerUnavailableResponse | BotBlockerOfflineResponse
+  >;
 }
 
 export interface TrustedProxyConfig {
@@ -127,7 +142,7 @@ export type AdvisoryRequestState =
     }
   | {
       advisory: true;
-      status: "checking" | "clearance" | "fail_open" | "allow" | "otp" | "unavailable";
+      status: "checking" | "clearance" | "fail_open" | "offline" | "allow" | "otp" | "unavailable";
       sessionId?: string;
       recommendation: GateRecommendationSnapshot;
     };
@@ -140,6 +155,7 @@ export type AdvisoryRouteHandler = (
 
 export interface GateNodeOptions {
   siteId: string;
+  webhookId: string;
   siteCredential: string;
   audience: string;
   verificationKeys: BotBlockerVerificationKeySet;

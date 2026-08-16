@@ -5,6 +5,7 @@ import type { GateNodeServices } from "./types.js";
 
 export function createGateNodeFixture(options: {
   siteId: string;
+  webhookId: string;
   siteCredential: string;
   audience: string;
   verificationKeys: BotBlockerVerificationKeySet;

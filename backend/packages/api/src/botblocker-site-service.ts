@@ -1,7 +1,6 @@
-import {
-  DEFAULT_BOTBLOCKER_SITE_CONFIGURATION,
-  type BotBlockerSiteConfiguration,
-  type UpdateBotBlockerSiteConfiguration,
+import type {
+  BotBlockerSiteConfiguration,
+  UpdateBotBlockerSiteConfiguration,
 } from "@powerotp/contracts";
 import type { Db } from "mongodb";
 
@@ -12,6 +11,16 @@ import type {
 } from "./persistence.js";
 import { ProjectError } from "./project-service.js";
 import { createId } from "./security.js";
+
+export interface RuntimeBotBlockerSite {
+  customerId: string;
+  projectId: string;
+  siteId: string;
+  webhookId: string;
+  enabled: boolean;
+  projectActive: boolean;
+  allowedOrigins: string[];
+}
 
 export class BotBlockerSiteService {
   readonly #sites;
@@ -29,49 +38,36 @@ export class BotBlockerSiteService {
     projectId: string,
   ): Promise<BotBlockerSiteConfiguration> {
     await this.#assertOwned(customerId, projectId);
-    return this.ensure(customerId, projectId);
-  }
-
-  /**
-   * Idempotently provisions the durable site row (and its `webhookId`)
-   * without an ownership check, so it can be called during project
-   * creation before any customer session context exists. Safe to call
-   * repeatedly — later calls return the same row unchanged. Customer-facing
-   * reads must go through `get()`, which enforces ownership first.
-   */
-  async ensure(
-    customerId: string,
-    projectId: string,
-  ): Promise<BotBlockerSiteConfiguration> {
-    const now = new Date();
-    const site = await this.#sites.findOneAndUpdate(
-      { projectId, customerId },
-      {
-        $setOnInsert: {
-          _id: createId("bbs"),
-          projectId,
-          customerId,
-          webhookId: createId("bwh"),
-          ...DEFAULT_BOTBLOCKER_SITE_CONFIGURATION,
-          createdAt: now,
-          updatedAt: now,
-        },
-      },
-      { upsert: true, returnDocument: "after" },
-    );
-    if (!site) throw new Error("BotBlocker site upsert returned no document");
+    const site = await this.#sites.findOne({ projectId, customerId });
+    if (!site) throw new ProjectError("botblocker_site_not_found", 404);
     return toResponse(site);
   }
 
-  /**
-   * Anonymous, project-scoped resolution for the runtime routes' URL
-   * `webhookId` segment. Never used for authorization by itself — see
-   * `BotBlockerWebhookIdSchema`'s doc comment — only to reject a request
-   * whose path doesn't correspond to a real site before running any
-   * credential/body auth.
-   */
-  findByWebhookId(webhookId: string) {
-    return this.#sites.findOne({ webhookId });
+  async resolveRuntimeSite(scope: {
+    projectId: string;
+    siteId: string;
+    webhookId: string;
+  }): Promise<RuntimeBotBlockerSite | undefined> {
+    const site = await this.#sites.findOne({
+      _id: scope.siteId,
+      projectId: scope.projectId,
+      webhookId: scope.webhookId,
+    });
+    if (!site) return undefined;
+    const project = await this.#projects.findOne({
+      _id: scope.projectId,
+      customerId: site.customerId,
+    });
+    if (!project) return undefined;
+    return {
+      customerId: site.customerId,
+      projectId: project._id,
+      siteId: site._id,
+      webhookId: site.webhookId,
+      enabled: site.enabled,
+      projectActive: project.active,
+      allowedOrigins: project.allowedOrigins,
+    };
   }
 
   async update(

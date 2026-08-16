@@ -40,6 +40,7 @@ export const GateRecommendationSchema = z.enum(gateRecommendationValues);
 export const gateLifecycleValues = [
   "checking",
   "fail_open",
+  "offline",
   "observing",
   "otp_required",
   "verified",
@@ -72,6 +73,12 @@ export const GateRecommendationSnapshotSchema = z.discriminatedUnion("lifecycle"
   z.object({
     ...snapshotCommon,
     lifecycle: z.literal("unavailable"),
+    recommendation: z.literal("full_access"),
+    otpOpen: z.literal(false),
+  }).strict(),
+  z.object({
+    ...snapshotCommon,
+    lifecycle: z.literal("offline"),
     recommendation: z.literal("full_access"),
     otpOpen: z.literal(false),
   }).strict(),

@@ -53,6 +53,7 @@ export const POST = apiRoute(async (request) => {
     status: "verification_email_queued",
     project: created.project,
     apiKey: created.apiKey,
+    botBlocker: created.botBlocker,
   };
   const response = NextResponse.json(body, { status: 201 });
   response.headers.set("cache-control", "no-store");

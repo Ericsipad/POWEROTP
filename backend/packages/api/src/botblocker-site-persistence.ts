@@ -4,10 +4,10 @@ export interface BotBlockerSiteDocument {
   _id: string;
   projectId: string;
   customerId: string;
-  /** Opaque, project-scoped URL segment for every runtime route (see
-   * `BotBlockerWebhookIdSchema`). Independent from `_id`/`siteId` so it can
-   * be rotated later without changing the site's internal identity. */
+  /** Immutable, self-validating project/site-scoped runtime endpoint token. */
   webhookId: string;
+  /** Independent callback-signing secret, authenticated-encrypted at rest. */
+  webhookSigningSecretEncrypted: string;
   enabled: boolean;
   decisionTimeoutMs: number;
   /** Atomic monotonic publication head. Releases remain append-only; this

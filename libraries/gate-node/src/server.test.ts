@@ -15,6 +15,7 @@ import { createMemoryGateSessionStore } from "./session.js";
 import type { GateNodeOptions, GateSession } from "./types.js";
 
 const siteId = "site_1234567890123456";
+const webhookId = `bwh_${"A".repeat(120)}.${"B".repeat(43)}`;
 const audience = "https://customer.example";
 const siteCredential = "potp_bb_secret_that_stays_server_side_123456";
 const visitorToken = "visitor_token_server_only_12345678901234567890";
@@ -620,6 +621,7 @@ test("trusted proxy configuration cannot trust all callers", () => {
     () =>
       createPowerOtpServer({
         siteId,
+        webhookId,
         audience,
         siteCredential,
         verificationKeys,
@@ -780,6 +782,7 @@ test("an active OTP challenge overrides an earlier valid clearance", async () =>
 test("minimal raw Node fixture runs without fabricated decisions", async () => {
   const server = createGateNodeFixture({
     siteId,
+    webhookId,
     audience,
     siteCredential,
     verificationKeys,
@@ -798,6 +801,7 @@ test("minimal raw Node fixture runs without fabricated decisions", async () => {
 async function start(overrides: Partial<GateNodeOptions> = {}) {
   const server = createPowerOtpServer({
     siteId,
+    webhookId,
     audience,
     siteCredential,
     verificationKeys,

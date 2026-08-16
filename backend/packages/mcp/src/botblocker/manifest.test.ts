@@ -86,16 +86,18 @@ describe("BotBlocker MCP manifests", () => {
         );
         assert.ok(
           requiredNames.includes("POWEROTP_SITE_ID") &&
+            requiredNames.includes("POWEROTP_WEBHOOK_ID") &&
             requiredNames.includes("POWEROTP_SITE_CREDENTIAL") &&
             requiredNames.includes("POWEROTP_AUDIENCE"),
           "expected every active integration env var name to appear",
         );
       });
 
-      it("instructs the customer to generate the webhook signing secret", () => {
+      it("instructs the customer to copy atomic project setup values", () => {
         const manifest = buildBotBlockerManifest(adapter);
         const combined = manifest.placementSteps.join("\n");
         assert.match(combined, /POWEROTP_WEBHOOK_SIGNING_SECRET/);
+        assert.match(combined, /project creation response/);
       });
 
       it("does not fabricate a webhook receiver route no adapter implements", () => {

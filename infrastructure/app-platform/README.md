@@ -67,6 +67,12 @@ repository `.env` file.
   are deliberately provisioned; at least 32 random characters and independent from
   `API_KEY_HASH_SECRET` and every OTP/signing secret. It keys hashes of server-only
   `potp_bb_*` site credentials.
+- `BOTBLOCKER_WEBHOOK_ENDPOINT_SECRET`: optional until project-scoped BotBlocker runtime
+  routing is activated; at least 32 random characters and dedicated only to immutable endpoint
+  token HMACs. Do not reuse an API-key, credential, callback, visitor-token, or signing secret.
+- `BOTBLOCKER_VISITOR_TOKEN_SECRET`: optional until BotBlocker visitor sessions are activated;
+  at least 32 random characters and dedicated only to 30-minute project/site/session/audience
+  tokens. Do not reuse `BOTBLOCKER_WEBHOOK_ENDPOINT_SECRET` or any other secret.
 - `BOTBLOCKER_RUNTIME_ORIGIN`: optional exact HTTPS origin for the runtime API. The
   planned primary public origin is `https://verify.powerotp.com`; leave it unset until
   the Cloudflare Worker is deployed. The Worker will retain at least 30 days of current

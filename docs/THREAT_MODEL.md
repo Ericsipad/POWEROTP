@@ -408,18 +408,23 @@ block the customer's site — an attacker who can cheaply flood a fixed global r
 correspondingly cheap way to degrade rate limits, database capacity, or availability shared
 across every customer at once, without needing to know any customer's credential first.
 
-- Every route above now requires a project-scoped `webhookId` path segment, generated
-  automatically at project creation (never lazily, never customer-requested) and distinct from
-  `siteId`. Like `siteId`, `webhookId` authorizes nothing by itself and may appear in
-  non-secret configuration; the Bearer site credential remains the sole authentication boundary
-  for the request.
-- The server resolves `webhookId` to a real site *before* parsing the request body or running
-  any credential/idempotency/nonce work, and returns a bare 404 immediately if it does not
-  resolve — the cheapest possible rejection for anonymous scanning traffic that does not know a
-  specific project's URL.
-- Once resolved, the existing Bearer-authenticated site must match the site the URL resolved to;
-  a mismatch (a credential valid for a different project replayed against this project's
-  webhook URL) is rejected as `audience_mismatch`, never silently accepted.
+- Project creation generates the project/API key/site/endpoint/signing secret/audits in one
+  MongoDB transaction. The signing secret is independently random and encrypted at rest. Any
+  failed write aborts the transaction; no cleanup hook, migration, or backfill is used.
+- Every route above requires an immutable `bwh_<signed-payload>.<hmac>` endpoint token. The
+  signed payload includes format version, random endpoint ID, project ID, and site ID. Strict
+  length/character validation and constant-time HMAC comparison use a dedicated server secret.
+- Malformed or forged paths receive a bare 404 before server-context loading, Valkey/rate-limit
+  access, MongoDB resolution, body parsing, site-credential authentication, visitor-token
+  authentication, nonce/idempotency, or business logic. A locally valid token then resolves only
+  its exact project/site/endpoint record.
+- The site credential authenticates only initial visitor-session creation. PowerOTP returns a
+  30-minute project/site/session/audience-bound visitor token; subsequent visitor operations
+  require it. Replaying another project's credential or token against this endpoint fails scope
+  validation.
+- Inactive project/site resolution returns typed `offline` before authentication or ingestion.
+  The adapter remains pass-through, stops ordinary reports/decisions, and uses bounded readiness
+  polling. Neither `offline` nor `fail_open` is an `allow` decision.
 - A dashboard-authenticated call the customer's own backend makes directly (project
   configuration, credential rotation, project-scoped visitor listing) is a different traffic
   class and is unaffected — it remains protected by the existing customer session, CSRF, and

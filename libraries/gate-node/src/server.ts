@@ -2,6 +2,7 @@ import { createServer, type RequestListener, type Server } from "node:http";
 
 import {
   BOTBLOCKER_TIMEOUT_DEFAULT_MS,
+  BotBlockerWebhookIdSchema,
   DecisionTimeoutMsSchema,
   SiteCredentialSchema,
   SiteIdSchema,
@@ -21,6 +22,7 @@ import {
   withinHeaderLimits,
 } from "./http.js";
 import {
+  beginDecision,
   createServices,
 } from "./runtime.js";
 import {
@@ -36,6 +38,7 @@ import type {
 
 export function createPowerOtpRequestListener(options: GateNodeOptions): RequestListener {
   const siteId = SiteIdSchema.parse(options.siteId);
+  BotBlockerWebhookIdSchema.parse(options.webhookId);
   SiteCredentialSchema.parse(options.siteCredential);
   if (!options.audience || options.audience.length > 2_048) {
     throw new TypeError("Audience must contain 1 through 2048 characters");
@@ -159,6 +162,22 @@ export function createPowerOtpRequestListener(options: GateNodeOptions): Request
       }
       session.requestContext ??= context;
       await store.set(session);
+      if (
+        session.recommendation?.lifecycle === "offline" &&
+        session.initialBrowser &&
+        !session.pendingDecision &&
+        (session.offlineUntil ?? 0) <= now()
+      ) {
+        void beginDecision({
+          context: session.requestContext,
+          initialBrowser: session.initialBrowser,
+          siteCredential: options.siteCredential,
+          decisionTimeoutMs,
+          session,
+          services,
+          save: () => Promise.resolve(store.set(session)),
+        });
+      }
       const clearance = verifyClearanceCookie({
         value: readCookie(request, cookieName),
         verificationKeys: options.verificationKeys,

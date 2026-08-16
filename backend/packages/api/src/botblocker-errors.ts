@@ -15,6 +15,7 @@ export class BotBlockerRuntimeError extends Error {
   constructor(
     readonly code:
       | "audience_mismatch"
+      | "authentication_required"
       | "expired"
       | "invalid_signature"
       | "invalid_request"

@@ -1,5 +1,9 @@
 import { z } from "zod";
 
+import {
+  BotBlockerWebhookIdSchema,
+  SiteIdSchema,
+} from "./botblocker.js";
 import { VerificationTypeSchema } from "./verification.js";
 
 export const ProjectNameSchema = z.string().trim().min(2).max(80);
@@ -120,10 +124,19 @@ export const PlatformUsageResponseSchema = z.object({
   stats: ProjectStatsSchema,
 });
 
+export const BotBlockerProjectSetupSchema = z
+  .object({
+    siteId: SiteIdSchema,
+    webhookId: BotBlockerWebhookIdSchema,
+    webhookSigningSecret: z.string().min(32),
+  })
+  .strict();
+
 export const ProjectCreatedSchema = z.object({
   project: ProjectSchema,
   apiKey: z.string().min(32),
   callbackSigningSecret: z.string().min(32).optional(),
+  botBlocker: BotBlockerProjectSetupSchema,
 });
 
 export const RotatedSecretSchema = z.object({
@@ -133,5 +146,8 @@ export const RotatedSecretSchema = z.object({
 export type CreateProject = z.infer<typeof CreateProjectSchema>;
 export type UpdateProject = z.infer<typeof UpdateProjectSchema>;
 export type Project = z.infer<typeof ProjectSchema>;
+export type BotBlockerProjectSetup = z.infer<
+  typeof BotBlockerProjectSetupSchema
+>;
 export type ProjectCreated = z.infer<typeof ProjectCreatedSchema>;
 export type PlatformUsageResponse = z.infer<typeof PlatformUsageResponseSchema>;

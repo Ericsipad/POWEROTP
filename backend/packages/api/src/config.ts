@@ -49,6 +49,13 @@ const ProductionConfigSchema = z.object({
    */
   BOTBLOCKER_SITE_CREDENTIAL_HASH_SECRET: z.string().min(32).optional(),
   /**
+   * Dedicated HMAC domains for immutable project-scoped endpoint tokens and
+   * 30-minute per-visitor authorization tokens. Neither secret is shared
+   * with site credentials, API keys, callbacks, or signed decisions.
+   */
+  BOTBLOCKER_WEBHOOK_ENDPOINT_SECRET: z.string().min(32).optional(),
+  BOTBLOCKER_VISITOR_TOKEN_SECRET: z.string().min(32).optional(),
+  /**
    * Independent keyed-lookup domain for pseudonymous BotBlocker browser
    * environment and trusted-IP hashes. Raw IPs and caller-supplied
    * fingerprint hashes are never persisted.

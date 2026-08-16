@@ -1,11 +1,17 @@
 import type {
+  BotBlockerProjectSetup,
   CreateProject,
   Project,
   UpdateProject,
   VerificationType,
 } from "@powerotp/contracts";
-import type { Db } from "mongodb";
+import {
+  DEFAULT_BOTBLOCKER_SITE_CONFIGURATION,
+} from "@powerotp/contracts";
+import type { Db, MongoClient } from "mongodb";
 
+import type { BotBlockerSiteDocument } from "./botblocker-site-persistence.js";
+import { createBotBlockerWebhookId } from "./botblocker-webhook.js";
 import type { ProductionConfig } from "./config.js";
 import {
   PLATFORM_ADMIN_USER_ID,
@@ -52,27 +58,19 @@ export class ProjectService {
   readonly #projects;
   readonly #apiKeys;
   readonly #audits;
+  readonly #botBlockerSites;
 
   constructor(
     db: Db,
+    private readonly client: Pick<MongoClient, "withSession">,
     private readonly config: ProductionConfig,
     private readonly stats?: ProjectStatsProvider,
-    /**
-     * Provisions the durable BotBlocker site row (and its `webhookId`) the
-     * moment a project exists, so the customer's scoped webhook endpoint is
-     * never something only lazily created on the customer's first dashboard
-     * visit — see `docs/THREAT_MODEL.md`'s "Site-scoped webhook endpoint
-     * routing". Optional so existing callers/tests that don't need
-     * BotBlocker keep working unchanged.
-     */
-    private readonly ensureBotBlockerSite?: (
-      customerId: string,
-      projectId: string,
-    ) => Promise<unknown>,
   ) {
     this.#projects = db.collection<ProjectDocument>("projects");
     this.#apiKeys = db.collection<ApiKeyDocument>("apiKeys");
     this.#audits = db.collection<AuditDocument>("auditEvents");
+    this.#botBlockerSites =
+      db.collection<BotBlockerSiteDocument>("botblockerSites");
   }
 
   async create(customerId: string, input: CreateProject, ip?: string) {
@@ -96,6 +94,26 @@ export class ProjectService {
     };
 
     const apiKey = this.#newApiKey(project, customerId);
+    const siteId = createId("bbs");
+    const webhookSigningSecret = createSecret();
+    const webhookId = createBotBlockerWebhookId(
+      project._id,
+      siteId,
+      this.#requireWebhookEndpointSecret(),
+    );
+    const botBlockerSite: BotBlockerSiteDocument = {
+      _id: siteId,
+      projectId: project._id,
+      customerId,
+      webhookId,
+      webhookSigningSecretEncrypted: encryptString(
+        webhookSigningSecret,
+        this.config.CONFIG_ENCRYPTION_KEY,
+      ),
+      ...DEFAULT_BOTBLOCKER_SITE_CONFIGURATION,
+      createdAt: now,
+      updatedAt: now,
+    };
     const callbackSigningSecret = input.callbackUrl ? createSecret() : undefined;
     if (callbackSigningSecret) {
       project.callbackSecretEncrypted = encryptString(
@@ -104,25 +122,51 @@ export class ProjectService {
       );
     }
 
-    await this.#projects.insertOne(project);
-    let apiKeyInserted = false;
-    try {
-      await this.#apiKeys.insertOne(apiKey.document);
-      apiKeyInserted = true;
-      await this.ensureBotBlockerSite?.(customerId, project._id);
-    } catch (error) {
-      if (apiKeyInserted) {
-        await this.#apiKeys.deleteOne({ _id: apiKey.document._id });
-      }
-      await this.#projects.deleteOne({ _id: project._id });
-      throw error;
-    }
-    await this.#audit(customerId, "project.created", "project", project._id, ip);
+    const projectAudit = this.#auditDocument(
+      customerId,
+      "project.created",
+      "project",
+      project._id,
+      now,
+      ip,
+    );
+    const siteAudit = this.#auditDocument(
+      customerId,
+      "botblocker_site.created",
+      "botblocker_site",
+      siteId,
+      now,
+      ip,
+    );
+    const apiKeyAudit = this.#auditDocument(
+      customerId,
+      "api_key.created",
+      "project",
+      project._id,
+      now,
+      ip,
+    );
+    await this.client.withSession(async (session) => {
+      await session.withTransaction(async () => {
+        await this.#projects.insertOne(project, { session });
+        await this.#apiKeys.insertOne(apiKey.document, { session });
+        await this.#botBlockerSites.insertOne(botBlockerSite, { session });
+        await this.#audits.insertMany(
+          [projectAudit, apiKeyAudit, siteAudit],
+          { session },
+        );
+      });
+    });
 
     return {
-      project: await this.#toResponse(project),
+      project: this.#toNewProjectResponse(project, apiKey.document),
       apiKey: apiKey.raw,
       callbackSigningSecret,
+      botBlocker: {
+        siteId,
+        webhookId,
+        webhookSigningSecret,
+      } satisfies BotBlockerProjectSetup,
     };
   }
 
@@ -312,6 +356,38 @@ export class ProjectService {
     };
   }
 
+  #toNewProjectResponse(
+    project: ProjectDocument,
+    key: ApiKeyDocument,
+  ): Project {
+    return {
+      id: project._id,
+      name: project.name,
+      slug: project.slug,
+      apiUrl: projectVerificationUrl(this.config.PUBLIC_API_URL, project.slug),
+      enabledMethods: project.enabledMethods,
+      allowedOrigins: project.allowedOrigins,
+      callbackUrl: project.callbackUrl,
+      callbackConfigured: Boolean(
+        project.callbackUrl && project.callbackSecretEncrypted,
+      ),
+      active: project.active,
+      activatedAt: project.activatedAt.toISOString(),
+      apiKeyPrefix: key.prefix,
+      apiKeyLastFour: key.lastFour,
+      brandName: project.brandName,
+      brandLogoUrl: project.brandLogoUrl,
+      brandReplyToEmail: project.brandReplyToEmail,
+      brandHtmlTemplate: project.brandHtmlTemplate,
+      stats: {
+        total: 0,
+        succeeded: 0,
+        failed: 0,
+        byType: { ...emptyByType },
+      },
+    };
+  }
+
   async #toResponse(project: ProjectDocument): Promise<Project> {
     const key = await this.#apiKeys.findOne(
       { projectId: project._id, revokedAt: { $exists: false } },
@@ -349,14 +425,40 @@ export class ProjectService {
     targetId: string,
     ip?: string,
   ) {
-    await this.#audits.insertOne({
+    await this.#audits.insertOne(this.#auditDocument(
+      actorId,
+      action,
+      targetType,
+      targetId,
+      new Date(),
+      ip,
+    ));
+  }
+
+  #auditDocument(
+    actorId: string,
+    action: string,
+    targetType: string,
+    targetId: string,
+    occurredAt: Date,
+    ip?: string,
+  ): AuditDocument {
+    return {
       _id: createId("aud"),
       actorId,
       action,
       targetType,
       targetId,
-      occurredAt: new Date(),
+      occurredAt,
       ip,
-    });
+    };
+  }
+
+  #requireWebhookEndpointSecret(): string {
+    const secret = this.config.BOTBLOCKER_WEBHOOK_ENDPOINT_SECRET;
+    if (!secret) {
+      throw new ProjectError("botblocker_webhook_unavailable", 503);
+    }
+    return secret;
   }
 }

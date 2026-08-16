@@ -8,12 +8,15 @@ import {
   BotBlockerSiteCredentialService,
   type AuthenticatedBotBlockerSite,
 } from "./botblocker-site-credential-service.js";
+import type { RuntimeBotBlockerSite } from "./botblocker-site-service.js";
+import { BotBlockerVisitorTokenService } from "./botblocker-visitor-token.js";
 
 const REQUEST_WINDOW_MS = 300_000;
 const IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1_000;
 
 export interface BotBlockerRuntimeEnvelope {
   siteId: string;
+  gateSessionId: string;
   audience: string;
   nonce: string;
   issuedAt: number;
@@ -27,6 +30,10 @@ export class BotBlockerRuntimeSecurity {
       BotBlockerSiteCredentialService,
       "authenticate"
     >,
+    private readonly visitorTokens: Pick<
+      BotBlockerVisitorTokenService,
+      "verify"
+    >,
     private readonly valkey: Redis,
     private readonly config: Pick<
       ProductionConfig,
@@ -39,6 +46,8 @@ export class BotBlockerRuntimeSecurity {
     requestOrigin: string;
     idempotencyKey?: string;
     operation: string;
+    authentication: "site_credential" | "visitor_token";
+    runtimeSite: RuntimeBotBlockerSite;
     body: BotBlockerRuntimeEnvelope;
     rawBody: unknown;
     now?: number;
@@ -47,6 +56,8 @@ export class BotBlockerRuntimeSecurity {
     const site = await this.#authenticateAndValidate({
       authorizationHeader: options.authorizationHeader,
       requestOrigin: options.requestOrigin,
+      authentication: options.authentication,
+      runtimeSite: options.runtimeSite,
       body: options.body,
       now,
     });
@@ -92,11 +103,13 @@ export class BotBlockerRuntimeSecurity {
   authorizeRead(options: {
     authorizationHeader?: string;
     requestOrigin: string;
+    runtimeSite: RuntimeBotBlockerSite;
     body: BotBlockerRuntimeEnvelope;
     now?: number;
   }) {
     return this.#authenticateAndValidate({
       ...options,
+      authentication: "visitor_token",
       now: options.now ?? Date.now(),
     });
   }
@@ -104,12 +117,22 @@ export class BotBlockerRuntimeSecurity {
   async #authenticateAndValidate(options: {
     authorizationHeader?: string;
     requestOrigin: string;
+    authentication: "site_credential" | "visitor_token";
+    runtimeSite: RuntimeBotBlockerSite;
     body: BotBlockerRuntimeEnvelope;
     now: number;
   }): Promise<AuthenticatedBotBlockerSite> {
-    const site = await this.credentials.authenticate(
-      options.authorizationHeader,
-    );
+    const site =
+      options.authentication === "site_credential"
+        ? await this.credentials.authenticate(options.authorizationHeader)
+        : this.#authenticateVisitor(options);
+    if (
+      site.customerId !== options.runtimeSite.customerId ||
+      site.projectId !== options.runtimeSite.projectId ||
+      site.siteId !== options.runtimeSite.siteId
+    ) {
+      throw new BotBlockerRuntimeError("audience_mismatch", 403);
+    }
     const configuredOrigin = this.config.BOTBLOCKER_RUNTIME_ORIGIN;
     if (!configuredOrigin) {
       throw new BotBlockerRuntimeError(
@@ -134,6 +157,31 @@ export class BotBlockerRuntimeSecurity {
       throw new BotBlockerRuntimeError("expired", 400);
     }
     return site;
+  }
+
+  #authenticateVisitor(options: {
+    authorizationHeader?: string;
+    runtimeSite: RuntimeBotBlockerSite;
+    body: BotBlockerRuntimeEnvelope;
+    now: number;
+  }): AuthenticatedBotBlockerSite {
+    this.visitorTokens.verify(
+      options.authorizationHeader,
+      {
+        projectId: options.runtimeSite.projectId,
+        siteId: options.runtimeSite.siteId,
+        gateSessionId: options.body.gateSessionId,
+        audience: options.body.audience,
+      },
+      options.now,
+    );
+    return {
+      customerId: options.runtimeSite.customerId,
+      projectId: options.runtimeSite.projectId,
+      siteId: options.runtimeSite.siteId,
+      enabled: options.runtimeSite.enabled,
+      allowedOrigins: options.runtimeSite.allowedOrigins,
+    };
   }
 
   async #claim(

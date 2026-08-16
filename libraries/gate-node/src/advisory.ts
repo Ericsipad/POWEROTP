@@ -42,6 +42,16 @@ export function unavailableSnapshot(lastApplied?: ReportSequence): GateRecommend
   });
 }
 
+export function offlineSnapshot(lastApplied?: ReportSequence): GateRecommendationSnapshot {
+  return parse({
+    lifecycle: "offline",
+    recommendation: "full_access",
+    decisionPending: false,
+    otpOpen: false,
+    ...(lastApplied ? { lastApplied } : {}),
+  });
+}
+
 export function allowSnapshot(lastApplied?: ReportSequence): GateRecommendationSnapshot {
   return parse({
     lifecycle: "observing",
@@ -102,6 +112,7 @@ function statusFor(
   if (snapshot.lifecycle === "checking") return "checking";
   if (snapshot.lifecycle === "fail_open") return "fail_open";
   if (snapshot.lifecycle === "unavailable") return "unavailable";
+  if (snapshot.lifecycle === "offline") return "offline";
   if (snapshot.lifecycle === "otp_required") return "otp";
   if (session.clearanceVerified) return "clearance";
   return "allow";

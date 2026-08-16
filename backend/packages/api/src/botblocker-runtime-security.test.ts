@@ -15,6 +15,11 @@ const site = {
   enabled: true,
   allowedOrigins: ["https://customer.example"],
 };
+const runtimeSite = {
+  ...site,
+  webhookId: "bwh_test",
+  projectActive: true,
+};
 const now = 1_786_000_000_000;
 
 function fixture(options: { storageFailure?: boolean } = {}) {
@@ -30,6 +35,16 @@ function fixture(options: { storageFailure?: boolean } = {}) {
   } as unknown as Redis;
   const security = new BotBlockerRuntimeSecurity(
     { authenticate: async () => site },
+    { verify: () => ({
+      version: 1,
+      projectId: site.projectId,
+      siteId: site.siteId,
+      gateSessionId: "gate_session_123456",
+      audience: "https://customer.example",
+      nonce: "visitor_nonce_123456",
+      issuedAt: now - 1,
+      expiresAt: now + 60_000,
+    }) },
     valkey,
     { BOTBLOCKER_RUNTIME_ORIGIN: "https://verify.powerotp.com" },
   );
@@ -39,6 +54,7 @@ function fixture(options: { storageFailure?: boolean } = {}) {
 function request(overrides: Record<string, unknown> = {}) {
   const body = {
     siteId: site.siteId,
+    gateSessionId: "gate_session_123456",
     audience: "https://customer.example",
     nonce: "nonce_1234567890123456",
     issuedAt: now,
@@ -49,6 +65,8 @@ function request(overrides: Record<string, unknown> = {}) {
     requestOrigin: "https://verify.powerotp.com",
     idempotencyKey: "idem_1234567890123456",
     operation: "rapid-auth",
+    authentication: "site_credential" as const,
+    runtimeSite,
     body,
     rawBody: body,
     now,

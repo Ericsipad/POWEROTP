@@ -5,7 +5,7 @@ const POWEROTP_SERVER_TS = `import { createPublicKey } from "node:crypto";
 import { createPowerOtpBotBlocker } from "@powerotp/gate-express";
 
 /**
- * POWEROTP_SITE_ID/POWEROTP_SITE_CREDENTIAL identify your project; generate
+ * POWEROTP_SITE_ID/POWEROTP_WEBHOOK_ID identify your endpoint. Generate
  * the credential from POST /v1/projects/{projectId}/botblocker/
  * rotate-site-credential.
  *
@@ -16,6 +16,7 @@ import { createPowerOtpBotBlocker } from "@powerotp/gate-express";
  */
 export const powerOtp = createPowerOtpBotBlocker({
   siteId: process.env.POWEROTP_SITE_ID!,
+  webhookId: process.env.POWEROTP_WEBHOOK_ID!,
   siteCredential: process.env.POWEROTP_SITE_CREDENTIAL!,
   audience: process.env.POWEROTP_AUDIENCE ?? "https://your-app.example",
   verificationKeys: {
@@ -110,9 +111,10 @@ export function buildExpressTemplate(packageVersion: string): AdapterTemplate {
         "express.static(), and your API/SSR routers.",
       "3. Mount <PowerOtpBrowserGate /> near your React root, or call " +
         "createGateBrowserCoordinator directly if you need subscribe()/getSnapshot()/openOtp().",
-      "4. Generate POWEROTP_SITE_CREDENTIAL via POST /v1/projects/{projectId}/botblocker/" +
-        "rotate-site-credential, generate POWEROTP_WEBHOOK_SIGNING_SECRET, and set them plus " +
-        "POWEROTP_SITE_ID and your verification key pair server-side. See " +
+      "4. Copy POWEROTP_SITE_ID, POWEROTP_WEBHOOK_ID, and the show-once " +
+        "POWEROTP_WEBHOOK_SIGNING_SECRET from the project creation response. Generate " +
+        "POWEROTP_SITE_CREDENTIAL via POST /v1/projects/{projectId}/botblocker/" +
+        "rotate-site-credential, then set all values and your verification key pair server-side. See " +
         "get_botblocker_environment_variables for the full list and how to obtain each value.",
     ],
     testCommands: [
@@ -135,6 +137,8 @@ export function buildExpressTemplate(packageVersion: string): AdapterTemplate {
       "This application-layer middleware only observes requests reaching this Express process.",
       "Decisions publish fail-open (full access) state whenever a fresh decision cannot be " +
         "returned before decisionTimeoutMs elapses; this never overrides an active OTP challenge.",
+      "An inactive site publishes offline/full-access state, suppresses ordinary visitor calls, " +
+        "and performs at most one readiness retry per server-provided retry interval.",
     ],
     troubleshooting: [
       {
