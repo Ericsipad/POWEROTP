@@ -16,16 +16,14 @@ import { createPublicKey } from "node:crypto";
 import { createPowerOtpNext } from "@powerotp/gate-next";
 
 /**
- * POWEROTP_SITE_ID/POWEROTP_SITE_CREDENTIAL are the two values your project
- * actually needs; the credential is generated once (and re-rotatable) by
- * POST /v1/projects/{projectId}/botblocker/rotate-site-credential.
+ * POWEROTP_SITE_ID/POWEROTP_SITE_CREDENTIAL identify your project; generate
+ * the credential from POST /v1/projects/{projectId}/botblocker/
+ * rotate-site-credential.
  *
- * verificationKeys below lets a returning visitor who already received an
+ * verificationKeys lets a returning visitor who already received an
  * \`allow\` get it again instantly from a signed, long-lived cookie, checked
- * entirely on this server without a fresh decision or a PowerOTP
- * round-trip. Set it directly for now; Phase 14A resolves it automatically
- * from the signed policy release instead (see
- * POWEROTP_BOTBLOCKER_DEVELOPMENT_PHASES.md).
+ * entirely on this server without a fresh decision. Obtain the key pair
+ * for your site from PowerOTP.
  */
 export const powerOtp = createPowerOtpNext({
   siteId: process.env.POWEROTP_SITE_ID!,
@@ -157,9 +155,9 @@ export function buildNextjsTemplate(packageVersion: string): AdapterTemplate {
       "3. Add both App Router route files at their exact paths.",
       "4. Wrap app/layout.tsx's existing content with PowerOtpNextProvider.",
       "5. Generate POWEROTP_SITE_CREDENTIAL via POST /v1/projects/{projectId}/botblocker/" +
-        "rotate-site-credential and set it plus POWEROTP_SITE_ID server-side. See " +
-        "get_botblocker_environment_variables for the full current list, including the " +
-        "verification key pair Phase 14A will eventually deliver automatically.",
+        "rotate-site-credential, generate POWEROTP_WEBHOOK_SIGNING_SECRET, and set them plus " +
+        "POWEROTP_SITE_ID and your verification key pair server-side. See " +
+        "get_botblocker_environment_variables for the full list and how to obtain each value.",
     ],
     testCommands: [
       "npm run build",
@@ -180,15 +178,10 @@ export function buildNextjsTemplate(packageVersion: string): AdapterTemplate {
         "supplies an authenticated resolveDirectAddress function.",
       "The default session store is process-local; serverless/multi-instance production needs " +
         "an injected bounded, concurrency-safe shared GateSessionStore.",
-      "No real RapidAuth/intelligence backend is wired in yet, so decisions resolve to typed " +
-        "unavailable/fail-open until real services are injected.",
       "Proxy cannot observe traffic that bypasses the Next.js process (e.g. a CDN serving " +
         "cached responses directly).",
-      "verificationKeys (Ed25519) powers the returning-visitor instant-allow cookie fast path " +
-        "and is set directly for now. Phase 14A (planned) will resolve it automatically from " +
-        "the signed policy release using only the public siteId.",
-      "POWEROTP_WEBHOOK_SIGNING_SECRET ships with the planned webhook callback receiver; no " +
-        "adapter implements /_powerotp/webhooks/challenge-status yet.",
+      "Decisions publish fail-open (full access) state whenever a fresh decision cannot be " +
+        "returned before decisionTimeoutMs elapses; this never overrides an active OTP challenge.",
     ],
     troubleshooting: [
       {

@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { describe, it } from "node:test";
 
-import { getBotBlockerArchitectureOverview } from "./architecture.js";
 import { allBotBlockerEnvVarNames } from "./env.js";
 import { buildAllBotBlockerManifests, buildBotBlockerManifest } from "./manifest.js";
 import { AdapterManifestSchema } from "./schemas.js";
@@ -18,6 +17,21 @@ const CREDENTIAL_LIKE_PATTERNS = [
 const PROHIBITED_ROUTE_PATTERNS = [
   /powerotp\/aisummary/,
   /cleandatapage/i,
+];
+
+/**
+ * MCP output is read by customers and their AI tools, not by PowerOTP staff. It must never
+ * mention internal phase numbers, roadmap doc filenames, or "not built yet"/"planned" framing —
+ * it describes how to install and use the product today, nothing about how it was developed.
+ */
+const DEV_PROCESS_LEAK_PATTERNS = [
+  /\bphase\s*\d+[a-z]?\b/i,
+  /POWEROTP_BOTBLOCKER_\w+\.md/i,
+  /\bnot yet\b/i,
+  /\bplanned\b/i,
+  /\balready-shipped\b/i,
+  /\broadmap\b/i,
+  /\bwired in\b/i,
 ];
 
 describe("BotBlocker MCP manifests", () => {
@@ -78,6 +92,12 @@ describe("BotBlocker MCP manifests", () => {
         );
       });
 
+      it("instructs the customer to generate the webhook signing secret", () => {
+        const manifest = buildBotBlockerManifest(adapter);
+        const combined = manifest.placementSteps.join("\n");
+        assert.match(combined, /POWEROTP_WEBHOOK_SIGNING_SECRET/);
+      });
+
       it("does not fabricate a webhook receiver route no adapter implements", () => {
         const manifest = buildBotBlockerManifest(adapter);
         for (const file of manifest.files) {
@@ -85,12 +105,28 @@ describe("BotBlocker MCP manifests", () => {
         }
       });
 
-      it("notes Phase 14A's planned automatic key delivery and the planned webhook secret", () => {
+      it("describes the returning-visitor instant-allow cookie without exposing dev process", () => {
         const manifest = buildBotBlockerManifest(adapter);
         const combined = manifest.knownLimitations.join("\n");
-        assert.match(combined, /Phase 14A/);
-        assert.match(combined, /returning-visitor instant-allow cookie/);
-        assert.match(combined, /POWEROTP_WEBHOOK_SIGNING_SECRET/);
+        assert.match(combined, /returning-visitor|instant-allow|fail-open/i);
+      });
+
+      it("never exposes phase numbers, roadmap doc filenames, or \"not built yet\" framing", () => {
+        const manifest = buildBotBlockerManifest(adapter);
+        const surfaces = [
+          ...manifest.files.map((file) => file.contents),
+          ...manifest.knownLimitations,
+          ...manifest.placementSteps,
+          ...manifest.testCommands,
+          ...manifest.exclusions,
+          ...manifest.upgradeInstructions,
+          ...manifest.troubleshooting.flatMap((entry) => [entry.symptom, entry.explanation]),
+        ];
+        for (const text of surfaces) {
+          for (const pattern of DEV_PROCESS_LEAK_PATTERNS) {
+            assert.doesNotMatch(text, pattern, `"${text}" matched ${pattern}`);
+          }
+        }
       });
 
       it("points to the real site-credential rotation endpoint instead of an invented flow", () => {
@@ -119,11 +155,18 @@ describe("BotBlocker MCP manifests", () => {
     }
   });
 
-  it("describes the planned rapid edge and authoritative backend fallback", () => {
-    const origins = getBotBlockerArchitectureOverview().runtimeOrigins;
-    assert.match(origins.primary, /https:\/\/verify\.powerotp\.com/);
-    assert.match(origins.primary, /not yet deployed/i);
-    assert.match(origins.authoritativeFallback, /https:\/\/api\.powerotp\.com/);
-    assert.match(origins.authoritativeFallback, /full-history master/i);
+  it("never exposes phase numbers, roadmap doc filenames, or \"not built yet\" framing in tool/resource content", async () => {
+    const { getBotBlockerArchitectureOverview, getBotBlockerDataBoundary } = await import(
+      "./architecture.js"
+    );
+    const surfaces = [
+      JSON.stringify(getBotBlockerArchitectureOverview()),
+      JSON.stringify(getBotBlockerDataBoundary()),
+    ];
+    for (const text of surfaces) {
+      for (const pattern of DEV_PROCESS_LEAK_PATTERNS) {
+        assert.doesNotMatch(text, pattern, `matched ${pattern}`);
+      }
+    }
   });
 });

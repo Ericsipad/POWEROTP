@@ -2,11 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 
 import { getBotBlockerArchitectureOverview, getBotBlockerDataBoundary } from "./architecture.js";
-import {
-  BOTBLOCKER_ENV_VARS,
-  BOTBLOCKER_PLANNED_ENV_VARS,
-  BOTBLOCKER_UNDELIVERED_ENV_VARS,
-} from "./env.js";
+import { BOTBLOCKER_ENV_VARS, BOTBLOCKER_VERIFICATION_KEY_ENV_VARS } from "./env.js";
 import { buildAllBotBlockerManifests, buildBotBlockerManifest } from "./manifest.js";
 import { AdapterManifestSchema, BotBlockerAdapterIdSchema } from "./schemas.js";
 
@@ -103,21 +99,16 @@ export function registerBotBlockerCapabilities(mcp: McpServer): void {
     async () =>
       json({
         required: BOTBLOCKER_ENV_VARS,
-        plannedForUpcomingPhase: {
-          webhookSigningSecret: BOTBLOCKER_PLANNED_ENV_VARS,
-          automaticKeyDeliveryPhase14A: BOTBLOCKER_UNDELIVERED_ENV_VARS,
-        },
+        verificationKeyPair: BOTBLOCKER_VERIFICATION_KEY_ENV_VARS,
         placement:
           "Set these in your secure hosting environment's secret/config store (e.g. DigitalOcean " +
           "App Platform environment variables). Never commit them to source control or a browser bundle.",
-        dashboardStatus:
-          "POWEROTP_SITE_CREDENTIAL is already issued by the shipped " +
-          "POST /v1/projects/{projectId}/botblocker/rotate-site-credential endpoint (shown once, " +
-          "rotatable). The plannedForUpcomingPhase entries are scheduled work, not settings a " +
-          "customer manages today: POWEROTP_WEBHOOK_SIGNING_SECRET ships with the planned " +
-          "webhook callback receiver, and the verification key pair is set directly until Phase " +
-          "14A automates its delivery from the signed policy release (see " +
-          "POWEROTP_BOTBLOCKER_DEVELOPMENT_PHASES.md).",
+        howToObtain:
+          "Generate POWEROTP_SITE_CREDENTIAL with POST /v1/projects/{projectId}/botblocker/" +
+          "rotate-site-credential, which returns the raw value once. Generate " +
+          "POWEROTP_WEBHOOK_SIGNING_SECRET for your project the same way — shown once, " +
+          "rotatable with overlap. Obtain your verificationKeyPair values for your site from " +
+          "PowerOTP.",
       }),
   );
 

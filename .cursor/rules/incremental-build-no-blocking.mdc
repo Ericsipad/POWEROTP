@@ -1,0 +1,31 @@
+---
+description: Never refuse or water down a requested step because a later/dependent step isn't built yet; scale verification effort to the size of the change
+alwaysApply: true
+---
+
+# Build what's asked, not what's "safe" given later steps
+
+Never refuse, skip, or water down a piece of work on the reasoning "there's no
+consumer/next step built yet, so this can't really work." That logic is wrong
+and has been explicitly rejected by the user multiple times.
+
+Example of the banned reasoning: "We shouldn't build a signup form because
+there's no app yet to log into." Wrong — build the signup form now; the app
+that consumes those signups is a later, separate step. Every project is built
+incrementally. A piece being unfinished downstream is never a reason to omit,
+hedge, or annotate a currently-requested piece with "this doesn't do anything
+yet" language.
+
+If the user asks for documentation, instructions, an environment variable, a
+config value, or a feature description, provide it as normal, complete
+guidance — never gated behind "but nothing consumes this yet." If a
+genuinely blocking dependency exists, ask the user directly instead of
+silently deciding to omit or soften what was asked for.
+
+# Match verification effort to the size of the change
+
+For a small, self-contained text/doc/content edit, do not rebuild, re-run the
+full test suite multiple times, or re-scan the whole codebase repeatedly.
+Make the edit, do one proportionate sanity check if genuinely warranted, and
+stop. Reserve full build/lint/test/verify passes for changes that actually
+touch runtime logic or could plausibly break something.

@@ -19,16 +19,14 @@ export type PowerOtpHandler = (
  * this module never blocks, redirects, or rewrites the wrapped handler's
  * request or response. Your handler decides whether and how to use it.
  *
- * POWEROTP_SITE_ID/POWEROTP_SITE_CREDENTIAL are the two values your project
- * actually needs: the site credential is generated once (and re-rotatable)
- * by POST /v1/projects/{projectId}/botblocker/rotate-site-credential.
+ * POWEROTP_SITE_ID/POWEROTP_SITE_CREDENTIAL identify your project; generate
+ * the credential from POST /v1/projects/{projectId}/botblocker/
+ * rotate-site-credential.
  *
- * verificationKeys below lets a returning visitor who already received an
+ * verificationKeys lets a returning visitor who already received an
  * \`allow\` get it again instantly from a signed, long-lived cookie, checked
- * entirely on this server without a fresh decision or a PowerOTP
- * round-trip. Set it directly for now; Phase 14A resolves it automatically
- * from the signed policy release instead (see
- * POWEROTP_BOTBLOCKER_DEVELOPMENT_PHASES.md).
+ * entirely on this server without a fresh decision. Obtain the key pair
+ * for your site from PowerOTP.
  */
 export function createPowerOtpListener(handle: PowerOtpHandler) {
   return createPowerOtpRequestListener({
@@ -131,9 +129,10 @@ export function buildNodeHttpTemplate(packageVersion: string): AdapterTemplate {
       "3. Bundle public/powerotp-client.ts (or the equivalent inline logic) into pages you want " +
         "observed; call mountPowerOtp() once on page load.",
       "4. Generate POWEROTP_SITE_CREDENTIAL via POST /v1/projects/{projectId}/botblocker/" +
-        "rotate-site-credential and set it plus POWEROTP_SITE_ID server-side; never in a " +
-        "browser bundle. See get_botblocker_environment_variables for the full current list, " +
-        "including the verification key pair Phase 14A will eventually deliver automatically.",
+        "rotate-site-credential, generate POWEROTP_WEBHOOK_SIGNING_SECRET, and set them plus " +
+        "POWEROTP_SITE_ID and your verification key pair server-side; never in a browser " +
+        "bundle. See get_botblocker_environment_variables for the full list and how to obtain " +
+        "each value.",
     ],
     testCommands: [
       "node --test server/*.test.ts",
@@ -151,16 +150,10 @@ export function buildNodeHttpTemplate(packageVersion: string): AdapterTemplate {
         "shared, concurrency-safe GateSessionStore that preserves active OTP sessions.",
       "Client IP defaults to the direct socket address. A forwarded header is only trusted with " +
         "an explicit trustedProxy header/position/IP-list configuration.",
-      "No real RapidAuth/intelligence backend is wired in yet; requestDecision/verifyDecision/" +
-        "assessBrowser/launchChallenge/pollChallenge resolve to typed unavailable until you " +
-        "inject real services, so today's traffic observes fail-open/unavailable state only.",
       "BotBlocker only sees requests that reach this Node process; a directly reachable origin " +
         "bypassing it is invisible to BotBlocker.",
-      "verificationKeys (Ed25519) powers the returning-visitor instant-allow cookie fast path " +
-        "and is set directly for now. Phase 14A (planned) will resolve it automatically from " +
-        "the signed policy release using only the public siteId.",
-      "POWEROTP_WEBHOOK_SIGNING_SECRET ships with the planned webhook callback receiver; no " +
-        "adapter implements /_powerotp/webhooks/challenge-status yet.",
+      "Decisions publish fail-open (full access) state whenever a fresh decision cannot be " +
+        "returned before decisionTimeoutMs elapses; this never overrides an active OTP challenge.",
     ],
     troubleshooting: [
       {
@@ -179,8 +172,8 @@ export function buildNodeHttpTemplate(packageVersion: string): AdapterTemplate {
       {
         symptom: "State never leaves status: \"checking\".",
         explanation:
-          "This is expected until a real decision service is injected (see known limitations) " +
-          "or the configured decisionTimeoutMs elapses, at which point it becomes fail_open.",
+          "This is normal while a decision is pending; once decisionTimeoutMs elapses it " +
+          "becomes fail_open.",
       },
     ],
     upgradeInstructions: [

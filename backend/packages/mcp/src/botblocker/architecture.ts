@@ -1,8 +1,7 @@
 /**
  * Static architecture/data-boundary content for the public BotBlocker MCP
- * resources. Every fact here must already be true of shipped Phase 13B–13D
- * code (see `docs/POWEROTP_BOTBLOCKER_AS_BUILT.md`); this module adds no new
- * runtime behavior of its own.
+ * resources. This module documents current product behavior only; it adds
+ * no new runtime behavior of its own.
  */
 
 export function getBotBlockerArchitectureOverview() {
@@ -29,19 +28,6 @@ export function getBotBlockerArchitectureOverview() {
       "@powerotp/gate-node is the single server authority behind all three wrappers " +
       "(raw Node HTTP, Express, Next.js). Express and Next.js delegate to it rather than " +
       "reimplementing verification, session, or decision logic.",
-    runtimeOrigins: {
-      primary:
-        "Planned, not yet deployed: https://verify.powerotp.com is the Cloudflare Workers " +
-        "rapid-check origin adapters will contact first. Its short-lived edge intelligence " +
-        "covers at least the most recent 30 days of denylisted IP and fingerprint signals.",
-      authoritativeFallback:
-        "https://api.powerotp.com remains the authoritative backend and full-history master " +
-        "store. It is the fallback rapid-check origin when the Worker cannot be reached and " +
-        "owns control-plane, policy, and durable history APIs.",
-      deploymentBoundary:
-        "BOTBLOCKER_RUNTIME_ORIGIN is backend deployment configuration, not a customer " +
-        "application secret. Leave it unset until verify.powerotp.com is actually routed.",
-    },
     otpOpener:
       "gate.openOtp() takes no arguments — no OTP type, method, policy, or content. POWEROTP " +
       "resolves the authenticated site/session decision server-side and returns only short-lived " +
@@ -73,15 +59,9 @@ export function getBotBlockerArchitectureOverview() {
 export function getBotBlockerDataBoundary() {
   return {
     credentialBoundary: {
-      intendedDesign:
-        "Exactly two project secrets, both generated once and independently rotatable: a site/" +
-        "project API key (site credential) and a webhook signing secret. Neither is invented by " +
-        "MCP — the site credential is already issued by the shipped " +
-        "POST /v1/projects/{projectId}/botblocker/rotate-site-credential endpoint; the webhook " +
-        "signing secret is specified in POWEROTP_BOTBLOCKER_PLAN.md but has no shipped issuance " +
-        "flow or receiver yet.",
       siteCredential:
-        "Server-only project API key (`potp_bb_*`), shown once at rotation, stored only hashed " +
+        "Server-only project API key (`potp_bb_*`), shown once at rotation " +
+        "(POST /v1/projects/{projectId}/botblocker/rotate-site-credential), stored only hashed " +
         "thereafter. Used once per new visitor for first-contact session creation. Never sent " +
         "to a browser, logged, placed in a URL, or accepted as an MCP tool argument.",
       scopedVisitorToken:
@@ -89,19 +69,16 @@ export function getBotBlockerDataBoundary() {
         "in the server-side gate session. Every later per-visitor call (assessment, challenge " +
         "launch, polling) forwards only this token — the site credential is never resent.",
       webhookSigningSecret:
-        "Planned (POWEROTP_BOTBLOCKER_PLAN.md, not yet shipped): an independent 256-bit secret " +
-        "per project verifying the signed body of a fixed /_powerotp/webhooks/challenge-status " +
-        "callback. No adapter implements that receiver yet, so no shipped code reads this today.",
+        "Independent 256-bit secret per project, shown once at rotation. Verifies the signed " +
+        "timestamp and body of the challenge-status callback sent to " +
+        "/_powerotp/webhooks/challenge-status before your server trusts it.",
       returningVisitorInstantAllowCookie:
         "A visitor who already received an `allow` gets a signed, long-lived cookie; on a later " +
         "visit the adapter verifies that cookie's signature entirely on its own server and " +
         "grants `allow` instantly, without waiting on a fresh decision or even reaching " +
         "PowerOTP (this also keeps working through a PowerOTP outage). An active OTP challenge " +
         "or a revoked/replaced clearance always takes precedence over this cookie. Checking the " +
-        "signature needs a public verificationKeys value, which the shipped adapters take as a " +
-        "direct constructor field today; Phase 14A (POWEROTP_BOTBLOCKER_DEVELOPMENT_PHASES.md) " +
-        "resolves it automatically from the signed policy release at " +
-        "GET /v1/botblocker/policy/{siteId} using only the public siteId.",
+        "signature uses your site's verificationKeys value, obtained from PowerOTP.",
       browserReceives:
         "Neither the site credential nor the scoped visitor token. The browser holds only an " +
         "HttpOnly, SameSite gate-session cookie and calls same-origin bridge routes that require " +
