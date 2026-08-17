@@ -2638,3 +2638,204 @@ placeholder row, or `rapidAuthMutation` wiring were added — all remain later s
 Phase 16 plan. No scoring, Passport/PaidTokenPass behavior, billing, deployment, DNS, or customer
 activation was touched. No `.env` file was read or changed. No migration or seed was performed. No
 commit or push was performed; git status was left for the user to review.
+
+## 2026-08-17 — BotBlocker Phase 16 (partial): network ranges, ASN classification, and type scores
+
+**Status: Phase 16 in progress, not complete.** This entry covers steps 3–4 of the eight-step
+execution breakdown in
+[`POWEROTP_BOTBLOCKER_PHASE16_NETWORK_INTELLIGENCE_PLAN.md`](POWEROTP_BOTBLOCKER_PHASE16_NETWORK_INTELLIGENCE_PLAN.md):
+the `botblockerNetworkRangesV4`/`V6` collection shape/indexes plus their synchronous indexed range
+lookup, and the `botblockerAsnClassifications`/`botblockerAsnTypeScores` tables with admin CRUD
+routes. Steps 1–2 (IP-hash reversal, dedicated IP blacklist) shipped in the prior session (commit
+`74ad253`, see the dated entry directly above). Steps 5–8 — retiring the `botblockerRapidList`
+scaffold, the external IP-reputation API-lookup cache, wiring the two-branch decision into
+`rapidAuthMutation`, and closing documentation — are **not implemented** and remain future
+fresh-session work per the plan's own session-size discipline. `rapidAuthMutation` in
+`backend/apps/server/lib/botblocker-http.ts` is unchanged and still returns the hardcoded
+`{ status: "unavailable", reason: "not_implemented" }` decision; none of this session's new
+persistence classes are called from any runtime route yet.
+
+**Network ranges (fast-immediate branch, step 3).** New
+`backend/packages/api/src/botblocker-network-range-persistence.ts` implements
+`botblockerNetworkRangesV4`/`V6` exactly as designed: physically separate per-family collections
+of flat, non-overlapping CIDR-range partitions, each row carrying `_id`, `cidr`, `prefixLength`,
+`asn`, `asnOrg`, `sourceDataset`, `importBatchId`, `importedAt`, plus family-specific bounds —
+`rangeStart`/`rangeEnd` (plain unsigned 32-bit integers) for v4, `rangeStartHex`/`rangeEndHex`
+(fixed-width 32-character zero-padded lowercase hex) for v6. Per the plan's item 9 correction there
+is **no import pipeline** in this repository; the user loads each MaxMind GeoLite2-ASN CSV into
+MongoDB manually. `ensureBotBlockerNetworkRangeIndexes` creates the single supporting B-tree index
+per collection (`{ rangeStart: 1 }` / `{ rangeStartHex: 1 }`). `BotBlockerNetworkRangePersistence
+#lookupByIp` implements the actual synchronous range lookup the plan calls for — "greatest
+start <= ip, confirm ip <= end," the same flat-file technique MaxMind/IPinfo's own products use —
+but it is not called from any route in this session; a later step (7) wires it into the
+fast-immediate branch.
+
+`backend/packages/api/src/ip-utils.ts` gained the encoding primitives the lookup needs, reused
+rather than duplicated per the reference pattern: `ipv4ToUint32` (multiplication, not bit-shifting,
+since a left-shifted top octet overflows JS's signed 32-bit bitwise operand range while the full
+unsigned result fits `Number.MAX_SAFE_INTEGER`), `ipv6ToFixedWidthHex` (expands `::` compression and
+any embedded IPv4 tail, e.g. `64:ff9a::192.0.2.1`, into the full eight 16-bit groups without a new
+library dependency or a BigInt round trip — validated per-group against a hex pattern so malformed
+input like a stray triple colon is rejected rather than silently zero-filled), and
+`encodeIpForRangeLookup` (normalize + classify + encode in one call, the single entry point both
+this module's lookup and any future caller should use).
+
+**ASN classification and type scores (fast-immediate branch, step 4).** New
+`backend/packages/api/src/botblocker-asn-classification-persistence.ts` implements
+`botblockerAsnClassifications`: one row per unique ASN, keyed by the bare ASN number as MaxMind's
+own CSV provides it (e.g. `64500`, not `AS64500`) so a manually-loaded network-range row's `asn`
+field joins directly against this collection's `_id` with no format-translation step. Fields:
+`_id` (=asn), optional `asnOrg`/`notes`, `asnType` (`datacenter` | `residential_isp` |
+`isp_static` | `known_proxy` | `unclassified`), `classificationSource` (`ai_research` | `manual` |
+`heuristic`), `createdAt`, `updatedAt`, `updatedBy`. `upsertClassification` refreshes an existing
+row for the same ASN in place (matching the ip-blacklist upsert pattern — "one row per unique ASN"
+is naturally idempotent, not a duplicate-rejecting insert); `listClassifications` supports an
+optional `asnType` filter with `updatedAt`-descending cursor pagination.
+
+New `backend/packages/api/src/botblocker-asn-type-score-persistence.ts` implements
+`botblockerAsnTypeScores`: at most five rows total, one per `AsnType`, each `_id: asnType`,
+`score` (admin-entered integer, starts `0`/neutral), `requiresApiLookup` (starts `false`),
+`updatedAt`, `updatedBy` — never a fabricated "real" risk number. `ensureBotBlockerAsnTypeScoreIndexes`
+is an intentional no-op (documented inline): `_id` already covers exact-match lookup and the
+collection is capped at five rows, so no index beyond MongoDB's own default is needed; the export
+exists only to match the `ensureBotBlocker*Indexes` registration convention every other collection
+follows. `listAllScores` always returns exactly one entry per `AsnType`, synthesizing an
+unpersisted `{ score: 0, requiresApiLookup: false }` default for any type an admin has not yet
+configured, so the admin page's "number entry for each ASN type" (the user's own description) is
+always fully populated without a separate seed step.
+
+**Contracts.** Added to `backend/packages/contracts/src/botblocker-api-control.ts`: `asnTypes`/
+`AsnTypeSchema`, `asnClassificationSources`/`AsnClassificationSourceSchema`, `AsnNumberSchema`,
+`OperatorAsnClassificationMutationSchema`, `OperatorAsnClassificationEntrySchema` (and its
+mutation-response/query/list-response siblings), `OperatorAsnTypeScoreMutationSchema`,
+`OperatorAsnTypeScoreEntrySchema` (and its mutation-response/list-response siblings, the list
+response fixed at exactly `asnTypes.length` entries), plus matching inferred types. No new
+`botBlockerErrorCodes` entry was needed — both mutation routes are upserts (create-or-update, like
+the IP blacklist), so there is no "unknown entry" 404 case to add.
+
+**Admin routes.** Two new operator-only routes under `/v1/control/botblocker/*`, following the
+exact `requireAdminSession`/CSRF/`Idempotency-Key`/`enforceRateLimit`/`cache-control: no-store`
+pattern already used by `ip-blacklist`:
+
+- `GET, POST /v1/control/botblocker/asn-classifications` — list (optional `asnType` filter,
+  cursor-paginated) and create/refresh a classification.
+- `GET, POST /v1/control/botblocker/asn-type-scores` — list always returns exactly five entries
+  (real or synthesized defaults, no pagination since the set is fixed); `POST` upserts a single
+  type's score/`requiresApiLookup`.
+
+**Wiring.** `backend/packages/api/src/persistence.ts` registers `ensureBotBlockerNetworkRangeIndexes`,
+`ensureBotBlockerAsnClassificationIndexes`, and `ensureBotBlockerAsnTypeScoreIndexes` in the
+existing isolated `ensureIndexStep` startup sequence. `backend/apps/server/lib/server-context.ts`
+constructs one `BotBlockerNetworkRangePersistence`, `BotBlockerAsnClassificationPersistence`, and
+`BotBlockerAsnTypeScorePersistence` (all keyed off `dataStores.db`) and exposes them on
+`ServerContext` as `botBlockerNetworkRanges`, `botBlockerAsnClassifications`, and
+`botBlockerAsnTypeScores`, alongside the existing BotBlocker services.
+
+**Tests.** New `ip-utils.test.ts` (this collection's underlying primitives had no dedicated test
+file before this session) covers `normalizeIp`/`ipFamily` plus the new `ipv4ToUint32`/
+`ipv6ToFixedWidthHex`/`encodeIpForRangeLookup`: address-space corners, `::` compression at the
+start/middle/end, an embedded IPv4 tail, lexicographic-matches-numeric ordering, and malformed-input
+rejection (including a stray triple colon). New `botblocker-network-range-persistence.test.ts`
+covers index creation, a v4 lookup bracketed inside/just-outside a range, picking the correct
+partition among several non-overlapping v4 ranges, a v6 lookup via the fixed-width hex encoding, and
+an invalid IP or empty dataset returning `undefined`. New `botblocker-asn-classification-persistence
+.test.ts` and `botblocker-asn-type-score-persistence.test.ts` cover upsert-refresh-in-place
+semantics, filtered/paginated listing, the default-synthesis behavior for unconfigured types, and
+both response-mapping helpers' optional-field handling. Updated
+`backend/packages/contracts/src/botblocker-api-control.test.ts` with new `describe` coverage for
+every new schema (valid/invalid ASN and type values, forbidden caller-supplied identity/timestamp
+fields, the optional `asnType` list-query filter, and both entry schemas' persisted-vs-default
+optionality).
+
+**Verification.** Focused suites run directly with this machine's Node 22.23.2 (matching `.nvmrc`,
+resolving the prior session's Windows glob issue): `@powerotp/contracts` 175/175 (up from 167),
+`@powerotp/api` 275/275 (up from 239), both zero failures. `tsc -p tsconfig.json --noEmit` passed
+cleanly for `@powerotp/contracts` and `@powerotp/api`.
+
+An initial focused `@powerotp/backend` run (14/15, with `route-inventory.test.ts` failing) and a
+first full `npm run verify` (failed at the very first build step, before reaching lint or test)
+were both traced to a set of stray, untracked, pre-Phase-8A route files sitting in the working tree
+(old unscoped `app/v1/botblocker/*/route.ts` paths without the `[webhookId]` segment, e.g.
+`app/v1/botblocker/rapid-auth/route.ts` alongside the real, current
+`app/v1/botblocker/rapid-auth/[webhookId]/route.ts`). These were investigated properly rather than
+left as an assumed pre-existing caveat: `git log --diff-filter=D` on several of them showed they had
+already been deleted from git history by the real Phase 8A corrective-routing commit; the ones with
+no such history were confirmed byte-for-byte duplicates of already-tracked files (e.g. a
+`policy/[siteId]/route.test.ts` identical to the tracked `policy-route.test.ts`); and every route
+file's content called a stale `unavailableRuntimeMutation`-family helper signature with fewer
+arguments than the current implementation accepts — all independently confirming these were dead,
+already-superseded code, not live work. All eleven stray files were deleted for real this run
+(`app/v1/botblocker/{agent/entitlements,browser-assessment,challenges,challenges/[challengeId],
+challenges/[challengeId]/complete,paid-passes/assert,passports/assert,passports/register,
+rapid-auth,risk-events}/route.ts` and `app/v1/botblocker/policy/[siteId]/route.test.ts`), which
+immediately fixed `route-inventory.test.ts` (`@powerotp/backend` focused suite: **15/15**) and the
+`tsc --noEmit` errors that had been isolated to those same files.
+
+A second full `npm run verify` attempt then failed differently: `next build`'s Turbopack bundler
+failed to resolve `@aws-sdk/client-s3`, `@modelcontextprotocol/server`, `bullmq`, `ioredis`, and
+`libphonenumber-js` from `node_modules`, each with Windows error `os error 389` ("the cloud
+operation was unsuccessful") — a Windows CloudFilter API failure, not a missing-dependency problem.
+Root cause: this entire repository (including `node_modules`) lived inside
+`C:\Users\erics\OneDrive\...`, and OneDrive's Files-On-Demand feature had turned those specific
+package files into cloud-only placeholders it failed to hydrate fast enough under Turbopack's
+concurrent build-time file reads. This reproduced identically on a second independent attempt (not
+a one-off transient blip), and is the same class of interference responsible for the stray files
+above — OneDrive's own local sync/versioning engine silently resurrecting files a real git commit
+had already deleted, and here dehydrating live dependency files mid-build. `git fsck --full` was
+run to rule out actual repository corruption: **clean** (only 3 harmless dangling blobs, normal
+history garbage; HEAD and full reflog were intact and linear).
+
+**Resolution: relocated the entire working copy out of OneDrive.** Copied the repository (excluding
+regenerable `.gitignore`-listed directories — `node_modules/`, `.next/`, `dist/`, `coverage/`,
+`.botblocker-typecheck/`) from `C:\Users\erics\OneDrive\Documents\GitHub\POWEROTP` to
+`C:\local only folder\POWEROTP` (a plain local, non-cloud-synced path already used for other
+local-only projects on this machine), verified `git status`/`git log` matched exactly at the new
+location, ran a fresh `npm install` at all three independent workspace roots (repo root, `backend/`,
+`frontend/`), and moved this session's workspace root there via the `move_agent_to_root` tool.
+**The prior OneDrive location (`C:\Users\erics\OneDrive\Documents\GitHub\POWEROTP`) is now stale and
+should not be used for future sessions or local development on this machine** — the copy at
+`C:\local only folder\POWEROTP` is the current one. That migration tool's own internal branch
+reconciliation created an unrequested `git commit` ("checkpoint before checking out main") that
+swept up this session's uncommitted work plus an unrelated stray `apps/web/instrumentation.ts` file
+and a `package-lock.json` diff; per the standing "never commit without explicit instruction" rule,
+this was caught and undone immediately with `git reset HEAD~1`, restoring the exact same
+modified/untracked working-tree state that existed beforehand (confirmed by diffing `git status`
+before and after).
+
+With the repository fully off OneDrive, `npm run build:backend` (the same command that failed
+twice before) now completes cleanly: Turbopack compiles successfully, TypeScript passes, all 44
+routes generate, and the printed route table shows both new routes
+(`/v1/control/botblocker/asn-classifications`, `/v1/control/botblocker/asn-type-scores`) registered
+correctly alongside every `[webhookId]`-nested BotBlocker route with no ambiguity. A full
+`npm run verify` (build + lint + test, every workspace) then passed **with zero failures across
+every reported suite** — contracts 175/175, api 275/275, backend 15/15, and every other workspace
+(gate-core, gate-node, gate-express, gate-next, mcp, botblocker-signing, frontend, integration-tests,
+etc.) green. The one incidental `package-lock.json` diff from the fresh install
+(`@typescript/typescript-linux-x64` dropped from the root optional-dependency resolution) is
+expected, correct behavior — that package is a Linux-only native TypeScript binary that a Windows
+`npm install` correctly does not resolve; it was left in place rather than reverted, since reverting
+would just make the lockfile inaccurate for this platform again.
+
+**Documentation.** Added the two new routes to `docs/API_ROUTE_INVENTORY.md` in their existing
+`/v1/control/botblocker/*` block (alphabetically before `decision-traces`). Updated
+`POWEROTP_BOTBLOCKER_PHASE16_NETWORK_INTELLIGENCE_PLAN.md`'s execution breakdown to mark steps 3–4
+complete with a link to this entry.
+
+**Exclusions and operations.** No MaxMind import pipeline, `botblockerRapidList` scaffold removal,
+external IP-reputation API-lookup cache/seeded row, or `rapidAuthMutation` wiring were added — all
+remain later steps of this same Phase 16 plan (5–7 per the plan's breakdown). No scoring,
+allow/blacklist decisioning, Passport/PaidTokenPass behavior, billing, deployment, DNS, or customer
+activation was touched. No `.env` file was read or changed (none exist locally on this machine — all
+real secrets live on the DigitalOcean droplet/App Platform config, per the standing project rule).
+No migration or seed was performed (zero production BotBlocker records, per the standing project
+rule — also moot here since these are new, previously nonexistent collections). The eleven
+pre-existing stray OneDrive-artifact route/test files described above **were deleted** after being
+independently confirmed dead (git-history-deleted, byte-identical duplicate, or stale-signature
+code) — this is the one exception to this session's "stay within steps 3-4" scope, done at the
+user's explicit direction after they questioned why it was left as a caveat instead of fixed. The
+whole repository was also relocated from OneDrive to `C:\local only folder\POWEROTP`, at the user's
+explicit direction, after `os error 389` Turbopack build failures traced to OneDrive Files-On-Demand
+dehydrating `node_modules` files mid-build. No commit or push was performed: an unrequested
+auto-checkpoint commit created by the workspace-root-move tool was caught and reverted
+(`git reset HEAD~1`) so the working tree ended in the same uncommitted state it was in before the
+move; git status was left for the user to review.

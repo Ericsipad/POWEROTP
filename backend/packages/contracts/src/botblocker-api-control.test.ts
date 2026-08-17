@@ -4,6 +4,11 @@ import { describe, it } from "node:test";
 import {
   CustomerVisitorSchema,
   CustomerVisitorsQuerySchema,
+  OperatorAsnClassificationEntrySchema,
+  OperatorAsnClassificationMutationSchema,
+  OperatorAsnClassificationQuerySchema,
+  OperatorAsnTypeScoreEntrySchema,
+  OperatorAsnTypeScoreMutationSchema,
   OperatorBotBlockerHealthResponseSchema,
   OperatorDecisionTraceEntrySchema,
   OperatorIpBlacklistEntrySchema,
@@ -146,6 +151,141 @@ describe("operator IP blacklist contracts", () => {
         reason: "unexpected",
       }).success,
       false,
+    );
+  });
+});
+
+describe("operator ASN classification contracts", () => {
+  const mutation = {
+    asn: 64500,
+    asnType: "datacenter",
+    classificationSource: "ai_research",
+  };
+
+  it("accepts a minimal classification and defaults are not implied by the schema", () => {
+    assert.equal(OperatorAsnClassificationMutationSchema.safeParse(mutation).success, true);
+    assert.equal(
+      OperatorAsnClassificationMutationSchema.safeParse({
+        ...mutation,
+        asnOrg: "Example Hosting Org",
+        notes: "Confirmed via WHOIS + provider ASN listing",
+      }).success,
+      true,
+    );
+  });
+
+  it("rejects a non-numeric or non-positive ASN and an unknown type", () => {
+    assert.equal(
+      OperatorAsnClassificationMutationSchema.safeParse({ ...mutation, asn: "AS64500" }).success,
+      false,
+    );
+    assert.equal(
+      OperatorAsnClassificationMutationSchema.safeParse({ ...mutation, asn: -1 }).success,
+      false,
+    );
+    assert.equal(
+      OperatorAsnClassificationMutationSchema.safeParse({
+        ...mutation,
+        asnType: "residential_home",
+      }).success,
+      false,
+    );
+  });
+
+  it("rejects caller-supplied identity or timestamps", () => {
+    for (const forbidden of ["updatedBy", "createdAt", "updatedAt"]) {
+      assert.equal(
+        OperatorAsnClassificationMutationSchema.safeParse({
+          ...mutation,
+          [forbidden]: "caller-value",
+        }).success,
+        false,
+      );
+    }
+  });
+
+  it("requires every ASN type default to unclassified, never a fabricated type", () => {
+    const entry = {
+      asn: 64500,
+      asnType: "unclassified",
+      classificationSource: "manual",
+      updatedBy: "usr_platform_admin_1",
+      createdAt: NOW,
+      updatedAt: NOW,
+    };
+    assert.equal(OperatorAsnClassificationEntrySchema.safeParse(entry).success, true);
+  });
+
+  it("accepts an optional asnType filter on the list query", () => {
+    assert.equal(OperatorAsnClassificationQuerySchema.safeParse({}).success, true);
+    assert.equal(
+      OperatorAsnClassificationQuerySchema.safeParse({ asnType: "known_proxy" }).success,
+      true,
+    );
+    assert.equal(
+      OperatorAsnClassificationQuerySchema.safeParse({ asnType: "not-a-type" }).success,
+      false,
+    );
+  });
+});
+
+describe("operator ASN type score contracts", () => {
+  it("accepts an integer score and boolean API-lookup switch for every type", () => {
+    for (const asnType of [
+      "datacenter",
+      "residential_isp",
+      "isp_static",
+      "known_proxy",
+      "unclassified",
+    ]) {
+      assert.equal(
+        OperatorAsnTypeScoreMutationSchema.safeParse({
+          asnType,
+          score: 25,
+          requiresApiLookup: true,
+        }).success,
+        true,
+      );
+    }
+  });
+
+  it("rejects a non-integer score and an unknown type", () => {
+    assert.equal(
+      OperatorAsnTypeScoreMutationSchema.safeParse({
+        asnType: "datacenter",
+        score: 1.5,
+        requiresApiLookup: false,
+      }).success,
+      false,
+    );
+    assert.equal(
+      OperatorAsnTypeScoreMutationSchema.safeParse({
+        asnType: "not-a-type",
+        score: 0,
+        requiresApiLookup: false,
+      }).success,
+      false,
+    );
+  });
+
+  it("allows an entry with no persisted updatedBy/updatedAt (a synthesized default)", () => {
+    assert.equal(
+      OperatorAsnTypeScoreEntrySchema.safeParse({
+        asnType: "unclassified",
+        score: 0,
+        requiresApiLookup: false,
+      }).success,
+      true,
+    );
+    assert.equal(
+      OperatorAsnTypeScoreEntrySchema.safeParse({
+        asnType: "unclassified",
+        score: 0,
+        requiresApiLookup: false,
+        updatedBy: "usr_platform_admin_1",
+        updatedAt: NOW,
+      }).success,
+      true,
     );
   });
 });

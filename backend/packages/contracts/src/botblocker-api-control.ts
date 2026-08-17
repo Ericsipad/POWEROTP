@@ -122,6 +122,112 @@ export const OperatorIpBlacklistRevokeRequestSchema = z
   .object({ entryId: OpaqueIdSchema })
   .strict();
 
+/**
+ * `botblockerAsnClassifications`/`botblockerAsnTypeScores` (Phase 16
+ * network-intelligence design, execution step 4): one classification row
+ * per unique ASN, plus an admin-configurable score/API-lookup-requirement
+ * per ASN *type*. MaxMind GeoLite2 only supplies CIDR + ASN number + org
+ * name, never a type, so every ASN starts `unclassified` here; a later
+ * "AI research pass" (not built by this phase) writes real types through
+ * these same admin routes. This is not the "override" list the design
+ * plan's corrections section rejected — it is source-of-truth scoring
+ * configuration for the fast-immediate branch's ASN/subnet chain.
+ */
+export const asnTypes = [
+  "datacenter",
+  "residential_isp",
+  "isp_static",
+  "known_proxy",
+  "unclassified",
+] as const;
+export const AsnTypeSchema = z.enum(asnTypes);
+
+export const asnClassificationSources = ["ai_research", "manual", "heuristic"] as const;
+export const AsnClassificationSourceSchema = z.enum(asnClassificationSources);
+
+/** The bare ASN number as MaxMind's own CSV provides it (e.g. `64500` for
+ * `AS64500`), used as-is so a manually-loaded `botblockerNetworkRangesV4`/
+ * `V6` row's `asn` field joins directly against this collection's `_id`
+ * without a format-translation step. */
+export const AsnNumberSchema = z.number().int().positive();
+
+export const OperatorAsnClassificationMutationSchema = z
+  .object({
+    asn: AsnNumberSchema,
+    asnType: AsnTypeSchema,
+    classificationSource: AsnClassificationSourceSchema,
+    asnOrg: z.string().min(1).max(256).optional(),
+    notes: z.string().min(1).max(2_000).optional(),
+  })
+  .strict();
+
+export const OperatorAsnClassificationEntrySchema = z
+  .object({
+    asn: AsnNumberSchema,
+    asnType: AsnTypeSchema,
+    classificationSource: AsnClassificationSourceSchema,
+    asnOrg: z.string().min(1).max(256).optional(),
+    notes: z.string().min(1).max(2_000).optional(),
+    updatedBy: OpaqueIdSchema,
+    createdAt: z.string().datetime(),
+    updatedAt: z.string().datetime(),
+  })
+  .strict();
+
+export const OperatorAsnClassificationMutationResponseSchema = z
+  .object({ classification: OperatorAsnClassificationEntrySchema })
+  .strict();
+
+export const OperatorAsnClassificationQuerySchema = z
+  .object({
+    asnType: AsnTypeSchema.optional(),
+    cursor: CursorSchema.optional(),
+    limit: PageLimitSchema.default(50),
+  })
+  .strict();
+
+export const OperatorAsnClassificationListResponseSchema = z
+  .object({
+    classifications: z.array(OperatorAsnClassificationEntrySchema).max(200),
+    nextCursor: CursorSchema.optional(),
+  })
+  .strict();
+
+/** `score` starts at `0`/neutral and `requiresApiLookup` starts `false`
+ * for every type until an admin sets them — never a fabricated "real"
+ * risk number. Per the user: "admin page will have a number entry for
+ * each ASN type that will dynamically adjust scoring." */
+export const OperatorAsnTypeScoreMutationSchema = z
+  .object({
+    asnType: AsnTypeSchema,
+    score: z.number().int(),
+    requiresApiLookup: z.boolean(),
+  })
+  .strict();
+
+export const OperatorAsnTypeScoreEntrySchema = z
+  .object({
+    asnType: AsnTypeSchema,
+    score: z.number().int(),
+    requiresApiLookup: z.boolean(),
+    updatedBy: OpaqueIdSchema.optional(),
+    updatedAt: z.string().datetime().optional(),
+  })
+  .strict();
+
+export const OperatorAsnTypeScoreMutationResponseSchema = z
+  .object({ typeScore: OperatorAsnTypeScoreEntrySchema })
+  .strict();
+
+/** Always exactly one entry per `asnType` (defaults are synthesized for
+ * any type an admin has not yet configured), matching the fixed-size
+ * "number entry for each ASN type" admin page described above. */
+export const OperatorAsnTypeScoreListResponseSchema = z
+  .object({
+    typeScores: z.array(OperatorAsnTypeScoreEntrySchema).length(asnTypes.length),
+  })
+  .strict();
+
 export const rapidListKinds = ["allow", "blacklist"] as const;
 export const RapidListKindSchema = z.enum(rapidListKinds);
 export const rapidListIndicatorKinds = [
@@ -247,6 +353,21 @@ export type OperatorIpBlacklistQuery = z.infer<
 export type OperatorIpBlacklistRevokeRequest = z.infer<
   typeof OperatorIpBlacklistRevokeRequestSchema
 >;
+export type AsnType = z.infer<typeof AsnTypeSchema>;
+export type AsnClassificationSource = z.infer<typeof AsnClassificationSourceSchema>;
+export type OperatorAsnClassificationMutation = z.infer<
+  typeof OperatorAsnClassificationMutationSchema
+>;
+export type OperatorAsnClassificationEntry = z.infer<
+  typeof OperatorAsnClassificationEntrySchema
+>;
+export type OperatorAsnClassificationQuery = z.infer<
+  typeof OperatorAsnClassificationQuerySchema
+>;
+export type OperatorAsnTypeScoreMutation = z.infer<
+  typeof OperatorAsnTypeScoreMutationSchema
+>;
+export type OperatorAsnTypeScoreEntry = z.infer<typeof OperatorAsnTypeScoreEntrySchema>;
 export type RapidListKind = z.infer<typeof RapidListKindSchema>;
 export type RapidListIndicatorKind = z.infer<typeof RapidListIndicatorKindSchema>;
 export type OperatorRapidListMutation = z.infer<

@@ -2,8 +2,11 @@ import type { AccountClass, VerificationType } from "@powerotp/contracts";
 import type { Db } from "mongodb";
 
 import { ensureBillingIndexes } from "./billing-persistence.js";
+import { ensureBotBlockerAsnClassificationIndexes } from "./botblocker-asn-classification-persistence.js";
+import { ensureBotBlockerAsnTypeScoreIndexes } from "./botblocker-asn-type-score-persistence.js";
 import { ensureBotBlockerIntelligenceIndexes } from "./botblocker-intelligence-persistence.js";
 import { ensureBotBlockerIpBlacklistIndexes } from "./botblocker-ip-blacklist-persistence.js";
+import { ensureBotBlockerNetworkRangeIndexes } from "./botblocker-network-range-persistence.js";
 import { ensureBotBlockerPolicyIndexes } from "./botblocker-policy-persistence.js";
 import { ensureBotBlockerSiteCredentialIndexes } from "./botblocker-site-credential-persistence.js";
 import { ensureBotBlockerSiteIndexes } from "./botblocker-site-persistence.js";
@@ -232,6 +235,9 @@ export async function ensureIndexes(db: Db) {
     ensureIndexStep("botBlockerSiteCredential", () => ensureBotBlockerSiteCredentialIndexes(db)),
     ensureIndexStep("botBlockerIntelligence", () => ensureBotBlockerIntelligenceIndexes(db)),
     ensureIndexStep("botBlockerIpBlacklist", () => ensureBotBlockerIpBlacklistIndexes(db)),
+    ensureIndexStep("botBlockerNetworkRange", () => ensureBotBlockerNetworkRangeIndexes(db)),
+    ensureIndexStep("botBlockerAsnClassification", () => ensureBotBlockerAsnClassificationIndexes(db)),
+    ensureIndexStep("botBlockerAsnTypeScore", () => ensureBotBlockerAsnTypeScoreIndexes(db)),
     ensureIndexStep("botBlockerPolicy", () => ensureBotBlockerPolicyIndexes(db)),
   ]);
 }

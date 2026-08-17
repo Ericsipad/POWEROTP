@@ -290,13 +290,21 @@ This is larger than one fresh-session unit per this project's own "20% of contex
 (see [`POWEROTP_BOTBLOCKER_DEVELOPMENT_PHASES.md`](POWEROTP_BOTBLOCKER_DEVELOPMENT_PHASES.md#session-size-and-handoff-rule)).
 Suggested split, in dependency order:
 
-1. IP-hash reversal + doc corrections (self-contained, unblocks everything else designed around
-   raw IP storage)
-2. `botblockerIpBlacklistV4`/`V6` dedicated fast tables + admin CRUD — fast-immediate branch
-3. `botblockerNetworkRangesV4`/`V6` collection shape/indexes for each — fast-immediate branch.
-   No import pipeline: MaxMind CSVs load directly into MongoDB manually (see correction above).
-4. `botblockerAsnClassifications` + `botblockerAsnTypeScores` + admin routes — fast-immediate
-   branch
+1. **Status: complete (2026-08-16).** IP-hash reversal + doc corrections (self-contained, unblocks
+   everything else designed around raw IP storage). See
+   [`POWEROTP_BOTBLOCKER_AS_BUILT.md`](POWEROTP_BOTBLOCKER_AS_BUILT.md#2026-08-16--botblocker-phase-16-partial-ip-hash-reversal-and-dedicated-ip-blacklist)'s
+   dated entry for exact files/tests/verification.
+2. **Status: complete (2026-08-16).** `botblockerIpBlacklistV4`/`V6` dedicated fast tables + admin
+   CRUD — fast-immediate branch. Same as-built entry as step 1 above covers this step too (both
+   shipped in the same session/commit).
+3. **Status: complete (2026-08-17).** `botblockerNetworkRangesV4`/`V6` collection shape/indexes
+   for each, plus the synchronous indexed range lookup — fast-immediate branch. No import
+   pipeline: MaxMind CSVs load directly into MongoDB manually (see correction above). See
+   [`POWEROTP_BOTBLOCKER_AS_BUILT.md`](POWEROTP_BOTBLOCKER_AS_BUILT.md#2026-08-17--botblocker-phase-16-partial-network-ranges-asn-classification-and-type-scores)'s
+   dated entry for exact files/tests/verification.
+4. **Status: complete (2026-08-17).** `botblockerAsnClassifications` + `botblockerAsnTypeScores` +
+   admin routes — fast-immediate branch. Same as-built entry as step 3 above covers this step too
+   (both shipped in the same session).
 5. Remove the retired `botblockerRapidList` scaffold (contracts + route)
 6. `botblockerIpApiLookupsV4`/`V6` cache + seeded placeholder row, triggered only by
    `requiresApiLookup`, awaited (not fire-and-forget) — wait-for-full-result branch

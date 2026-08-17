@@ -2,11 +2,14 @@ import { createAlertQueue, createAlertWorker, scheduleAlertChecks } from "@power
 import { AuthService } from "@powerotp/api/auth-service.js";
 import { BalanceService } from "@powerotp/api/balance-service.js";
 import { BillingChargeService } from "@powerotp/api/billing-charge-service.js";
+import { BotBlockerAsnClassificationPersistence } from "@powerotp/api/botblocker-asn-classification-persistence.js";
+import { BotBlockerAsnTypeScorePersistence } from "@powerotp/api/botblocker-asn-type-score-persistence.js";
 import { createBotBlockerKeyRing } from "@powerotp/api/botblocker-config.js";
 import { BotBlockerIngestionPersistence } from "@powerotp/api/botblocker-ingestion-persistence.js";
 import { BotBlockerIngestionService } from "@powerotp/api/botblocker-ingestion-service.js";
 import { BotBlockerIntelligencePersistence } from "@powerotp/api/botblocker-intelligence-persistence.js";
 import { BotBlockerIpBlacklistPersistence } from "@powerotp/api/botblocker-ip-blacklist-persistence.js";
+import { BotBlockerNetworkRangePersistence } from "@powerotp/api/botblocker-network-range-persistence.js";
 import { BotBlockerOperationsService } from "@powerotp/api/botblocker-operations-service.js";
 import { BotBlockerPolicyControlService } from "@powerotp/api/botblocker-policy-control-service.js";
 import { BotBlockerPolicyPersistence } from "@powerotp/api/botblocker-policy-persistence.js";
@@ -54,6 +57,9 @@ export interface ServerContext {
   botBlockerVisitorTokens: BotBlockerVisitorTokenService;
   botBlockerIngestion: BotBlockerIngestionService;
   botBlockerIpBlacklist: BotBlockerIpBlacklistPersistence;
+  botBlockerNetworkRanges: BotBlockerNetworkRangePersistence;
+  botBlockerAsnClassifications: BotBlockerAsnClassificationPersistence;
+  botBlockerAsnTypeScores: BotBlockerAsnTypeScorePersistence;
   botBlockerPolicy: BotBlockerPolicyService;
   botBlockerPolicyControl: BotBlockerPolicyControlService;
   botBlockerOperations: BotBlockerOperationsService;
@@ -153,6 +159,9 @@ async function buildServerContext(): Promise<ServerContext> {
     config,
   );
   const botBlockerIpBlacklist = new BotBlockerIpBlacklistPersistence(dataStores.db);
+  const botBlockerNetworkRanges = new BotBlockerNetworkRangePersistence(dataStores.db);
+  const botBlockerAsnClassifications = new BotBlockerAsnClassificationPersistence(dataStores.db);
+  const botBlockerAsnTypeScores = new BotBlockerAsnTypeScorePersistence(dataStores.db);
   const botBlockerPolicyPersistence = new BotBlockerPolicyPersistence(
     dataStores.db,
     dataStores.client,
@@ -212,6 +221,9 @@ async function buildServerContext(): Promise<ServerContext> {
     botBlockerVisitorTokens,
     botBlockerIngestion,
     botBlockerIpBlacklist,
+    botBlockerNetworkRanges,
+    botBlockerAsnClassifications,
+    botBlockerAsnTypeScores,
     botBlockerPolicy,
     botBlockerPolicyControl,
     botBlockerOperations,
