@@ -2929,24 +2929,38 @@ to either disable OneDrive Files-On-Demand for this folder or force a full local
 (e.g. `attrib -U` a targeted rehydration, or right-click "Always keep on this device" on the repo
 folder) before `npm run verify`'s build/lint/test chain can run to completion on this machine.
 
-**Post-implementation discovery: this session ran in the stale OneDrive location.** While pushing
-this session's commit, `git push` was rejected because `origin/main` already had a commit
-(`899facf`) not present locally — a parallel session's steps 3–4 work, pushed from
-`C:\local only folder\POWEROTP` rather than the `C:\Users\erics\OneDrive\Documents\GitHub\POWEROTP`
-path this session was explicitly directed to use. That commit's own as-built entry (the one directly
-above this one, after conflict resolution) records that the parallel session traced this same class
-of `os error 389` Turbopack failure to OneDrive Files-On-Demand, deleted eleven confirmed-dead stray
-route files, and **relocated the entire repository to `C:\local only folder\POWEROTP`, explicitly
-flagging the OneDrive path as stale and not to be used for future sessions.** This session had no
-way to know that when it started (it was explicitly pointed at the OneDrive path in its handoff
-prompt), which is exactly why it hit the same environment failure class again. A `git rebase
-origin/main` reconciled the two histories: all of steps 3–4's files were confirmed byte-identical
-between both sessions' independent implementations before rebasing, so only this session's unique
-step-5-specific changes (contracts, test, route deletion, docs) needed manual conflict resolution,
-done by hand for the four conflicting files
-(`backend/packages/contracts/src/botblocker-api-control.ts` and `.test.ts`, this document, and the
-plan document). **Future sessions should use `C:\local only folder\POWEROTP`, not the OneDrive
-path, per the parallel session's already-pushed finding.**
+**Correction: steps 3–4 were already committed and pushed before this session started.** This
+session's own handoff prompt (from the immediately preceding session) stated steps 3–4 were
+uncommitted, and this session's local OneDrive checkout's `git status` agreed (`up to date with
+origin/main` at `74ad253`) — but that was a stale local remote-tracking ref, not reality: the
+preceding session had in fact already committed and pushed that work (`899facf`) from a different
+local checkout (`C:\local only folder\POWEROTP`) before this session began, and its own as-built
+entry recorded that push. `git push` at the end of this session was rejected for exactly that
+reason (`origin/main` had a commit this checkout hadn't fetched), which is what surfaced the stale
+handoff. **This is a recurring class of mistake: writing an as-built entry/handoff describing
+"not committed/pushed" and then a commit+push actually happens afterward (by the same session,
+a follow-up action, or the user) without the written record being corrected** — a future session
+then inherits stale instructions and risks redoing or re-diverging from already-shipped work
+exactly as happened here. The fix applied going forward: **push first, then write the as-built
+entry and next-session handoff last**, so the written record always reflects the true final state
+rather than a snapshot from before the last push.
+
+Once the stale-fetch state was discovered, `git fetch origin` confirmed `899facf` (steps 3–4,
+already shipped, containing files byte-identical to this session's own independently-produced
+copies of the same files) and `git rebase origin/main` replayed this session's step-5-only delta
+on top of it cleanly (all steps 3–4 files matched with zero diff; only this session's unique
+changes — `backend/packages/contracts/src/botblocker-api-control.ts` and `.test.ts`, this document,
+and the plan document — needed manual conflict resolution, done by hand). The result is a clean,
+linear history: `74ad253` → `899facf` (steps 3–4) → `f423cc7` (step 5 only), matching the plan's
+own step boundaries with no duplicated or redundant content.
+
+`899facf`'s own as-built entry (directly above this one) also separately records that the preceding
+session relocated the repository to `C:\local only folder\POWEROTP` after tracing the `os error 389`
+Turbopack failures (same class this session's own Verification section above independently
+rediscovered) to OneDrive Files-On-Demand, and flagged the OneDrive path as stale for future local
+development. That relocation is real and already reflected in `899facf`'s history; it is unrelated
+to the stale-handoff issue corrected in this paragraph, which was purely about the written
+commit/push status of steps 3–4, not about which local path is preferred.
 
 **Documentation.** Updated `POWEROTP_BOTBLOCKER_PHASE16_NETWORK_INTELLIGENCE_PLAN.md`'s execution
 breakdown to mark step 5 complete with a link to this entry.
@@ -2955,7 +2969,6 @@ breakdown to mark step 5 complete with a link to this entry.
 or `rapidAuthMutation` wiring were added — both remain later steps of this same Phase 16 plan (6–7
 per the plan's breakdown). No scoring, allow/blacklist decisioning, Passport/PaidTokenPass
 behavior, billing, deployment, DNS, or customer activation was touched. No `.env` file was read or
-changed. No migration or seed was performed. **No commit or push was performed**; the steps 3–4
-work from the immediately preceding session remains uncommitted alongside this session's step 5
-changes, exactly as before — git status was left for the user to review and decide how to commit
-(together, separately, or in some other split).
+changed. No migration or seed was performed. **This session's commit was pushed to `origin/main`
+as `f423cc7`** (steps 3–4 were already pushed as `899facf` before this session started; this
+session added only the step-5 delta on top, per the correction above).
