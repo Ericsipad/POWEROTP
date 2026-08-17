@@ -11,6 +11,7 @@ import { BotBlockerIntelligencePersistence } from "@powerotp/api/botblocker-inte
 import { BotBlockerIpApiLookupPersistence } from "@powerotp/api/botblocker-ip-api-lookup-persistence.js";
 import { BotBlockerIpBlacklistPersistence } from "@powerotp/api/botblocker-ip-blacklist-persistence.js";
 import { BotBlockerIpReputationService } from "@powerotp/api/botblocker-ip-reputation-service.js";
+import { BotBlockerNetworkIntelligenceService } from "@powerotp/api/botblocker-network-intelligence-service.js";
 import { BotBlockerNetworkRangePersistence } from "@powerotp/api/botblocker-network-range-persistence.js";
 import { BotBlockerOperationsService } from "@powerotp/api/botblocker-operations-service.js";
 import { BotBlockerPolicyControlService } from "@powerotp/api/botblocker-policy-control-service.js";
@@ -64,6 +65,7 @@ export interface ServerContext {
   botBlockerNetworkRanges: BotBlockerNetworkRangePersistence;
   botBlockerAsnClassifications: BotBlockerAsnClassificationPersistence;
   botBlockerAsnTypeScores: BotBlockerAsnTypeScorePersistence;
+  botBlockerNetworkIntelligence: BotBlockerNetworkIntelligenceService;
   botBlockerPolicy: BotBlockerPolicyService;
   botBlockerPolicyControl: BotBlockerPolicyControlService;
   botBlockerOperations: BotBlockerOperationsService;
@@ -168,6 +170,13 @@ async function buildServerContext(): Promise<ServerContext> {
   const botBlockerNetworkRanges = new BotBlockerNetworkRangePersistence(dataStores.db);
   const botBlockerAsnClassifications = new BotBlockerAsnClassificationPersistence(dataStores.db);
   const botBlockerAsnTypeScores = new BotBlockerAsnTypeScorePersistence(dataStores.db);
+  const botBlockerNetworkIntelligence = new BotBlockerNetworkIntelligenceService(
+    botBlockerIpBlacklist,
+    botBlockerNetworkRanges,
+    botBlockerAsnClassifications,
+    botBlockerAsnTypeScores,
+    botBlockerIpReputation,
+  );
   const botBlockerPolicyPersistence = new BotBlockerPolicyPersistence(
     dataStores.db,
     dataStores.client,
@@ -232,6 +241,7 @@ async function buildServerContext(): Promise<ServerContext> {
     botBlockerNetworkRanges,
     botBlockerAsnClassifications,
     botBlockerAsnTypeScores,
+    botBlockerNetworkIntelligence,
     botBlockerPolicy,
     botBlockerPolicyControl,
     botBlockerOperations,

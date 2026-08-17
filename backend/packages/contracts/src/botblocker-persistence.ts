@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { AsnTypeSchema } from "./botblocker-api-control.js";
 import { BotBlockerChallengeStateSchema } from "./botblocker-challenge.js";
 import { RiskEventSchema } from "./botblocker-proofs.js";
 import {
@@ -43,6 +44,29 @@ export const IpObservationSchema = z
     { message: "lastObservedAt cannot precede firstObservedAt" },
   );
 
+/** Session-level snapshot of the fast-immediate network/ASN classification
+ * chain (Phase 16 step 7), taken once at gate-session creation. Purely
+ * informational network input — no final weighted/thresholded decision is
+ * derived from it here (Phase 17 scope). */
+const GateSessionNetworkClassificationSchema = z
+  .object({
+    asn: z.number().int().positive(),
+    asnOrg: z.string().min(1).max(256),
+    asnType: AsnTypeSchema,
+    score: z.number().int(),
+    requiresApiLookup: z.boolean(),
+  })
+  .strict();
+
+/** Session-level snapshot of an awaited external vendor lookup, taken only
+ * when the resolved ASN type required it. */
+const GateSessionIpReputationSchema = z
+  .object({
+    vendor: z.string().min(1).max(128),
+    score: z.number(),
+  })
+  .strict();
+
 export const GateSessionRecordSchema = ScopedRecordSchema.extend({
   gateSessionId: OpaqueIdSchema,
   userIntelligenceId: OpaqueIdSchema,
@@ -50,6 +74,8 @@ export const GateSessionRecordSchema = ScopedRecordSchema.extend({
   ip: TrustedProxyIpSchema.optional(),
   state: z.enum(["active", "ended"]),
   latestDecision: BotBlockerDecisionOutcomeSchema.optional(),
+  networkClassification: GateSessionNetworkClassificationSchema.optional(),
+  ipReputation: GateSessionIpReputationSchema.optional(),
   lastAppliedSequence: z.number().int().min(-1),
   startedAt: z.string().datetime(),
   lastObservedAt: z.string().datetime(),

@@ -5,6 +5,7 @@ import {
   BrowserEvidenceSchema,
   RiskEventBatchSchema,
   type BehaviorReport,
+  type BotBlockerDecisionOutcome,
   type BrowserEvidence,
   type RiskEventBatch,
 } from "@powerotp/contracts";
@@ -15,7 +16,11 @@ import {
   BotBlockerIngestionPersistenceError,
   type BotBlockerIngestionResult,
 } from "./botblocker-ingestion-persistence.js";
-import type { BotBlockerScope } from "./botblocker-intelligence-persistence.js";
+import type {
+  BotBlockerScope,
+  GateSessionIpReputation,
+  GateSessionNetworkClassification,
+} from "./botblocker-intelligence-persistence.js";
 import type { AuthenticatedBotBlockerSite } from "./botblocker-site-credential-service.js";
 import type { ProductionConfig } from "./config.js";
 import { normalizeIp } from "./ip-utils.js";
@@ -46,6 +51,14 @@ export class BotBlockerIngestionService {
     gateSessionId: string;
     evidence: BrowserEvidence;
     trustedClientIp?: string;
+    /** Already-resolved fast-immediate-branch network intelligence
+     * (Phase 16 step 7's `rapidAuthMutation` wiring) to land on the gate
+     * session row at creation time. Absent for every other caller of this
+     * method (e.g. the browser-assessment late-session-creation fallback),
+     * which never resolved that chain. */
+    latestDecision?: BotBlockerDecisionOutcome;
+    networkClassification?: GateSessionNetworkClassification;
+    ipReputation?: GateSessionIpReputation;
   }) {
     const evidence = parseEvidence(input.evidence);
     const now = this.now();
@@ -57,6 +70,11 @@ export class BotBlockerIngestionService {
         ...(input.trustedClientIp
           ? { ip: this.#normalizedIp(input.trustedClientIp) }
           : {}),
+        ...(input.latestDecision ? { latestDecision: input.latestDecision } : {}),
+        ...(input.networkClassification
+          ? { networkClassification: input.networkClassification }
+          : {}),
+        ...(input.ipReputation ? { ipReputation: input.ipReputation } : {}),
         evidence,
         now,
       });

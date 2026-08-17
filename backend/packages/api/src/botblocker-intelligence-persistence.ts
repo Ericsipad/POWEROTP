@@ -1,4 +1,5 @@
 import type {
+  AsnType,
   BehaviorReport,
   BotBlockerChallengeState,
   BotBlockerDecisionOutcome,
@@ -25,6 +26,31 @@ export interface BotBlockerScope {
   siteId: string;
 }
 
+/** Session-level snapshot of the fast-immediate network/ASN classification
+ * chain (Phase 16 step 7 — `botblockerNetworkRangesV4`/`V6` ->
+ * `botblockerAsnClassifications` -> `botblockerAsnTypeScores`), taken once at
+ * gate-session creation. `asnOrg` is copied from the matched network-range
+ * row (always present there), not from the classification row's own
+ * optional denormalized copy. This is informational network input only —
+ * per the Phase 16 plan's explicit exclusions, no final weighted/thresholded
+ * decision is derived from it here (that is Phase 17 scope). */
+export interface GateSessionNetworkClassification {
+  asn: number;
+  asnOrg: string;
+  asnType: AsnType;
+  score: number;
+  requiresApiLookup: boolean;
+}
+
+/** Session-level snapshot of an awaited external vendor lookup
+ * (`BotBlockerIpReputationService`), taken only when the resolved ASN
+ * type's `requiresApiLookup` is `true`. The raw vendor payload stays in
+ * `botblockerIpApiLookupsV4`/`V6`'s own cache row, not duplicated here. */
+export interface GateSessionIpReputation {
+  vendor: string;
+  score: number;
+}
+
 export interface GateSessionDocument extends BotBlockerScope {
   _id: string;
   userIntelligenceId: string;
@@ -37,6 +63,8 @@ export interface GateSessionDocument extends BotBlockerScope {
   ip?: string;
   state: "active" | "ended";
   latestDecision?: BotBlockerDecisionOutcome;
+  networkClassification?: GateSessionNetworkClassification;
+  ipReputation?: GateSessionIpReputation;
   lastAppliedSequence: number;
   startedAt: Date;
   lastObservedAt: Date;

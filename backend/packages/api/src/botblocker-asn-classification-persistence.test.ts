@@ -24,6 +24,8 @@ function fakeDb() {
         indexes.push({ keys });
         return "index";
       },
+      findOne: async (filter: { _id: number }) =>
+        rows.find((row) => row._id === filter._id) ?? null,
       findOneAndUpdate: async (
         filter: { _id: number },
         update: {
@@ -124,6 +126,22 @@ describe("BotBlockerAsnClassificationPersistence", () => {
     assert.equal(updated.asnType, "datacenter");
     assert.equal(updated.classificationSource, "ai_research");
     assert.equal(updated.asnOrg, undefined);
+  });
+
+  it("finds a classification by ASN, or undefined for an unclassified/unknown ASN", async () => {
+    const { db } = fakeDb();
+    const persistence = new BotBlockerAsnClassificationPersistence(db);
+    await persistence.upsertClassification({
+      asn: 64500,
+      asnType: "known_proxy",
+      classificationSource: "ai_research",
+      updatedBy: "usr_platform_admin",
+      now,
+    });
+
+    const found = await persistence.findByAsn(64500);
+    assert.equal(found?.asnType, "known_proxy");
+    assert.equal(await persistence.findByAsn(64501), undefined);
   });
 
   it("lists classifications filtered by asnType, most recently updated first", async () => {

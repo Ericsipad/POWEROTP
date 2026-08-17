@@ -3093,3 +3093,127 @@ customer activation was touched. No `.env` file was read or changed (none exist 
 machine — all real secrets live on the DigitalOcean droplet/App Platform config, per the standing
 project rule). No migration was performed; the one seeded placeholder row is an explicit,
 user-approved exception to "never mock data for dev/prod," not a migration.
+
+## 2026-08-17 — BotBlocker Phase 16 (partial): wire the two-branch decision into `rapidAuthMutation`
+
+**Status: Phase 16 in progress, not complete.** This entry covers step 7 of the eight-step execution
+breakdown in
+[`POWEROTP_BOTBLOCKER_PHASE16_NETWORK_INTELLIGENCE_PLAN.md`](POWEROTP_BOTBLOCKER_PHASE16_NETWORK_INTELLIGENCE_PLAN.md):
+replacing `rapidAuthMutation`'s hardcoded `decision: { status: "unavailable", reason:
+"not_implemented" }` with the real two-branch precedence (blacklist exact-match, then
+network-range -> ASN classification -> ASN type-score, then the awaited external vendor lookup
+only when required), and landing the resolved result on the gate session row at creation time.
+Steps 1–6 (IP-hash reversal, dedicated IP blacklist, network ranges, ASN classification/type
+scores, retiring the `botblockerRapidList` scaffold, the external IP-reputation vendor cache)
+shipped in the four prior sessions (commits `74ad253`, `899facf`, `f423cc7`, `6b71382`). Step 8 —
+the closing documentation pass (API route inventory, control matrix) beyond this entry — is **not
+implemented** and remains future fresh-session work.
+
+**Composed (now wired) network-intelligence service.** New
+`backend/packages/api/src/botblocker-network-intelligence-service.ts` implements
+`BotBlockerNetworkIntelligenceService#resolve(ip, now)`, composing the five already-built pieces
+named in the plan exactly per its "Runtime integration" mermaid sequence diagram: a dedicated
+IP-blacklist exact-match lookup short-circuits first (an active match — not revoked, not past its
+`expiresAt` — resolves `{ blacklisted: true }` without ever touching the network-range tables);
+otherwise a network-range lookup joins to `botblockerAsnClassifications` (an ASN with no
+persisted classification row is treated as `"unclassified"`, matching "every ASN defaulting to
+unclassified, never a fabricated type") and then to `botblockerAsnTypeScores#listAllScores` for
+that resolved type's `score`/`requiresApiLookup`; only when `requiresApiLookup` is `true` does it
+await `BotBlockerIpReputationService#getReputation` (already cache-checked/awaited internally,
+never fire-and-forget) before resolving. Per the plan's explicit exclusion ("no final
+weighted/thresholded risk score... Phase 17"), the network-range/ASN/vendor-score chain is
+returned as informational enrichment only (`networkClassification`/`ipReputation` on the
+resolution) — it never produces a visitor-facing outcome itself; a blacklist match is the only
+input this phase converts into a decision, and that conversion (`"otp"`) happens in
+`rapidAuthMutation`, not inside this service, keeping the service itself free of protocol-level
+response shaping.
+
+**`botblocker-asn-classification-persistence.ts`** gained `findByAsn(asn)`, a single-ASN lookup the
+network-intelligence chain needs (`listClassifications` was paginated/type-filtered only,
+insufficient for this join) — resolves `undefined` for an ASN with no row yet rather than a
+fabricated default document, leaving the "unclassified" substitution to the calling service per the
+plan's own convention.
+
+**Gate session enrichment lands at creation time (plan correction 5).** New optional fields
+`GateSessionDocument.networkClassification`/`.ipReputation` in
+`botblocker-intelligence-persistence.ts` (session-level snapshots: `{ asn, asnOrg, asnType, score,
+requiresApiLookup }` and `{ vendor, score }` respectively — the vendor's raw response payload stays
+in `botblockerIpApiLookupsV4`/`V6`'s own cache row, not duplicated onto every session).
+`GateSessionDocument.latestDecision` (declared since an earlier phase but never previously written
+by any caller) is now set to `"otp"` on a blacklist match. `BotBlockerSessionPersistence
+#openGateSession` and `BotBlockerIngestionService#startSession` both gained matching optional
+parameters, forwarded straight through to the insert path only — the pre-existing `existingById`
+idempotent-reuse branch is untouched, so a session created before this session's own enrichment ran
+(or created by a caller that never resolved it, e.g. the browser-assessment late-session-creation
+fallback) simply has no enrichment fields, exactly as "at creation time" implies rather than a
+later backfill. `backend/packages/contracts/src/botblocker-persistence.ts`'s `GateSessionRecordSchema`
+gained matching optional `networkClassification`/`ipReputation` sub-schemas (imported `AsnTypeSchema`
+from `botblocker-api-control.ts`, no circular import) to keep mirroring the real persistence shape,
+per the same convention step 1's `ip` field rename followed — this contract is not consumed by any
+route yet, so no other file needed touching for it.
+
+**`rapidAuthMutation` wiring.** `backend/apps/server/lib/botblocker-http.ts` now calls
+`context.botBlockerNetworkIntelligence.resolve(clientIp(request), new Date())` once, before
+`startSession`, and threads the result both into `startSession`'s new optional parameters (so the
+gate session row is enriched atomically at creation) and into the response's `decision` field: a
+blacklist match returns `{ status: "ready", outcome: "otp" }`; every other outcome (no client IP, no
+blacklist/range match, or a resolved type that does not require the vendor call) leaves `decision`
+exactly as it was before this session — `{ status: "unavailable", reason: "not_implemented",
+retryable: false }` — since no final scoring/threshold logic exists yet (Phase 17). This is a
+literal, non-inventive reading of the plan's own repeated "no final weighted/thresholded score"
+exclusion: the ASN/vendor-score chain is real, wired, and lands on the session row, but nothing in
+this phase converts a bare `score` number into a second visitor-facing outcome value beyond the two
+the protocol already defines (`allow`/`otp`) — that conversion is explicitly Phase 17's job once the
+user supplies weights/decay/threshold rules.
+
+**Wiring.** `backend/apps/server/lib/server-context.ts` constructs one
+`BotBlockerNetworkIntelligenceService` (wrapping the five already-constructed pieces:
+`botBlockerIpBlacklist`, `botBlockerNetworkRanges`, `botBlockerAsnClassifications`,
+`botBlockerAsnTypeScores`, `botBlockerIpReputation`) and exposes it on `ServerContext` as
+`botBlockerNetworkIntelligence`. No new persistence classes were added, matching the plan's own
+expectation for this step — only the one new composing service, plus the single `findByAsn` method
+on an already-existing persistence class.
+
+**Tests.** New `botblocker-network-intelligence-service.test.ts` covers: no client IP resolves no
+signal; an active blacklist match short-circuits before the network chain runs; a revoked entry and
+a past-`expiresAt` entry are both correctly treated as inactive and fall through to the network
+chain; an IP outside every loaded range resolves no signal; an ASN with no classification row
+defaults to `"unclassified"`; the fast-immediate branch returns without any vendor call when
+`requiresApiLookup` is `false`; the vendor lookup is awaited and its result attached only when
+`requiresApiLookup` is `true`; and the network classification still returns (with no `ipReputation`)
+when the vendor lookup itself resolves `undefined`. New coverage in
+`botblocker-asn-classification-persistence.test.ts` for `findByAsn` (found vs. unknown ASN). New
+coverage in `botblocker-session-persistence.test.ts` for both directions: all three new optional
+fields landing on a newly created session row, and all three being entirely absent (not present as
+`undefined` keys) when nothing was resolved.
+
+**Verification.** `@powerotp/contracts`: rebuilt (`tsc -p tsconfig.json`) cleanly; full workspace
+test suite passed **173/173** (unchanged from the prior entry — this session's contract change was
+additive/optional-only, no new or removed test cases). `@powerotp/api`: rebuilt cleanly; `tsc -p
+tsconfig.json --noEmit` passed with zero errors; full workspace test suite passed **302/302** (up
+from 290/290, +12 new tests, zero failures). `@powerotp/backend`: cleared the stale `.next/` and
+`tsconfig.tsbuildinfo` first (this session's `server-context.ts`/`botblocker-http.ts` changes would
+otherwise typecheck against a stale generated route/type cache), then `tsc --noEmit` passed with
+zero errors and the focused test list (`app/health/route.test.ts`, `app/route-inventory.test.ts`,
+`app/v1/botblocker/phase8-http.test.ts`, `app/v1/botblocker/policy-route.test.ts`,
+`lib/**/*.test.ts`) passed **15/15** (unchanged — `rapidAuthMutation` itself still has no dedicated
+unit-test file, matching its pre-existing untested status; its logic is now backed indirectly by the
+new `BotBlockerNetworkIntelligenceService` and session-persistence tests above, which exercise every
+branch this session added). A full `npm run verify` (build + lint + test, every workspace) then
+passed with **zero failures across every reported suite**, including the production Next.js build
+successfully compiling `rapidAuthMutation`'s new network-intelligence wiring.
+
+**Documentation.** Updated `POWEROTP_BOTBLOCKER_PHASE16_NETWORK_INTELLIGENCE_PLAN.md`'s execution
+breakdown to mark step 7 complete with a link to this entry.
+
+**Exclusions and operations.** No admin override list, no final weighted/thresholded score, and no
+Passport/paid-allow blacklist bypass were added — all remain explicitly out of scope (the first two
+permanently per the plan's own exclusions pending Phase 17 weights/decay/threshold rules, the third
+pending Phase 21-23 Passport/PaidTokenPass). No live external vendor HTTP integration exists —
+`ip-reputation-client.ts#lookup` remains the same intentional placeholder from the prior session,
+untouched by this one. No new persistence classes, admin routes, or contract mutation schemas were
+added. No scoring beyond what's already described in the plan's data model sections 1-5, no
+aggregation into `userIntelligence` (Phase 17), billing, deployment, DNS, or customer activation was
+touched. No `.env` file was read or changed. No migration or seed was performed. Step 8 (the closing
+documentation pass beyond this entry — API route inventory review, control matrix) remains for a
+future session. No commit or push was performed; git status was left for the user to review.

@@ -314,8 +314,10 @@ Suggested split, in dependency order:
    branch. See
    [`POWEROTP_BOTBLOCKER_AS_BUILT.md`](POWEROTP_BOTBLOCKER_AS_BUILT.md#2026-08-17--botblocker-phase-16-partial-external-ip-reputation-vendor-cache)'s
    dated entry for exact files/tests/verification.
-7. Wire the two-branch response into `rapidAuthMutation`, writing whichever result onto the new
-   session row at creation time
+7. **Status: complete (2026-08-17).** Wire the two-branch response into `rapidAuthMutation`,
+   writing whichever result onto the new session row at creation time. See
+   [`POWEROTP_BOTBLOCKER_AS_BUILT.md`](POWEROTP_BOTBLOCKER_AS_BUILT.md#2026-08-17--botblocker-phase-16-partial-wire-the-two-branch-decision-into-rapidauthmutation)'s
+   dated entry for exact files/tests/verification.
 8. Docs (as-built entry, API route inventory, control matrix) + focused tests per touched
    workspace, then one `npm run verify`
 

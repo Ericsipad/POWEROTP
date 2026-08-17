@@ -100,6 +100,16 @@ export class BotBlockerAsnClassificationPersistence {
     return entry;
   }
 
+  /** Single-ASN lookup for the fast-immediate branch's ranges ->
+   * classification -> type-score chain (Phase 16 step 7). Returns
+   * `undefined` for an ASN with no classification row yet — the caller
+   * treats that the same as an explicit `"unclassified"` row, matching
+   * "every ASN defaulting to unclassified, never a fabricated type." */
+  async findByAsn(asn: number): Promise<AsnClassificationDocument | undefined> {
+    const entry = await this.#classifications.findOne({ _id: asn });
+    return entry ?? undefined;
+  }
+
   listClassifications(options: {
     asnType?: AsnType;
     limit: number;

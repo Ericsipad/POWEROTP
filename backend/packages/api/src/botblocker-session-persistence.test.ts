@@ -206,6 +206,52 @@ describe("BotBlockerSessionPersistence", () => {
     assert.equal(state.intelligence.length, 2);
   });
 
+  it("lands the resolved network-intelligence result on the session row at creation time", async () => {
+    const state = fixture();
+    const session = await state.persistence.openGateSession({
+      scope,
+      gateSessionId: "bgs_intel_1234567890",
+      fingerprintHash: "a".repeat(64),
+      ip: "203.0.113.5",
+      evidence: browserEvidence,
+      latestDecision: "otp",
+      networkClassification: {
+        asn: 64500,
+        asnOrg: "Example Org",
+        asnType: "known_proxy",
+        score: 40,
+        requiresApiLookup: true,
+      },
+      ipReputation: { vendor: "acme-ip-intel", score: 70 },
+      now,
+    });
+
+    assert.equal(session.latestDecision, "otp");
+    assert.deepEqual(session.networkClassification, {
+      asn: 64500,
+      asnOrg: "Example Org",
+      asnType: "known_proxy",
+      score: 40,
+      requiresApiLookup: true,
+    });
+    assert.deepEqual(session.ipReputation, { vendor: "acme-ip-intel", score: 70 });
+  });
+
+  it("omits network-intelligence fields entirely when none were resolved", async () => {
+    const state = fixture();
+    const session = await state.persistence.openGateSession({
+      scope,
+      gateSessionId: "bgs_no_intel_123456",
+      fingerprintHash: "a".repeat(64),
+      evidence: browserEvidence,
+      now,
+    });
+
+    assert.equal("latestDecision" in session, false);
+    assert.equal("networkClassification" in session, false);
+    assert.equal("ipReputation" in session, false);
+  });
+
   it("rejects reuse of a session identifier from another project", async () => {
     const state = fixture({
       _id: "bgs_shared_123456789",

@@ -1,4 +1,4 @@
-import type { BrowserEvidence } from "@powerotp/contracts";
+import type { BotBlockerDecisionOutcome, BrowserEvidence } from "@powerotp/contracts";
 import type { Db, MongoClient } from "mongodb";
 
 import {
@@ -8,6 +8,8 @@ import {
   createUserIntelligenceId,
   type BotBlockerScope,
   type GateSessionDocument,
+  type GateSessionIpReputation,
+  type GateSessionNetworkClassification,
   type IpObservation,
   type UserIntelligenceDocument,
 } from "./botblocker-intelligence-persistence.js";
@@ -43,6 +45,13 @@ export class BotBlockerSessionPersistence {
     fingerprintHash: string;
     ip?: string;
     evidence: BrowserEvidence;
+    /** Set only when the fast-immediate branch's network intelligence
+     * chain (Phase 16 step 7) already resolved a visitor-facing outcome
+     * before the session was created — currently only a dedicated
+     * IP-blacklist match, which always implies `"otp"`. */
+    latestDecision?: BotBlockerDecisionOutcome;
+    networkClassification?: GateSessionNetworkClassification;
+    ipReputation?: GateSessionIpReputation;
     now: Date;
   }): Promise<GateSessionDocument> {
     const userIntelligenceId = createUserIntelligenceId();
@@ -121,6 +130,11 @@ export class BotBlockerSessionPersistence {
           fingerprintHash: input.fingerprintHash,
           ...(input.ip ? { ip: input.ip } : {}),
           state: "active",
+          ...(input.latestDecision ? { latestDecision: input.latestDecision } : {}),
+          ...(input.networkClassification
+            ? { networkClassification: input.networkClassification }
+            : {}),
+          ...(input.ipReputation ? { ipReputation: input.ipReputation } : {}),
           lastAppliedSequence: -1,
           startedAt: input.now,
           lastObservedAt: input.now,

@@ -93,6 +93,11 @@ export async function rapidAuthMutation(
       600,
       60,
     );
+    const requestIp = clientIp(request);
+    const intelligence = await context.botBlockerNetworkIntelligence.resolve(
+      requestIp,
+      new Date(),
+    );
     await context.botBlockerIngestion.startSession({
       scope: {
         customerId: site.customerId,
@@ -101,7 +106,12 @@ export async function rapidAuthMutation(
       },
       gateSessionId: body.gateSessionId,
       evidence: body.payload.browser.evidence,
-      ...(clientIp(request) ? { trustedClientIp: clientIp(request) } : {}),
+      ...(requestIp ? { trustedClientIp: requestIp } : {}),
+      ...(intelligence.blacklisted ? { latestDecision: "otp" } : {}),
+      ...(intelligence.networkClassification
+        ? { networkClassification: intelligence.networkClassification }
+        : {}),
+      ...(intelligence.ipReputation ? { ipReputation: intelligence.ipReputation } : {}),
     });
     const issued = context.botBlockerVisitorTokens.issue({
       projectId: site.projectId,
@@ -113,11 +123,9 @@ export async function rapidAuthMutation(
       status: "ready",
       visitorToken: issued.token,
       expiresAt: issued.claims.expiresAt,
-      decision: {
-        status: "unavailable",
-        reason: "not_implemented",
-        retryable: false,
-      },
+      decision: intelligence.blacklisted
+        ? { status: "ready", outcome: "otp" }
+        : { status: "unavailable", reason: "not_implemented", retryable: false },
     });
   } catch (error) {
     return mapBotBlockerRuntimeError(error);
