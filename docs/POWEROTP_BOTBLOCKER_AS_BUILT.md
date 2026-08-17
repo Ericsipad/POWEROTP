@@ -2796,8 +2796,9 @@ location, ran a fresh `npm install` at all three independent workspace roots (re
 should not be used for future sessions or local development on this machine** — the copy at
 `C:\local only folder\POWEROTP` is the current one. That migration tool's own internal branch
 reconciliation created an unrequested `git commit` ("checkpoint before checking out main") that
-swept up this session's uncommitted work plus an unrelated stray `apps/web/instrumentation.ts` file
-and a `package-lock.json` diff; per the standing "never commit without explicit instruction" rule,
+swept up this session's uncommitted work plus an unrelated stray `instrumentation.ts` file sitting
+under a legacy pre-separation top-level app directory (not part of any current workspace) and a
+`package-lock.json` diff; per the standing "never commit without explicit instruction" rule,
 this was caught and undone immediately with `git reset HEAD~1`, restoring the exact same
 modified/untracked working-tree state that existed beforehand (confirmed by diffing `git status`
 before and after).
