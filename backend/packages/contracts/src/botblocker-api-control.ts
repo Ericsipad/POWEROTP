@@ -228,48 +228,6 @@ export const OperatorAsnTypeScoreListResponseSchema = z
   })
   .strict();
 
-export const rapidListKinds = ["allow", "blacklist"] as const;
-export const RapidListKindSchema = z.enum(rapidListKinds);
-export const rapidListIndicatorKinds = [
-  "ip_prefix",
-  "asn",
-  "fingerprint_hash",
-  "passport_subject",
-] as const;
-export const RapidListIndicatorKindSchema = z.enum(rapidListIndicatorKinds);
-
-export const OperatorRapidListMutationSchema = z
-  .object({
-    kind: RapidListKindSchema,
-    indicatorKind: RapidListIndicatorKindSchema,
-    indicator: z.string().min(1).max(512),
-    reason: z.string().min(1).max(1_000),
-    expiresAt: z.string().datetime().optional(),
-  })
-  .strict();
-
-export const OperatorRapidListQuerySchema = z
-  .object({
-    kind: RapidListKindSchema.optional(),
-    indicatorKind: RapidListIndicatorKindSchema.optional(),
-    cursor: CursorSchema.optional(),
-    limit: PageLimitSchema.default(50),
-  })
-  .strict();
-
-export const OperatorRapidListEntrySchema = OperatorRapidListMutationSchema.extend({
-  entryId: OpaqueIdSchema,
-  createdAt: z.string().datetime(),
-  revokedAt: z.string().datetime().optional(),
-}).strict();
-
-export const OperatorRapidListResponseSchema = z
-  .object({
-    entries: z.array(OperatorRapidListEntrySchema).max(200),
-    nextCursor: CursorSchema.optional(),
-  })
-  .strict();
-
 export const OperatorDecisionTraceQuerySchema = z
   .object({
     gateSessionId: OpaqueIdSchema,
@@ -368,13 +326,6 @@ export type OperatorAsnTypeScoreMutation = z.infer<
   typeof OperatorAsnTypeScoreMutationSchema
 >;
 export type OperatorAsnTypeScoreEntry = z.infer<typeof OperatorAsnTypeScoreEntrySchema>;
-export type RapidListKind = z.infer<typeof RapidListKindSchema>;
-export type RapidListIndicatorKind = z.infer<typeof RapidListIndicatorKindSchema>;
-export type OperatorRapidListMutation = z.infer<
-  typeof OperatorRapidListMutationSchema
->;
-export type OperatorRapidListQuery = z.infer<typeof OperatorRapidListQuerySchema>;
-export type OperatorRapidListEntry = z.infer<typeof OperatorRapidListEntrySchema>;
 export type OperatorDecisionTraceQuery = z.infer<
   typeof OperatorDecisionTraceQuerySchema
 >;

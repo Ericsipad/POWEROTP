@@ -16,7 +16,6 @@ import {
   OperatorIpBlacklistQuerySchema,
   OperatorIpBlacklistRevokeRequestSchema,
   OperatorPolicyPublicationRequestSchema,
-  OperatorRapidListMutationSchema,
 } from "./botblocker-api-control.js";
 
 const SITE_ID = "site_0123456789abcdef";
@@ -291,45 +290,6 @@ describe("operator ASN type score contracts", () => {
 });
 
 describe("operator contracts", () => {
-  it("accepts rapid-list input without caller authority", () => {
-    assert.equal(
-      OperatorRapidListMutationSchema.safeParse({
-        kind: "blacklist",
-        indicatorKind: "asn",
-        indicator: "AS64500",
-        reason: "Confirmed abusive network",
-        expiresAt: "2026-09-13T00:00:00.000Z",
-      }).success,
-      true,
-    );
-  });
-
-  it("rejects caller signatures, scores, weights, ownership, and success", () => {
-    const valid = {
-      kind: "allow",
-      indicatorKind: "ip_prefix",
-      indicator: "192.0.2.0/24",
-      reason: "Reviewed test network",
-    };
-    for (const forbidden of [
-      "signature",
-      "score",
-      "weights",
-      "customerId",
-      "ownerId",
-      "success",
-      "unexpected",
-    ]) {
-      assert.equal(
-        OperatorRapidListMutationSchema.safeParse({
-          ...valid,
-          [forbidden]: forbidden === "success" ? true : "caller-value",
-        }).success,
-        false,
-      );
-    }
-  });
-
   it("keeps decision traces score-free", () => {
     const trace = {
       traceId: "trace_01234567890",

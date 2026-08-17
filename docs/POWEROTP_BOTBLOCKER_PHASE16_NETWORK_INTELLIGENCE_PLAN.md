@@ -305,7 +305,10 @@ Suggested split, in dependency order:
 4. **Status: complete (2026-08-17).** `botblockerAsnClassifications` + `botblockerAsnTypeScores` +
    admin routes — fast-immediate branch. Same as-built entry as step 3 above covers this step too
    (both shipped in the same session).
-5. Remove the retired `botblockerRapidList` scaffold (contracts + route)
+5. **Status: complete (2026-08-17).** Remove the retired `botblockerRapidList` scaffold
+   (contracts + route). See
+   [`POWEROTP_BOTBLOCKER_AS_BUILT.md`](POWEROTP_BOTBLOCKER_AS_BUILT.md#2026-08-17--botblocker-phase-16-partial-retire-the-botblockerrapidlist-scaffold)'s
+   dated entry for exact files/tests/verification.
 6. `botblockerIpApiLookupsV4`/`V6` cache + seeded placeholder row, triggered only by
    `requiresApiLookup`, awaited (not fire-and-forget) — wait-for-full-result branch
 7. Wire the two-branch response into `rapidAuthMutation`, writing whichever result onto the new

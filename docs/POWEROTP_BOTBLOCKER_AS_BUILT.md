@@ -2839,3 +2839,123 @@ dehydrating `node_modules` files mid-build. No commit or push was performed: an 
 auto-checkpoint commit created by the workspace-root-move tool was caught and reverted
 (`git reset HEAD~1`) so the working tree ended in the same uncommitted state it was in before the
 move; git status was left for the user to review.
+
+## 2026-08-17 — BotBlocker Phase 16 (partial): retire the `botblockerRapidList` scaffold
+
+**Status: Phase 16 in progress, not complete.** This entry covers step 5 of the eight-step
+execution breakdown in
+[`POWEROTP_BOTBLOCKER_PHASE16_NETWORK_INTELLIGENCE_PLAN.md`](POWEROTP_BOTBLOCKER_PHASE16_NETWORK_INTELLIGENCE_PLAN.md):
+full removal of the pre-existing `botblockerRapidList` scaffold. Steps 1–4 (IP-hash reversal,
+dedicated IP blacklist, network ranges, ASN classification/type scores) shipped in the two prior
+sessions (commit `74ad253`, and the uncommitted working-tree changes from the immediately preceding
+session — see the two dated entries directly above). Steps 6–8 — the external IP-reputation
+API-lookup cache, wiring the two-branch decision into `rapidAuthMutation`, and closing
+documentation — are **not implemented** and remain future fresh-session work per the plan's own
+session-size discipline. `rapidAuthMutation` in `backend/apps/server/lib/botblocker-http.ts` is
+unchanged and still returns the hardcoded `{ status: "unavailable", reason: "not_implemented" }`
+decision.
+
+**What was removed.** Per the plan's corrections section (item 2) and its "Retiring the existing
+`botblockerRapidList` scaffold entirely" section: there is no admin-managed "override" list — the
+only admin-facing configuration is the ASN-type score table already shipped in steps 3–4. This
+session deleted, rather than narrowed or renamed, every piece of the scaffold:
+
+- `backend/packages/contracts/src/botblocker-api-control.ts`: removed `rapidListKinds`,
+  `RapidListKindSchema`, `rapidListIndicatorKinds`, `RapidListIndicatorKindSchema`,
+  `OperatorRapidListMutationSchema`, `OperatorRapidListQuerySchema`,
+  `OperatorRapidListEntrySchema`, `OperatorRapidListResponseSchema`, and the inferred types
+  `RapidListKind`, `RapidListIndicatorKind`, `OperatorRapidListMutation`,
+  `OperatorRapidListQuery`, `OperatorRapidListEntry`. (`OperatorRapidListResponseSchema` had no
+  corresponding inferred type export to begin with.)
+- `backend/packages/contracts/src/botblocker-api-control.test.ts`: removed the
+  `OperatorRapidListMutationSchema` import and its two `describe("operator contracts")` cases
+  (`"accepts rapid-list input without caller authority"`,
+  `"rejects caller signatures, scores, weights, ownership, and success"`); the remaining cases in
+  that `describe` block (decision traces, operator health, policy publication) are unaffected.
+- `backend/apps/server/app/v1/control/botblocker/rapid-list/route.ts` and its containing
+  `rapid-list/` directory: deleted entirely (previously a stub returning `not_implemented` for
+  both `GET` and `POST`).
+- `docs/API_ROUTE_INVENTORY.md`: removed the `rapid-list` row from the
+  `/v1/control/botblocker/*` block.
+
+Before deleting, confirmed via a repo-wide search (excluding `node_modules`) that
+`OperatorRapidListMutationSchema`, `rapidListIndicatorKinds`, `RapidListKindSchema`,
+`RapidListIndicatorKindSchema`, and `rapid-list` had no other referrers anywhere in `backend/` —
+the three files above were the only ones touching the scaffold, exactly matching the plan's
+removal list. The only remaining hits after removal are historical/narrative mentions in this
+document, the Phase 16 plan itself, `POWEROTP_BOTBLOCKER_DEVELOPMENT_PHASES.md`'s Phase 8 charter
+list, and `POWEROTP_BOTBLOCKER_PLAN.md` — none of those are code and none were changed, since they
+describe past design/charter history rather than a live reference to the removed exports.
+
+**Verification.** `@powerotp/contracts`: rebuilt (`tsc -p tsconfig.json`) cleanly; focused run of
+`botblocker-api-control.test.ts` (`node --import tsx --test`) passed 18/18; full workspace test
+suite passed 173/173 (down from 175/175 in the prior entry, matching the two removed cases exactly,
+zero failures); `tsc -p tsconfig.typecheck.json` passed cleanly. `@powerotp/api` was unaffected by
+this step (no references to the scaffold existed there) but was rebuilt anyway
+(`tsc -p tsconfig.json`, run directly in that package since it is not a root npm workspace) so
+`@powerotp/backend` could resolve both packages' rebuilt `dist/` output.
+`@powerotp/backend`: after clearing a stale `.next/` directory (its generated
+`.next/types/validator.ts` still imported the just-deleted route file, which is expected — Next.js
+regenerates this file from the current route tree on the next build/typecheck, this is not a code
+defect), `tsc --noEmit` passed with zero errors and the focused test list
+(`app/health/route.test.ts`, `app/route-inventory.test.ts`,
+`app/v1/botblocker/phase8-http.test.ts`, `app/v1/botblocker/policy-route.test.ts`,
+`lib/**/*.test.ts`) passed 15/15 — including `route-inventory.test.ts`, which failed in the prior
+session's entry solely because of stray unscoped `app/v1/botblocker/*/route.ts` OneDrive-sync
+artifacts flagged in that entry; this session confirmed those stray files are no longer present in
+this working tree (resolved outside this session, as expected, since the prior entry described it
+as a human housekeeping action), so that pre-existing failure is gone on its own.
+
+A full `npm run verify` was attempted once per the project's own discipline; the `build` stage
+failed, but for a reason unrelated to this session's change and unrelated to the previously-flagged
+stray-route-file issue: Turbopack's production build repeatedly hit
+`Error: Module not found` for several third-party dependencies that are demonstrably present in
+`node_modules` (`bullmq`, `mongodb`, `ioredis`, `@aws-sdk/client-s3`,
+`@modelcontextprotocol/server`, `libphonenumber-js`), each accompanied by
+`Caused by: - The cloud operation was unsuccessful. (os error 389)` — a Windows/OneDrive
+Files-On-Demand cloud-placeholder I/O error, not a missing dependency (confirmed `Test-Path` true
+for all of them; a directory listing of one, `node_modules/bullmq`, returned no materialized
+children, consistent with an un-hydrated cloud placeholder). None of the failing modules
+(spaces-client, alert-worker, billing-daily-charge-worker, callback-worker,
+provider-reconcile-worker, verification-queue, dependencies, country-lookup) have any relationship
+to the `botblockerRapidList` scaffold removed this session. Retried the build once more (it ran
+over three minutes, longer than the first attempt, consistent with OneDrive re-hydrating
+placeholders) and it failed identically. This is a new manifestation of the same general "this
+machine's OneDrive-synced working tree interferes with Next.js/Turbopack builds" environment
+category the immediately preceding session's entry already flagged (there, ambiguous stray route
+files; here, un-hydrated cloud file placeholders for unrelated dependencies) — not a regression
+from this session's change, and not something to fix as part of BotBlocker work; it needs a human
+to either disable OneDrive Files-On-Demand for this folder or force a full local hydration
+(e.g. `attrib -U` a targeted rehydration, or right-click "Always keep on this device" on the repo
+folder) before `npm run verify`'s build/lint/test chain can run to completion on this machine.
+
+**Post-implementation discovery: this session ran in the stale OneDrive location.** While pushing
+this session's commit, `git push` was rejected because `origin/main` already had a commit
+(`899facf`) not present locally — a parallel session's steps 3–4 work, pushed from
+`C:\local only folder\POWEROTP` rather than the `C:\Users\erics\OneDrive\Documents\GitHub\POWEROTP`
+path this session was explicitly directed to use. That commit's own as-built entry (the one directly
+above this one, after conflict resolution) records that the parallel session traced this same class
+of `os error 389` Turbopack failure to OneDrive Files-On-Demand, deleted eleven confirmed-dead stray
+route files, and **relocated the entire repository to `C:\local only folder\POWEROTP`, explicitly
+flagging the OneDrive path as stale and not to be used for future sessions.** This session had no
+way to know that when it started (it was explicitly pointed at the OneDrive path in its handoff
+prompt), which is exactly why it hit the same environment failure class again. A `git rebase
+origin/main` reconciled the two histories: all of steps 3–4's files were confirmed byte-identical
+between both sessions' independent implementations before rebasing, so only this session's unique
+step-5-specific changes (contracts, test, route deletion, docs) needed manual conflict resolution,
+done by hand for the four conflicting files
+(`backend/packages/contracts/src/botblocker-api-control.ts` and `.test.ts`, this document, and the
+plan document). **Future sessions should use `C:\local only folder\POWEROTP`, not the OneDrive
+path, per the parallel session's already-pushed finding.**
+
+**Documentation.** Updated `POWEROTP_BOTBLOCKER_PHASE16_NETWORK_INTELLIGENCE_PLAN.md`'s execution
+breakdown to mark step 5 complete with a link to this entry.
+
+**Exclusions and operations.** No external IP-reputation API-lookup cache, seeded placeholder row,
+or `rapidAuthMutation` wiring were added — both remain later steps of this same Phase 16 plan (6–7
+per the plan's breakdown). No scoring, allow/blacklist decisioning, Passport/PaidTokenPass
+behavior, billing, deployment, DNS, or customer activation was touched. No `.env` file was read or
+changed. No migration or seed was performed. **No commit or push was performed**; the steps 3–4
+work from the immediately preceding session remains uncommitted alongside this session's step 5
+changes, exactly as before — git status was left for the user to review and decide how to commit
+(together, separately, or in some other split).
