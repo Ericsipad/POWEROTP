@@ -8,7 +8,9 @@ import { createBotBlockerKeyRing } from "@powerotp/api/botblocker-config.js";
 import { BotBlockerIngestionPersistence } from "@powerotp/api/botblocker-ingestion-persistence.js";
 import { BotBlockerIngestionService } from "@powerotp/api/botblocker-ingestion-service.js";
 import { BotBlockerIntelligencePersistence } from "@powerotp/api/botblocker-intelligence-persistence.js";
+import { BotBlockerIpApiLookupPersistence } from "@powerotp/api/botblocker-ip-api-lookup-persistence.js";
 import { BotBlockerIpBlacklistPersistence } from "@powerotp/api/botblocker-ip-blacklist-persistence.js";
+import { BotBlockerIpReputationService } from "@powerotp/api/botblocker-ip-reputation-service.js";
 import { BotBlockerNetworkRangePersistence } from "@powerotp/api/botblocker-network-range-persistence.js";
 import { BotBlockerOperationsService } from "@powerotp/api/botblocker-operations-service.js";
 import { BotBlockerPolicyControlService } from "@powerotp/api/botblocker-policy-control-service.js";
@@ -57,6 +59,8 @@ export interface ServerContext {
   botBlockerVisitorTokens: BotBlockerVisitorTokenService;
   botBlockerIngestion: BotBlockerIngestionService;
   botBlockerIpBlacklist: BotBlockerIpBlacklistPersistence;
+  botBlockerIpApiLookups: BotBlockerIpApiLookupPersistence;
+  botBlockerIpReputation: BotBlockerIpReputationService;
   botBlockerNetworkRanges: BotBlockerNetworkRangePersistence;
   botBlockerAsnClassifications: BotBlockerAsnClassificationPersistence;
   botBlockerAsnTypeScores: BotBlockerAsnTypeScorePersistence;
@@ -159,6 +163,8 @@ async function buildServerContext(): Promise<ServerContext> {
     config,
   );
   const botBlockerIpBlacklist = new BotBlockerIpBlacklistPersistence(dataStores.db);
+  const botBlockerIpApiLookups = new BotBlockerIpApiLookupPersistence(dataStores.db);
+  const botBlockerIpReputation = new BotBlockerIpReputationService(botBlockerIpApiLookups, config);
   const botBlockerNetworkRanges = new BotBlockerNetworkRangePersistence(dataStores.db);
   const botBlockerAsnClassifications = new BotBlockerAsnClassificationPersistence(dataStores.db);
   const botBlockerAsnTypeScores = new BotBlockerAsnTypeScorePersistence(dataStores.db);
@@ -221,6 +227,8 @@ async function buildServerContext(): Promise<ServerContext> {
     botBlockerVisitorTokens,
     botBlockerIngestion,
     botBlockerIpBlacklist,
+    botBlockerIpApiLookups,
+    botBlockerIpReputation,
     botBlockerNetworkRanges,
     botBlockerAsnClassifications,
     botBlockerAsnTypeScores,

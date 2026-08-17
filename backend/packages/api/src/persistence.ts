@@ -5,6 +5,7 @@ import { ensureBillingIndexes } from "./billing-persistence.js";
 import { ensureBotBlockerAsnClassificationIndexes } from "./botblocker-asn-classification-persistence.js";
 import { ensureBotBlockerAsnTypeScoreIndexes } from "./botblocker-asn-type-score-persistence.js";
 import { ensureBotBlockerIntelligenceIndexes } from "./botblocker-intelligence-persistence.js";
+import { ensureBotBlockerIpApiLookupIndexes } from "./botblocker-ip-api-lookup-persistence.js";
 import { ensureBotBlockerIpBlacklistIndexes } from "./botblocker-ip-blacklist-persistence.js";
 import { ensureBotBlockerNetworkRangeIndexes } from "./botblocker-network-range-persistence.js";
 import { ensureBotBlockerPolicyIndexes } from "./botblocker-policy-persistence.js";
@@ -235,6 +236,7 @@ export async function ensureIndexes(db: Db) {
     ensureIndexStep("botBlockerSiteCredential", () => ensureBotBlockerSiteCredentialIndexes(db)),
     ensureIndexStep("botBlockerIntelligence", () => ensureBotBlockerIntelligenceIndexes(db)),
     ensureIndexStep("botBlockerIpBlacklist", () => ensureBotBlockerIpBlacklistIndexes(db)),
+    ensureIndexStep("botBlockerIpApiLookup", () => ensureBotBlockerIpApiLookupIndexes(db)),
     ensureIndexStep("botBlockerNetworkRange", () => ensureBotBlockerNetworkRangeIndexes(db)),
     ensureIndexStep("botBlockerAsnClassification", () => ensureBotBlockerAsnClassificationIndexes(db)),
     ensureIndexStep("botBlockerAsnTypeScore", () => ensureBotBlockerAsnTypeScoreIndexes(db)),

@@ -2973,3 +2973,123 @@ behavior, billing, deployment, DNS, or customer activation was touched. No `.env
 changed. No migration or seed was performed. **This session's commit was pushed to `origin/main`
 as `f423cc7`** (steps 3–4 were already pushed as `899facf` before this session started; this
 session added only the step-5 delta on top, per the correction above).
+
+## 2026-08-17 — BotBlocker Phase 16 (partial): external IP-reputation vendor cache
+
+**Status: Phase 16 in progress, not complete.** This entry covers step 6 of the eight-step
+execution breakdown in
+[`POWEROTP_BOTBLOCKER_PHASE16_NETWORK_INTELLIGENCE_PLAN.md`](POWEROTP_BOTBLOCKER_PHASE16_NETWORK_INTELLIGENCE_PLAN.md):
+the `botblockerIpApiLookupsV4`/`V6` external vendor cache, its seeded placeholder row, and a
+composed-but-unwired awaited-lookup service. Steps 1–5 (IP-hash reversal, dedicated IP blacklist,
+network ranges, ASN classification/type scores, retiring the `botblockerRapidList` scaffold)
+shipped in the three prior sessions (commits `74ad253`, `899facf`, `f423cc7`). Steps 7–8 — wiring
+the two-branch decision into `rapidAuthMutation` and the closing documentation pass — are **not
+implemented** and remain future fresh-session work. `rapidAuthMutation` in
+`backend/apps/server/lib/botblocker-http.ts` is unchanged and still returns the hardcoded
+`{ status: "unavailable", reason: "not_implemented" }` decision; none of this session's new
+classes are called from any runtime route yet.
+
+**Cache persistence.** New `backend/packages/api/src/botblocker-ip-api-lookup-persistence.ts`
+implements `botblockerIpApiLookupsV4`/`V6` exactly as the plan's section 5 specifies: `_id`, `ip`
+(raw), `vendor` (a plain configured string label, never a hardcoded provider name — the user
+mentioned one informally as "ip.fino," likely a mishearing, per the plan's own caveat),
+`score`, `rawResponse` (stored as-received, unshaped), `queriedAt`, `expiresAt`. Family split and
+ID-prefix convention (`ipl4_`/`ipl6_`) match the shipped `botblockerIpBlacklistV4`/`V6` exactly.
+`ensureBotBlockerIpApiLookupIndexes` creates a unique `{ ip: 1 }` index plus a TTL index on
+`{ expiresAt: 1 }` (`expireAfterSeconds: 0`) per collection, then seeds the placeholder row.
+`BotBlockerIpApiLookupPersistence#findByIp` is the cache-check step the wait-for-full-result branch
+will run before ever calling the live vendor API (returns the row's own `expiresAt` rather than
+filtering expired rows out itself, so a future caller can distinguish "no row" from "expired row"
+if that ever matters); `#upsertEntry` refreshes an existing row for the same IP in place, matching
+the ip-blacklist/network-range upsert-refresh convention rather than a duplicate-rejecting insert.
+
+**Seeded placeholder row.** Per the user's explicit instruction (a documented exception to "never
+mock data for dev/prod," plan section 5) `ensureBotBlockerIpApiLookupIndexes` also performs a
+`$setOnInsert`-only upsert of exactly one row into `botblockerIpApiLookupsV4`, keyed on an RFC 5737
+`TEST-NET-3` address (`203.0.113.10`) that can never collide with a real visitor IP —
+`vendor: "placeholder"`, `score: 0`, a `rawResponse` explicitly noting it is a seed, and a 24-hour
+`expiresAt` from whichever boot inserted it. `$setOnInsert`-only (not refreshed on every boot) means
+it is genuinely idempotent — safe to call on every server start like every other
+`ensureBotBlocker*Indexes` step — and if the TTL index ever expires and deletes it, the next boot
+naturally reseeds it with a fresh `expiresAt`, the same self-healing convention
+`ProjectService#ensureDemoProject`'s doc comment describes.
+
+**Vendor client (typed "unavailable" placeholder, no live HTTP integration).** New
+`backend/packages/api/src/ip-reputation-client.ts` mirrors the existing
+`createSpacesClient` pattern (`backend/packages/api/src/spaces-client.ts`) exactly: a factory
+function, `createIpReputationVendorClient`, that returns `undefined` until all three new
+`BOTBLOCKER_IP_REPUTATION_VENDOR_NAME`/`_URL`/`_API_KEY` config values are set. Per the plan's own
+explicit exclusion ("no live external vendor HTTP integration until real credentials exist"), the
+returned client's `lookup` method is itself an intentional placeholder that always rejects — even
+once all three variables are configured, since no real vendor has been chosen yet and this
+project's own rule is to never fabricate a real HTTP integration against an unknown vendor's actual
+request/response shape. Implementing the real call later is a scoped, single-function change inside
+this one module.
+
+**Composed (unwired) awaited-lookup service.** New
+`backend/packages/api/src/botblocker-ip-reputation-service.ts` implements
+`BotBlockerIpReputationService#getReputation(ip, now)`, exactly matching plan correction 6
+("awaited, not fire-and-forget"): checks the cache by IP first via `findByIp`; if a row exists and
+is not yet past its `expiresAt`, returns it without any vendor call; otherwise, only if a vendor is
+configured, awaits `lookup`, persists the result via `upsertEntry` (fixed 24-hour freshness window,
+a caching-policy constant, not a user-configurable secret), and returns it. Resolves to `undefined`
+— never throws, never blocks indefinitely — for an invalid IP, an unconfigured vendor, or a failed
+vendor call, so a not-yet-credentialed or momentarily-unavailable vendor can never stall or break
+whatever step 7 builds around this. This service is constructed in `server-context.ts` (below) but
+is not called from any route yet — the actual `rapidAuthMutation` two-branch wiring that calls it is
+step 7, explicitly out of scope for this session.
+
+**Config.** `backend/packages/api/src/config.ts` gained three new optional fields —
+`BOTBLOCKER_IP_REPUTATION_VENDOR_NAME` (plain string), `BOTBLOCKER_IP_REPUTATION_VENDOR_URL` (must
+be a URL), `BOTBLOCKER_IP_REPUTATION_VENDOR_API_KEY` (plain string) — following the exact optional
+deferred-credential convention every other provider in this project uses (Stripe, Spaces, VoIP.ms).
+No cross-field `superRefine` requirement was added (matching the `SPACES_*` quartet's own
+convention of an inline all-or-nothing check inside the client factory, not a schema-level one).
+
+**Wiring.** `backend/packages/api/src/persistence.ts` registers
+`ensureBotBlockerIpApiLookupIndexes` in the existing isolated `ensureIndexStep` startup sequence.
+`backend/apps/server/lib/server-context.ts` constructs one `BotBlockerIpApiLookupPersistence` and
+one `BotBlockerIpReputationService` (the latter wrapping the former plus the vendor config) and
+exposes them on `ServerContext` as `botBlockerIpApiLookups`/`botBlockerIpReputation`, alongside the
+existing BotBlocker services — matching the same "construct now, wire into a route later" pattern
+steps 3–4's persistence classes already established.
+
+**Tests.** New `botblocker-ip-api-lookup-persistence.test.ts` covers index creation (including the
+TTL index), idempotent placeholder seeding across repeated calls, v4/v6 entry creation with
+family-prefixed IDs, upsert-refresh-in-place semantics, invalid-IP rejection, and cross-family
+`findByIp`. New `ip-reputation-client.test.ts` covers the all-or-nothing configured/unconfigured
+factory behavior and confirms `lookup` rejects as the documented placeholder. New
+`botblocker-ip-reputation-service.test.ts` covers: invalid IP short-circuits before touching the
+cache or vendor; a fresh unexpired cache hit never calls the vendor; a cache miss with no vendor
+configured resolves `undefined` without blocking; an expired cache row with no vendor configured
+also resolves `undefined`; and a configured vendor's failing call resolves `undefined` rather than
+throwing or writing a stale cache row.
+
+**Verification.** `@powerotp/contracts` was unaffected (no contract types were needed — this cache
+has no admin-facing schema, unlike the ASN/blacklist tables) but was rebuilt anyway so
+`@powerotp/api` resolved a fresh `dist/`. `@powerotp/api`: `tsc -p tsconfig.json` (build) and
+`tsc -p tsconfig.json --noEmit` (typecheck) both passed cleanly; the full workspace test suite
+passed **290/290** (up from 275/275 in the prior entry, +15 new tests, zero failures).
+`@powerotp/backend`: cleared the stale `.next/` and `tsconfig.tsbuildinfo` first (this session's
+`server-context.ts` change would otherwise typecheck against a stale generated route/type cache),
+then `tsc --noEmit` passed with zero errors and the focused test list (`app/health/route.test.ts`,
+`app/route-inventory.test.ts`, `app/v1/botblocker/phase8-http.test.ts`,
+`app/v1/botblocker/policy-route.test.ts`, `lib/**/*.test.ts`) passed **15/15**. A full
+`npm run verify` (build + lint + test, every workspace) then passed with **zero failures across
+every reported suite** — no OneDrive-related build interference this session, since the working
+copy already lives at `C:\local only folder\POWEROTP` (relocated in a prior session).
+
+**Documentation.** Updated `POWEROTP_BOTBLOCKER_PHASE16_NETWORK_INTELLIGENCE_PLAN.md`'s execution
+breakdown to mark step 6 complete with a link to this entry.
+
+**Exclusions and operations.** No `rapidAuthMutation` wiring was added (step 7, not this session) —
+`BotBlockerIpReputationService` is constructed and available on `ServerContext` but called from
+nowhere yet. No live external vendor HTTP integration exists — `ip-reputation-client.ts#lookup`
+remains an intentional placeholder that always rejects, per the plan's own explicit exclusion. No
+admin routes or contract schemas were added for this cache (the plan does not call for any — unlike
+the ASN classification/type-score tables, this collection has no admin-facing CRUD surface). No
+scoring, allow/blacklist decisioning, Passport/PaidTokenPass behavior, billing, deployment, DNS, or
+customer activation was touched. No `.env` file was read or changed (none exist locally on this
+machine — all real secrets live on the DigitalOcean droplet/App Platform config, per the standing
+project rule). No migration was performed; the one seeded placeholder row is an explicit,
+user-approved exception to "never mock data for dev/prod," not a migration.

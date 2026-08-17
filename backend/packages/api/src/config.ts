@@ -238,6 +238,22 @@ const ProductionConfigSchema = z.object({
    */
   STRIPE_SECRET_KEY: z.string().min(1).optional(),
   STRIPE_WEBHOOK_SECRET: z.string().min(1).optional(),
+  /**
+   * Optional external IP-reputation vendor behind BotBlocker's
+   * `botblockerIpApiLookupsV4`/`V6` external vendor cache (Phase 16
+   * network-intelligence design, "wait-for-full-result" branch — only
+   * consulted when a resolved ASN type's `requiresApiLookup` is `true`).
+   * Deliberately vendor-agnostic: `VENDOR_NAME` is a plain configured
+   * label, not a hardcoded provider, since no specific vendor has been
+   * chosen yet. All three optional, the same deferred-credential
+   * convention as every other provider in this project — when any is
+   * unset, the awaited vendor lookup is skipped entirely (never blocked
+   * indefinitely) rather than failing closed with an error. See
+   * `backend/packages/api/src/ip-reputation-client.ts`.
+   */
+  BOTBLOCKER_IP_REPUTATION_VENDOR_NAME: z.string().min(1).optional(),
+  BOTBLOCKER_IP_REPUTATION_VENDOR_URL: z.string().url().optional(),
+  BOTBLOCKER_IP_REPUTATION_VENDOR_API_KEY: z.string().min(1).optional(),
 }).superRefine((configuration, context) => {
   const active = [
     configuration.BOTBLOCKER_ED25519_ACTIVE_KEY_ID,

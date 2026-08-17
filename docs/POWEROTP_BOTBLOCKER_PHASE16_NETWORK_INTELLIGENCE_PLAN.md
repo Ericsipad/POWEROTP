@@ -309,8 +309,11 @@ Suggested split, in dependency order:
    (contracts + route). See
    [`POWEROTP_BOTBLOCKER_AS_BUILT.md`](POWEROTP_BOTBLOCKER_AS_BUILT.md#2026-08-17--botblocker-phase-16-partial-retire-the-botblockerrapidlist-scaffold)'s
    dated entry for exact files/tests/verification.
-6. `botblockerIpApiLookupsV4`/`V6` cache + seeded placeholder row, triggered only by
-   `requiresApiLookup`, awaited (not fire-and-forget) — wait-for-full-result branch
+6. **Status: complete (2026-08-17).** `botblockerIpApiLookupsV4`/`V6` cache + seeded placeholder
+   row, triggered only by `requiresApiLookup`, awaited (not fire-and-forget) — wait-for-full-result
+   branch. See
+   [`POWEROTP_BOTBLOCKER_AS_BUILT.md`](POWEROTP_BOTBLOCKER_AS_BUILT.md#2026-08-17--botblocker-phase-16-partial-external-ip-reputation-vendor-cache)'s
+   dated entry for exact files/tests/verification.
 7. Wire the two-branch response into `rapidAuthMutation`, writing whichever result onto the new
    session row at creation time
 8. Docs (as-built entry, API route inventory, control matrix) + focused tests per touched
