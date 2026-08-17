@@ -3217,3 +3217,96 @@ aggregation into `userIntelligence` (Phase 17), billing, deployment, DNS, or cus
 touched. No `.env` file was read or changed. No migration or seed was performed. Step 8 (the closing
 documentation pass beyond this entry — API route inventory review, control matrix) remains for a
 future session. No commit or push was performed; git status was left for the user to review.
+
+## 2026-08-17 — BotBlocker Phase 16 (complete): closing documentation pass
+
+**Status: Phase 16 complete.** This entry covers step 8 — the final step of the eight-step execution
+breakdown in
+[`POWEROTP_BOTBLOCKER_PHASE16_NETWORK_INTELLIGENCE_PLAN.md`](POWEROTP_BOTBLOCKER_PHASE16_NETWORK_INTELLIGENCE_PLAN.md).
+Steps 1–7 shipped across five prior sessions/commits — `74ad253` (steps 1–2: IP-hash reversal,
+dedicated IP blacklist), `899facf` (steps 3–4: network ranges, ASN classification/type scores),
+`f423cc7` (step 5: retired the `botblockerRapidList` scaffold), `6b71382` (step 6: external
+IP-reputation vendor cache), `449893e` (step 7: wired the two-branch decision into
+`rapidAuthMutation`) — see the five dated entries directly above for exact files/tests/verification.
+This entry is a docs-only pass: no application code was added or changed.
+
+**Phase 16 final state, summarized.** A rapid-auth request now resolves real network intelligence
+via `BotBlockerNetworkIntelligenceService#resolve`: a dedicated per-family IP-blacklist exact-match
+lookup runs first (respecting `revokedAt`/`expiresAt`) and, on an active match, short-circuits to
+`decision: { status: "ready", outcome: "otp" }`; otherwise a synchronous indexed network-range lookup
+joins to `botblockerAsnClassifications` (defaulting to `"unclassified"` for any ASN with no
+persisted row) and then to `botblockerAsnTypeScores`, awaiting the external vendor lookup
+(`botblockerIpApiLookupsV4`/`V6`, cache-checked first, one seeded placeholder row) only when the
+resolved type's `requiresApiLookup` is `true`. Every other outcome still leaves `decision` exactly as
+before this phase — `{ status: "unavailable", reason: "not_implemented", retryable: false }` — since
+no final weighted/thresholded score exists yet (Phase 17). The resolved result lands on the new gate
+session row (`GateSessionDocument.networkClassification`/`.ipReputation`/`.latestDecision`) at
+creation time only, never backfilled. Raw IP is stored throughout (the Phase 15 `ipHash` field was
+removed); the only remaining hash is the keyed fingerprint lookup. Six new MongoDB collections exist
+(`botblockerIpBlacklistV4`/`V6`, `botblockerNetworkRangesV4`/`V6`, `botblockerAsnClassifications`,
+`botblockerAsnTypeScores`, `botblockerIpApiLookupsV4`/`V6` — nine physical collections total across
+the v4/v6 splits) with four new admin routes (`ip-blacklist`, `ip-blacklist/revoke`,
+`asn-classifications`, `asn-type-scores`) and one retired stub (`rapid-list`).
+
+**API route inventory — independently re-confirmed.** Re-checked `docs/API_ROUTE_INVENTORY.md`
+against the actual route tree (a repository glob of every
+`backend/apps/server/app/v1/{control/}botblocker/**/route.ts` file, not just trusting the prior
+session's note) rather than only trusting the prior session's finding: all four new Phase 16 admin
+routes (`ip-blacklist`, `ip-blacklist/revoke`, `asn-classifications`, `asn-type-scores`) are present
+and correctly documented, the retired `rapid-list` row is gone, and the eleven runtime
+`/v1/botblocker/*` routes and remaining seven `/v1/control/botblocker/*` routes match the file tree
+exactly (7 control routes, 11 runtime routes, no extra or missing rows either direction). No edit was
+needed.
+
+**Control matrix and threat model — reviewed, three rows updated.**
+`docs/POWEROTP_BOTBLOCKER_SOC2_ISO27001_CONTROL_MATRIX.md`'s `C1.1` and `A.5.34` rows (corrected
+during step 1 to state raw-IP retention plainly) still read accurately for the IP-hash-reversal
+claim itself, but both referred to it only as "the Phase 16 network-intelligence **design**," which
+undersold that IP-hash reversal, the dedicated IP blacklist, ASN classification/scoring, and the
+IP-reputation cache are now actually shipped, not just designed — both rows were reworded to say so
+and to name the new collections as admin-managed/vendor-sourced operational security data (not
+visitor-supplied content, so the confidentiality/PII analysis is unchanged). `PI1`'s "decision
+processing remains Phase 16/17/20" was genuinely stale now that step 7 shipped: a control's *actual*
+status changed, since a blacklist match now deterministically produces a real `otp` decision — the
+row was reworded to describe that one real branch while keeping the full weighted/thresholded score
+combination correctly attributed to Phase 17/20. `docs/THREAT_MODEL.md`'s BotBlocker ingestion
+section (the fingerprint/raw-IP paragraph corrected in step 1) and its "Cross-project data access"
+section (which already described blacklist/network-reputation signals as a private, non-returned
+server-side input) were both re-read and found still accurate with no further Phase 16 mechanism
+requiring a new row or correction; no other row in either document names a mechanism this phase
+touches. No new rows were added — no control's status changed outside the three above.
+
+**As-built internal-consistency audit.** Re-read all five prior Phase 16 dated entries' "Exclusions
+and operations" sections (and the surrounding body text) specifically checking for stale
+present-tense claims like "not called from any route" now that step 7 has shipped. Every instance
+found (`botblocker-ip-blacklist-persistence`'s "none of it is wired into `rapidAuthMutation` yet
+(that is step 7, later)" in the steps-1–2 entry; `BotBlockerIpReputationService`'s "constructed...
+but called from nowhere yet" alongside "step 7, not this session" in the step-6 entry) is already
+explicitly scoped to "as of that session"/"until step 7" rather than stated as an unqualified,
+still-current fact — each entry is a dated historical record of what was true when it was written,
+and a reader progressing through the dated entries in order (as this document is structured) reaches
+step 7's entry immediately afterward, which correctly states the current, now-wired reality. No
+sentence was found to be factually wrong as written; no edit was made under this item.
+
+**Verification.** No application code changed this session, so per this project's tightened
+verification-effort rule no build/test/typecheck run was warranted. `git fetch origin` plus
+`gh run list --branch main` confirmed `449893e` (step 7, current `HEAD` at session start) has a
+**successful** `Verify` CI run — the same `npm run verify` this session would otherwise have run
+manually already passed in CI for the exact commit these doc changes build on, so no redundant local
+`npm run verify` was run.
+
+**Documentation.** This entry itself. Marked step 8 complete in
+`POWEROTP_BOTBLOCKER_PHASE16_NETWORK_INTELLIGENCE_PLAN.md`'s execution breakdown, linking here, which
+closes out that plan's entire eight-step breakdown.
+
+**Exclusions and operations.** Per this phase's own explicit exclusions (unchanged, not
+re-litigated): no final weighted/thresholded score and no admin override list (both Phase 17), no
+live external vendor HTTP integration (`ip-reputation-client.ts#lookup` remains an intentional
+placeholder), no Passport/paid-allow blacklist bypass (documented future note only), and
+`rapidAuthMutation` still has no dedicated unit-test file of its own (accepted gap from step 7,
+exercised indirectly via `BotBlockerNetworkIntelligenceService`'s and
+`BotBlockerSessionPersistence`'s own test files). This entry closes Phase 16 entirely; Phase 17
+(weighted scoring, aggregation into `userIntelligence`, admin thresholds) is explicitly not started
+and requires a fresh planning session with the user's own weights/decay/threshold rules. No `.env`
+file was read or changed. No migration or seed was performed. No commit or push was performed by
+this session unless the user explicitly requested it; git status was left for the user to review.

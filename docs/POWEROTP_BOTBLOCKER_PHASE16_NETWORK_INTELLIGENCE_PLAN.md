@@ -318,8 +318,10 @@ Suggested split, in dependency order:
    writing whichever result onto the new session row at creation time. See
    [`POWEROTP_BOTBLOCKER_AS_BUILT.md`](POWEROTP_BOTBLOCKER_AS_BUILT.md#2026-08-17--botblocker-phase-16-partial-wire-the-two-branch-decision-into-rapidauthmutation)'s
    dated entry for exact files/tests/verification.
-8. Docs (as-built entry, API route inventory, control matrix) + focused tests per touched
-   workspace, then one `npm run verify`
+8. **Status: complete (2026-08-17).** Docs (as-built entry, API route inventory, control matrix) +
+   focused tests per touched workspace, then one `npm run verify`. This closes Phase 16 entirely. See
+   [`POWEROTP_BOTBLOCKER_AS_BUILT.md`](POWEROTP_BOTBLOCKER_AS_BUILT.md#2026-08-17--botblocker-phase-16-complete-closing-documentation-pass)'s
+   dated entry for exact detail.
 
 ## Verification discipline (once implementation starts)
 
