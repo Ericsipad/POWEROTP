@@ -22,10 +22,27 @@ guidance — never gated behind "but nothing consumes this yet." If a
 genuinely blocking dependency exists, ask the user directly instead of
 silently deciding to omit or soften what was asked for.
 
-# Match verification effort to the size of the change
+# Match verification effort to the size of the change — stop over-verifying
 
-For a small, self-contained text/doc/content edit, do not rebuild, re-run the
-full test suite multiple times, or re-scan the whole codebase repeatedly.
-Make the edit, do one proportionate sanity check if genuinely warranted, and
-stop. Reserve full build/lint/test/verify passes for changes that actually
-touch runtime logic or could plausibly break something.
+This has been flagged repeatedly as wasted time. Follow it literally, not just
+in spirit:
+
+- Doc/comment/markdown/string-literal/config-value edits: make the edit and
+  stop. No build, no test run, no typecheck, no "let me just confirm" pass.
+- One touched package/workspace: run that package's own focused
+  build/lint/test once. Do not also run the full monorepo `verify`, and do
+  not run other, unrelated packages' tests "to be safe."
+- Never run the same check twice in a row without a code change in between.
+  A clean result is trusted immediately — do not re-run it again "just to
+  make sure," re-read the output a second time via another command, or spot
+  check it by hand afterward.
+- Never re-verify a file, package, or behavior that this session already
+  confirmed passing and hasn't touched again since.
+- Only escalate to a full `npm run verify` (every workspace) when the user
+  explicitly asks for it, or the change genuinely spans/could break multiple
+  packages at once (e.g. a shared contract/type change). A single-package
+  runtime-logic change gets that one package's focused suite, not the whole
+  repo.
+- If a check passes, say so once and move on. Do not narrate additional
+  reassurance, hedge with "let me also double-check," or add extra
+  confirmation steps the user didn't ask for.
