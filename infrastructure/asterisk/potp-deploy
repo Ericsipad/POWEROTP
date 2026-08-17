@@ -49,6 +49,14 @@ fi
 shopt -u dotglob nullglob
 cp -a "$STAGE"/. "$ROOT"/
 
+# Belt-and-suspenders: bootstrap-node.sh's `install -d -m 0750` only applies
+# the mode when it *creates* $ROOT, so a pre-existing $ROOT with drifted
+# permissions (e.g. an old manual `mkdir`) silently stays wrong forever.
+# Re-asserting the mode on every deploy makes it self-healing without
+# depending on a re-run of bootstrap. Group-readable/executable is required
+# so the `potp-agent` service user (group `asterisk`) can traverse into it.
+chmod 0750 "$ROOT"
+
 sudo -n /usr/bin/systemctl restart powerotp-agent
 sleep 2
 sudo -n /usr/bin/systemctl is-active powerotp-agent

@@ -91,6 +91,16 @@ printf 'command="/usr/local/bin/potp-deploy",restrict %s\n' "$CI_DEPLOY_PUBKEY" 
 chown potp-deploy:asterisk /var/lib/potp-deploy/.ssh/authorized_keys
 chmod 0600 /var/lib/potp-deploy/.ssh/authorized_keys
 install -d -o potp-deploy -g asterisk -m 0750 /opt/powerotp
+# `install -d` only applies -o/-g/-m when it creates the directory; on a
+# re-run against an already-existing /opt/powerotp (e.g. a prior manual
+# `mkdir` or an earlier version of this script) it silently leaves stale
+# ownership/mode in place, which is what let /opt/powerotp drift to 0700
+# and made it untraversable by the `potp-agent` group member, crash-looping
+# the agent with a misleading "Cannot find module" (EACCES manifesting as
+# ENOENT during path resolution) — see docs/AS_BUILT.md. Enforce the target
+# state explicitly so re-running this script is truly idempotent.
+chown potp-deploy:asterisk /opt/powerotp
+chmod 0750 /opt/powerotp
 
 step "sshd hardening (verifying opsadmin key landed first, to avoid lockout)"
 test -s /home/opsadmin/.ssh/authorized_keys
