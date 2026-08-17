@@ -1,0 +1,33 @@
+---
+description: Write BOM-free multi-line git commit messages on Windows PowerShell
+alwaysApply: true
+---
+
+# Windows PowerShell adds a stray BOM to commit messages — avoid it
+
+This machine's shell is Windows PowerShell 5.1. `Out-File -Encoding utf8` (and
+`Set-Content -Encoding utf8`) **always prepends a UTF-8 byte-order-mark (BOM)** in
+Windows PowerShell 5.1, unlike PowerShell 7+. When that file is used as a
+`git commit -F <file>` message, the BOM becomes a stray invisible character at the
+start of the commit subject line, visible in `git log` and GitHub's commit list.
+This has recurred across multiple sessions — stop reproducing it.
+
+**Always write commit-message temp files with `.NET`'s `WriteAllText`, which is
+BOM-free by default, instead of `Out-File`/`Set-Content`:**
+
+```powershell
+$msg = @'
+Commit subject line
+
+Commit body, can be multi-line.
+'@
+[System.IO.File]::WriteAllText("$PWD\commit-msg.txt", $msg)
+git commit -F commit-msg.txt
+Remove-Item commit-msg.txt
+```
+
+Do NOT use `$msg | Out-File -FilePath commit-msg.txt -Encoding utf8` or
+`Set-Content -Encoding utf8` for this purpose on this machine.
+
+For single-line commit messages, `git commit -m "..."` needs no temp file and has
+no BOM risk — prefer it when the message is one line.
