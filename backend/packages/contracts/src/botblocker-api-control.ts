@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   BotBlockerDecisionOutcomeSchema,
   SiteIdSchema,
+  TrustedProxyIpSchema,
 } from "./botblocker.js";
 import {
   BotBlockerPolicySchema,
@@ -24,12 +25,16 @@ export const CustomerVisitorsQuerySchema = z
   })
   .strict();
 
-/** Purpose-limited visitor summary. It excludes raw events, IP/fingerprint
- * hashes, internal correlation, scores, weights, and other tenants' data. */
+/** Purpose-limited visitor summary. It excludes raw events, fingerprint
+ * hashes, internal correlation, scores, weights, and other tenants' data.
+ * It includes the visitor's most recently observed raw IP (not a hash) so
+ * the site owner's own visitor report can display it; an IP alone is never
+ * identity evidence elsewhere in BotBlocker. */
 export const CustomerVisitorSchema = z
   .object({
     visitorId: OpaqueIdSchema,
     siteId: SiteIdSchema,
+    ip: TrustedProxyIpSchema.optional(),
     latestDecision: BotBlockerDecisionOutcomeSchema.optional(),
     gateSessionCount: z.number().int().nonnegative(),
     behaviorReportCount: z.number().int().nonnegative(),
@@ -46,6 +51,75 @@ export const CustomerVisitorsResponseSchema = z
     visitors: z.array(CustomerVisitorSchema).max(200),
     nextCursor: CursorSchema.optional(),
   })
+  .strict();
+
+export const botBlockerIpFamilies = ["v4", "v6"] as const;
+export const BotBlockerIpFamilySchema = z.enum(botBlockerIpFamilies);
+
+/**
+ * `botblockerIpBlacklistV4`/`V6` (Phase 16 network-intelligence design): a
+ * small, dedicated, exact-IP-match table checked before the ASN/subnet
+ * range lookup so a known-bad IP short-circuits to `otp` without touching
+ * the larger network-classification tables. This is the only admin-facing
+ * BotBlocker override; there is no separate generic allow/blacklist
+ * mechanism (see the plan doc's "Corrections made during this design
+ * session," item 2).
+ */
+export const ipBlacklistProvenanceKinds = [
+  "operator_manual",
+  "automatic_detection",
+] as const;
+export const IpBlacklistProvenanceSchema = z.enum(ipBlacklistProvenanceKinds);
+
+/** Adding an IP that already has an entry (active or revoked) refreshes
+ * that entry in place — reason/provenance/expiry update and any prior
+ * revocation clears — rather than erroring or creating a duplicate row,
+ * since the underlying collection enforces one row per raw IP. */
+export const OperatorIpBlacklistMutationSchema = z
+  .object({
+    ip: TrustedProxyIpSchema,
+    reason: z.string().min(1).max(1_000),
+    provenance: IpBlacklistProvenanceSchema,
+    expiresAt: z.string().datetime().optional(),
+  })
+  .strict();
+
+export const OperatorIpBlacklistEntrySchema = z
+  .object({
+    entryId: OpaqueIdSchema,
+    family: BotBlockerIpFamilySchema,
+    ip: TrustedProxyIpSchema,
+    reason: z.string().min(1).max(1_000),
+    provenance: IpBlacklistProvenanceSchema,
+    expiresAt: z.string().datetime().optional(),
+    revokedAt: z.string().datetime().optional(),
+    createdBy: OpaqueIdSchema,
+    createdAt: z.string().datetime(),
+    updatedAt: z.string().datetime(),
+  })
+  .strict();
+
+export const OperatorIpBlacklistMutationResponseSchema = z
+  .object({ entry: OperatorIpBlacklistEntrySchema })
+  .strict();
+
+export const OperatorIpBlacklistQuerySchema = z
+  .object({
+    family: BotBlockerIpFamilySchema,
+    cursor: CursorSchema.optional(),
+    limit: PageLimitSchema.default(50),
+  })
+  .strict();
+
+export const OperatorIpBlacklistListResponseSchema = z
+  .object({
+    entries: z.array(OperatorIpBlacklistEntrySchema).max(200),
+    nextCursor: CursorSchema.optional(),
+  })
+  .strict();
+
+export const OperatorIpBlacklistRevokeRequestSchema = z
+  .object({ entryId: OpaqueIdSchema })
   .strict();
 
 export const rapidListKinds = ["allow", "blacklist"] as const;
@@ -159,6 +233,20 @@ export const OperatorPolicyReleaseListResponseSchema = z
 export type CustomerVisitorsQuery = z.infer<typeof CustomerVisitorsQuerySchema>;
 export type CustomerVisitor = z.infer<typeof CustomerVisitorSchema>;
 export type CustomerVisitorsResponse = z.infer<typeof CustomerVisitorsResponseSchema>;
+export type BotBlockerIpFamily = z.infer<typeof BotBlockerIpFamilySchema>;
+export type IpBlacklistProvenance = z.infer<typeof IpBlacklistProvenanceSchema>;
+export type OperatorIpBlacklistMutation = z.infer<
+  typeof OperatorIpBlacklistMutationSchema
+>;
+export type OperatorIpBlacklistEntry = z.infer<
+  typeof OperatorIpBlacklistEntrySchema
+>;
+export type OperatorIpBlacklistQuery = z.infer<
+  typeof OperatorIpBlacklistQuerySchema
+>;
+export type OperatorIpBlacklistRevokeRequest = z.infer<
+  typeof OperatorIpBlacklistRevokeRequestSchema
+>;
 export type RapidListKind = z.infer<typeof RapidListKindSchema>;
 export type RapidListIndicatorKind = z.infer<typeof RapidListIndicatorKindSchema>;
 export type OperatorRapidListMutation = z.infer<

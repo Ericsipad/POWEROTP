@@ -55,7 +55,7 @@ function fixture(existing?: UserIntelligenceDocument | GateSessionDocument) {
         return {
           findOne: async (filter: {
             fingerprintHash?: string;
-            "ipObservations.ipHash"?: string;
+            "ipObservations.ip"?: string;
             lastObservedAt?: { $gte: Date };
           }) => {
             matchingCutoff = filter.lastObservedAt?.$gte;
@@ -64,7 +64,7 @@ function fixture(existing?: UserIntelligenceDocument | GateSessionDocument) {
                 row.fingerprintHash === filter.fingerprintHash &&
                 row.ipObservations.some(
                   (observation) =>
-                    observation.ipHash === filter["ipObservations.ipHash"],
+                    observation.ip === filter["ipObservations.ip"],
                 ) &&
                 (!matchingCutoff || row.lastObservedAt >= matchingCutoff),
             ) ?? null;
@@ -106,13 +106,13 @@ function fixture(existing?: UserIntelligenceDocument | GateSessionDocument) {
 }
 
 describe("BotBlockerSessionPersistence", () => {
-  it("creates scoped session/intelligence records with only keyed lookup hashes", async () => {
+  it("creates scoped session/intelligence records with a keyed fingerprint hash and raw IP", async () => {
     const state = fixture();
     const session = await state.persistence.openGateSession({
       scope,
       gateSessionId: "bgs_session_123456789",
       fingerprintHash: "a".repeat(64),
-      ipHash: "b".repeat(64),
+      ip: "203.0.113.5",
       evidence: browserEvidence,
       now,
     });
@@ -121,7 +121,7 @@ describe("BotBlockerSessionPersistence", () => {
     assert.equal(state.intelligence.length, 1);
     assert.equal(session.lastAppliedSequence, -1);
     assert.equal(session.fingerprintHash, "a".repeat(64));
-    assert.equal(session.ipHash, "b".repeat(64));
+    assert.equal(session.ip, "203.0.113.5");
     assert.equal("clientIp" in session, false);
     assert.equal("rawFingerprint" in session, false);
     assert.equal(
@@ -144,7 +144,7 @@ describe("BotBlockerSessionPersistence", () => {
       ...scope,
       fingerprintHash: "a".repeat(64),
       ipObservations: [{
-        ipHash: "b".repeat(64),
+        ip: "203.0.113.5",
         firstObservedAt: new Date(now.getTime() - 1_000),
         lastObservedAt: new Date(now.getTime() - 1_000),
         observationCount: 1,
@@ -162,7 +162,7 @@ describe("BotBlockerSessionPersistence", () => {
       scope,
       gateSessionId: "bgs_second_123456789",
       fingerprintHash: "a".repeat(64),
-      ipHash: "b".repeat(64),
+      ip: "203.0.113.5",
       evidence: browserEvidence,
       now,
     });
@@ -179,7 +179,7 @@ describe("BotBlockerSessionPersistence", () => {
       ...scope,
       fingerprintHash: "c".repeat(64),
       ipObservations: [{
-        ipHash: "b".repeat(64),
+        ip: "203.0.113.5",
         firstObservedAt: now,
         lastObservedAt: now,
         observationCount: 1,
@@ -197,7 +197,7 @@ describe("BotBlockerSessionPersistence", () => {
       scope,
       gateSessionId: "bgs_distinct_1234567",
       fingerprintHash: "a".repeat(64),
-      ipHash: "b".repeat(64),
+      ip: "203.0.113.5",
       evidence: browserEvidence,
       now,
     });

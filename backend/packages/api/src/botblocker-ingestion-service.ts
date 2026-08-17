@@ -1,5 +1,4 @@
 import { createHmac } from "node:crypto";
-import { isIP } from "node:net";
 
 import {
   BehaviorReportSchema,
@@ -19,6 +18,7 @@ import {
 import type { BotBlockerScope } from "./botblocker-intelligence-persistence.js";
 import type { AuthenticatedBotBlockerSite } from "./botblocker-site-credential-service.js";
 import type { ProductionConfig } from "./config.js";
+import { normalizeIp } from "./ip-utils.js";
 
 const MAX_EVENT_CLOCK_SKEW_MS = 5 * 60 * 1_000;
 
@@ -55,7 +55,7 @@ export class BotBlockerIngestionService {
         gateSessionId: input.gateSessionId,
         fingerprintHash: this.#fingerprintHash(evidence),
         ...(input.trustedClientIp
-          ? { ipHash: this.#ipHash(input.trustedClientIp) }
+          ? { ip: this.#normalizedIp(input.trustedClientIp) }
           : {}),
         evidence,
         now,
@@ -128,16 +128,6 @@ export class BotBlockerIngestionService {
   }
 
   #fingerprintHash(evidence: BrowserEvidence): string {
-    return this.#lookupHash("fingerprint", JSON.stringify(evidence));
-  }
-
-  #ipHash(value: string): string {
-    const normalized = normalizeIp(value);
-    if (!normalized) throw new BotBlockerRuntimeError("invalid_request", 400);
-    return this.#lookupHash("ip", normalized);
-  }
-
-  #lookupHash(kind: "fingerprint" | "ip", value: string): string {
     if (!this.#hashSecret) {
       throw new BotBlockerRuntimeError(
         "dependency_unavailable",
@@ -146,8 +136,14 @@ export class BotBlockerIngestionService {
       );
     }
     return createHmac("sha256", this.#hashSecret)
-      .update(`botblocker-${kind}-v1\0${value}`)
+      .update(`botblocker-fingerprint-v1\0${JSON.stringify(evidence)}`)
       .digest("hex");
+  }
+
+  #normalizedIp(value: string): string {
+    const normalized = normalizeIp(value);
+    if (!normalized) throw new BotBlockerRuntimeError("invalid_request", 400);
+    return normalized;
   }
 
   #requireCurrentTimestamp(value: number, now: Date): void {
@@ -184,16 +180,6 @@ function scopeFor(site: AuthenticatedBotBlockerSite): BotBlockerScope {
     projectId: site.projectId,
     siteId: site.siteId,
   };
-}
-
-function normalizeIp(value: string): string | undefined {
-  const withoutMappedPrefix = value.toLowerCase().startsWith("::ffff:")
-    ? value.slice(7)
-    : value;
-  const version = isIP(withoutMappedPrefix);
-  if (version === 4) return withoutMappedPrefix;
-  if (version !== 6) return undefined;
-  return new URL(`http://[${withoutMappedPrefix}]/`).hostname.slice(1, -1);
 }
 
 function pageUrl(audience: string, routePath: string): string {

@@ -80,6 +80,10 @@ mistakes:
 8. **A signed snapshot export was proposed by the assistant (not requested by the user), then
    dropped.** It would let a future edge (Phase 26/27, not built) verify a copy of the rapid data
    without a live callback — but nothing consumes it yet, so it's excluded from this phase.
+9. **No MaxMind import pipeline.** Corrected during the IP-hash-reversal/blacklist session
+   (2026-08-16): the user loads each MaxMind GeoLite2-ASN CSV into MongoDB directly (manually, or
+   Cursor-assisted), not through repository-owned import code. This phase only defines the
+   `botblockerNetworkRangesV4`/`V6` collection shape and indexes a manual load must match.
 
 ## Data model
 
@@ -120,16 +124,18 @@ MaxMind file (already shipped as two separate CSVs) refresh independently.
   32-char zero-padded lowercase hex — 128-bit values don't fit safely in a JS/BSON number, and
   `Decimal128` can't hold the full IPv6 range exactly; a fixed-width zero-padded hex string sorts
   identically to numeric comparison). Index: `{ rangeStartHex: 1 }`.
-- Lookup: parse the request IP's family (reuse the existing `normalizeIp` in
-  [`backend/packages/api/src/botblocker-ingestion-service.ts`](../backend/packages/api/src/botblocker-ingestion-service.ts)),
+- Lookup: parse the request IP's family (reuse the existing `normalizeIp`, extracted for this
+  purpose into [`backend/packages/api/src/ip-utils.ts`](../backend/packages/api/src/ip-utils.ts)),
   query only the matching collection — greatest `rangeStart(Hex) <= ip`, confirm
   `ip <= rangeEnd(Hex)`. Same "flat non-overlapping partition" technique MaxMind/IPinfo's own
   flat-file products use — O(log n) via a single B-tree index per collection.
-- Import: new file `backend/packages/api/src/botblocker-network-ranges-import.ts` parses each
-  MaxMind GeoLite2-ASN CSV, loads into a staging collection, then does an atomic
-  `renameCollection` swap into the real collection — zero-downtime bulk reference-data refresh,
-  avoids one giant multi-million-row transaction. User has a MaxMind GeoLite2 file with CIDR +
-  ASN number + ASN org name for both IPv4 and IPv6 (no "type" field — see below).
+- **Import: no application code.** Corrected during the IP-hash-reversal/blacklist session
+  (2026-08-16) — the user will load each MaxMind GeoLite2-ASN CSV directly into MongoDB manually
+  (e.g. `mongoimport`, or a Cursor-assisted one-off load), not through a repository-owned import
+  pipeline. This phase only needs to define the collection shape/indexes above so a manual load
+  lands in the right place; no `botblocker-network-ranges-import.ts`, staging collection, or
+  `renameCollection` swap is part of this phase's code. User has a MaxMind GeoLite2 file with
+  CIDR + ASN number + ASN org name for both IPv4 and IPv6 (no "type" field — see below).
 
 ### 2. `botblockerAsnClassifications` — one row per unique ASN
 
@@ -287,7 +293,8 @@ Suggested split, in dependency order:
 1. IP-hash reversal + doc corrections (self-contained, unblocks everything else designed around
    raw IP storage)
 2. `botblockerIpBlacklistV4`/`V6` dedicated fast tables + admin CRUD — fast-immediate branch
-3. `botblockerNetworkRangesV4`/`V6` + MaxMind import pipeline for each — fast-immediate branch
+3. `botblockerNetworkRangesV4`/`V6` collection shape/indexes for each — fast-immediate branch.
+   No import pipeline: MaxMind CSVs load directly into MongoDB manually (see correction above).
 4. `botblockerAsnClassifications` + `botblockerAsnTypeScores` + admin routes — fast-immediate
    branch
 5. Remove the retired `botblockerRapidList` scaffold (contracts + route)

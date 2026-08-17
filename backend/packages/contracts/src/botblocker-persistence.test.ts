@@ -21,7 +21,7 @@ const scope = {
   siteId: "bbs_site_123456789",
 };
 const fingerprintHash = "a".repeat(64);
-const ipHash = "b".repeat(64);
+const ip = "203.0.113.5";
 const evidence = {
   routePath: "/products",
   clicks: [{ category: "button" as const, powerOtpId: "add-to-cart" }],
@@ -35,7 +35,7 @@ const gateSession = {
   gateSessionId: "bgs_session_123456",
   userIntelligenceId: "bui_visitor_123456",
   fingerprintHash,
-  ipHash,
+  ip,
   state: "active" as const,
   lastAppliedSequence: -1,
   startedAt: now,
@@ -63,7 +63,7 @@ describe("Phase 6 BotBlocker persistence contracts", () => {
       userIntelligenceId: "bui_visitor_654321",
     });
 
-    assert.equal(first.ipHash, second.ipHash);
+    assert.equal(first.ip, second.ip);
     assert.notEqual(first.userIntelligenceId, second.userIntelligenceId);
   });
 
@@ -73,7 +73,7 @@ describe("Phase 6 BotBlocker persistence contracts", () => {
       userIntelligenceId: "bui_visitor_123456",
       fingerprintHash,
       ipObservations: [{
-        ipHash,
+        ip,
         firstObservedAt: now,
         lastObservedAt: now,
         observationCount: 2,

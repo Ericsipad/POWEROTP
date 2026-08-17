@@ -2481,3 +2481,160 @@ implementing agent. During verification, an external concurrent process created 
 was deployed, seeded, configured, migrated, or otherwise remotely mutated by this work. No
 scoring, allow/blacklist behavior, Passport/PaidTokenPass behavior, billing, DNS, customer
 activation, or later phase was implemented.
+
+## 2026-08-16 — BotBlocker Phase 16 (partial): IP-hash reversal and dedicated IP blacklist
+
+**Status: Phase 16 in progress, not complete.** This entry covers only steps 1–2 of the eight-step
+execution breakdown in
+[`POWEROTP_BOTBLOCKER_PHASE16_NETWORK_INTELLIGENCE_PLAN.md`](POWEROTP_BOTBLOCKER_PHASE16_NETWORK_INTELLIGENCE_PLAN.md):
+the IP-hash reversal and the dedicated `botblockerIpBlacklistV4`/`V6` tables with admin CRUD. The
+remaining steps — ASN/subnet network ranges and MaxMind import, ASN classification and per-type
+scoring, retiring the `botblockerRapidList` scaffold, the external IP-reputation API-lookup cache,
+and wiring the two-branch decision into `rapidAuthMutation` — are **not implemented** and remain
+future fresh-session work per that plan's own session-size discipline. `rapidAuthMutation` in
+`backend/apps/server/lib/botblocker-http.ts` is unchanged and still returns the hardcoded
+`{ status: "unavailable", reason: "not_implemented" }` decision.
+
+**IP-hash reversal.** Per the plan's corrections section, raw IP storage replaces the Phase 15
+`ipHash` field everywhere; only the fingerprint lookup remains a keyed HMAC-SHA-256 hash. This is
+not treated as identity/PII because it is never linked to a Supabase account record, and the raw
+value is needed for two documented purposes: showing it in a site owner's own visitor report, and
+using it as a return-visit correlation signal.
+
+- New `backend/packages/api/src/ip-utils.ts` extracts the previously-private `normalizeIp` (used
+  only by the ingestion service) into a shared helper, plus a new `ipFamily` classifier, so the new
+  IP blacklist persistence (below) derives the same canonical value instead of duplicating the
+  logic.
+- `botblocker-intelligence-persistence.ts`: `GateSessionDocument.ipHash` → `.ip`;
+  `IpObservation.ipHash` → `.ip`; the `userIntelligence` compound indexes now key on
+  `ipObservations.ip`.
+- `botblocker-ingestion-service.ts`: removed the `#ipHash`/generic `#lookupHash(kind, value)`
+  indirection; `#fingerprintHash` now hashes directly, and a new `#normalizedIp` validates without
+  hashing. `startSession` passes the normalized raw IP straight through.
+- `botblocker-session-persistence.ts`: matching/query/update all key on `ip` instead of `ipHash`;
+  `updateIpObservations` is otherwise mechanically unchanged (still a non-unique, per-IP observation
+  list, still never treating a repeated IP alone as identity).
+- `botblocker-operations-service.ts`: the project-owned visitor summary now includes the visitor's
+  raw `ip` (read directly from `ipObservations[0]`, not stored redundantly), while still excluding
+  the fingerprint hash, raw events, and other tenants' data. Clarified after user review: a
+  profile's `ipObservations` holds at most one entry today, because `openGateSession`'s matching
+  rule only ever merges a new session into an *existing* profile when that session's IP is already
+  one of the profile's observations, which then updates that same entry rather than adding a
+  second one — there is no "earlier IP" to pick between yet, so the field is read plainly instead
+  of via a most-recent-of-several computation that the matching rule never actually produces. The
+  user separately confirmed the existing fingerprint-and-IP matching rule itself is unchanged and
+  should stay exactly as designed for the no-cookie/no-Passport fallback case; a same-site return
+  visit with an already-valid local clearance/cookie is a separate, already-implemented path
+  (`openGateSession`'s exact-session-ID `existingById` branch) that updates the same linked
+  `userIntelligence` row directly and never needed fuzzy matching in the first place.
+- `backend/packages/contracts/src/botblocker-api-control.ts`'s `CustomerVisitorSchema` already had
+  no IP field at all; added `ip: TrustedProxyIpSchema.optional()`.
+- Found a **pre-existing uncommitted working-tree change**, not authored by this session, while
+  doing this: at session start, `backend/packages/contracts/src/botblocker-persistence.ts`'s
+  "record" contract schemas (`GateSessionRecordSchema`/`IpObservationSchema`) already had a raw
+  `ip` field (`git show HEAD:...` confirms the committed version at `0f00c08` still says `ipHash`/
+  `ServerIpHashSchema` — this session never edited this file directly, so the working-tree
+  difference predates it). That stray, partial, contracts-only edit left `botblocker-persistence
+  .test.ts`'s fixtures — which still passed `ipHash` — failing against the now-`.strict()`-mismatched
+  schema. Verified with a baseline test run before making any change of my own (3 pre-existing
+  failures in that one file). This session's IP-hash reversal supersedes and completes that
+  stray edit consistently across the real implementation, so the fix is to update the test
+  fixtures to `ip` to match the schema that was already there. Flagging this because it means the
+  actual pre-session working tree was not fully clean/uncoded relative to this plan, despite the
+  plan document's "no code in this repository has been changed" framing — worth the user's
+  awareness, not a criticism of this session's own work.
+- `config.ts`'s `BOTBLOCKER_INTELLIGENCE_HASH_SECRET` doc comment, `docs/THREAT_MODEL.md`'s
+  BotBlocker ingestion section, and `docs/POWEROTP_BOTBLOCKER_SOC2_ISO27001_CONTROL_MATRIX.md`'s
+  `C1.1` and `A.5.34` rows were corrected to state raw IP retention plainly instead of claiming IP
+  hashing or "raw IP addresses are not durable fields."
+- No migration was needed or performed (zero production BotBlocker records, per the standing
+  project rule).
+
+**Dedicated IP blacklist (fast-immediate branch, steps 2 of the plan).** New
+`backend/packages/api/src/botblocker-ip-blacklist-persistence.ts` implements
+`botblockerIpBlacklistV4`/`V6` exactly as designed: physically separate per-family collections,
+each with fields `_id`, `ip` (raw, exact, unique-indexed), `reason`, `provenance`
+(`operator_manual` | `automatic_detection`), optional `expiresAt`/`revokedAt`, `createdBy`,
+`createdAt`, `updatedAt`. Every entry ID is prefixed by its family (`bl4_…`/`bl6_…`,
+`identifyBlacklistEntryFamily`) so a caller holding only an `entryId` (e.g. a revoke request) can
+address the correct physical collection without an extra round trip or a redundant family
+parameter. `upsertEntry` is a refresh-in-place upsert keyed on the normalized IP (not a
+duplicate-rejecting insert): re-adding an already-blacklisted or previously-revoked IP overwrites
+its reason/provenance/expiry and clears any prior revocation, since the unique index enforces one
+row per raw IP — this is documented on `OperatorIpBlacklistMutationSchema` so a future caller does
+not "fix" it into an error path. `revokeEntry`, `findByIp`, and `listEntries` (paginated,
+`createdAt`-descending, per family) round out the persistence surface; none of it is wired into
+`rapidAuthMutation` yet (that is step 7, later).
+
+**Admin CRUD routes.** Two new operator-only routes under `/v1/control/botblocker/*`, following the
+exact `requireAdminSession`/CSRF/`Idempotency-Key`/`enforceRateLimit`/`cache-control: no-store`
+pattern already used by `policy-releases` and `rapid-list`:
+
+- `GET, POST /v1/control/botblocker/ip-blacklist` — list (requires a `family` query param; no
+  cross-family merge, matching the plan's "physically separate per family" model even for
+  admin-facing reads) and create/refresh.
+- `POST /v1/control/botblocker/ip-blacklist/revoke` — revoke by `entryId` alone (family is decoded
+  from the ID prefix, not accepted as a separate body field).
+
+Both routes share one mapping function, `toIpBlacklistEntryResponse` (exported from the persistence
+module), so the list/create and revoke responses cannot drift from each other.
+
+**Contracts.** Added to `backend/packages/contracts/src/botblocker-api-control.ts`:
+`BotBlockerIpFamilySchema` (`v4`/`v6`), `IpBlacklistProvenanceSchema`,
+`OperatorIpBlacklistMutationSchema`, `OperatorIpBlacklistEntrySchema`,
+`OperatorIpBlacklistMutationResponseSchema`, `OperatorIpBlacklistQuerySchema`,
+`OperatorIpBlacklistListResponseSchema`, `OperatorIpBlacklistRevokeRequestSchema`, and matching
+inferred types. Added `unknown_entry` to `botblocker.ts`'s `botBlockerErrorCodes` for an
+operator-referenced record (e.g. a revoke target) that does not exist. The pre-existing
+`botblockerRapidList` scaffold (`OperatorRapidListMutationSchema`, `rapidListIndicatorKinds`, the
+`/v1/control/botblocker/rapid-list` route) is **untouched** — its removal is plan step 5, not part
+of this session's scope.
+
+**Wiring.** `backend/packages/api/src/persistence.ts` registers
+`ensureBotBlockerIpBlacklistIndexes` (unique `ip` index plus a `createdAt` index, per family) in the
+existing isolated `ensureIndexStep` startup sequence. `backend/apps/server/lib/server-context.ts`
+constructs one `BotBlockerIpBlacklistPersistence(dataStores.db)` and exposes it on `ServerContext`
+as `botBlockerIpBlacklist`, alongside the existing BotBlocker services.
+
+**Tests.** New `botblocker-ip-blacklist-persistence.test.ts` covers family-prefixed ID generation,
+v4/v6 collection separation, refresh-in-place upsert semantics (including clearing a prior
+revocation and expiry), invalid-IP rejection (`IpBlacklistValidationError`), revoke-by-ID including
+unknown/wrong-prefix IDs, `findByIp` normalization across families, per-family paginated listing,
+and the shared response-mapping helper. Updated
+`backend/packages/contracts/src/botblocker-api-control.test.ts` with new `describe` coverage for
+every new schema (valid v4/v6 mutations, malformed-IP rejection, forbidden caller-supplied identity/
+score fields, the required `family` list-query param, and a bare-`entryId` revoke request). Fixed
+the six pre-existing `ipHash`-referencing test files identified above
+(`botblocker-ingestion-service.test.ts`, `botblocker-session-persistence.test.ts`,
+`botblocker-intelligence-persistence.test.ts`, `botblocker-operations-service.test.ts`,
+`botblocker-api-control.test.ts`, `botblocker-persistence.test.ts`) to use raw `ip` fixtures instead
+of `ipHash`.
+
+**Verification.** Focused suites run directly (this Windows/PowerShell environment's `npm run test`
+invocations fail on every workspace's `"src/**/*.test.ts"` script glob — a pre-existing, unrelated
+issue affecting the whole monorepo identically, not something this session introduced or fixed;
+worked around here by enumerating files explicitly): `@powerotp/contracts` 167/167,
+`@powerotp/api` 239/239, and `@powerotp/backend`'s explicit test list (route-inventory,
+BotBlocker Phase 8 HTTP, policy-route, and `lib/**` suites) 15/15, all zero failures.
+`tsc --noEmit`/`tsc -p tsconfig.json --noEmit` passed cleanly for `@powerotp/contracts`,
+`@powerotp/api`, and `@powerotp/backend`. A full `npm run verify` was then run once: the `build`
+stage succeeded completely, including the production Next.js build of `@powerotp/backend`, whose
+printed route table confirms both new routes
+(`/v1/control/botblocker/ip-blacklist`, `/v1/control/botblocker/ip-blacklist/revoke`) compiled and
+registered correctly; the `lint` stage (`tsc --noEmit` across every workspace) passed completely;
+the `test` stage failed, but only because of the same pre-existing Windows glob issue described
+above, reproduced identically across every workspace's test script including ones this session
+never touched (`@powerotp/botblocker-signing`, `@powerotp/mcp`) — not a regression from this
+session's changes. `backend/apps/server/app/route-inventory.test.ts`'s drift check (part of the
+15/15 above) independently confirms the two new route files' paths and exported HTTP methods match
+the `docs/API_ROUTE_INVENTORY.md` rows added for them exactly.
+
+**Documentation.** Added the two new routes to `docs/API_ROUTE_INVENTORY.md` in their existing
+`/v1/control/botblocker/*` block.
+
+**Exclusions and operations.** No ASN/subnet network-range tables, MaxMind import pipeline, ASN
+classification/type-score tables or admin routes, external IP-reputation API-lookup cache, seeded
+placeholder row, or `rapidAuthMutation` wiring were added — all remain later steps of this same
+Phase 16 plan. No scoring, Passport/PaidTokenPass behavior, billing, deployment, DNS, or customer
+activation was touched. No `.env` file was read or changed. No migration or seed was performed. No
+commit or push was performed; git status was left for the user to review.

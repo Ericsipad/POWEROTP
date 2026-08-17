@@ -28,10 +28,13 @@ export interface BotBlockerScope {
 export interface GateSessionDocument extends BotBlockerScope {
   _id: string;
   userIntelligenceId: string;
-  /** Server-derived fingerprint and keyed IP lookup hashes only. Raw device
-   * input and raw IP addresses are not durable fields in this collection. */
+  /** Server-derived fingerprint lookup hash. Raw device input is never a
+   * durable field. The trusted request IP is stored raw (not hashed) for
+   * site-owner visitor reporting and return-visit correlation; it is not
+   * treated as identity/PII because it is never linked to a Supabase
+   * account record. */
   fingerprintHash: string;
-  ipHash?: string;
+  ip?: string;
   state: "active" | "ended";
   latestDecision?: BotBlockerDecisionOutcome;
   lastAppliedSequence: number;
@@ -44,7 +47,7 @@ export interface GateSessionDocument extends BotBlockerScope {
 }
 
 export interface IpObservation {
-  ipHash: string;
+  ip: string;
   firstObservedAt: Date;
   lastObservedAt: Date;
   observationCount: number;
@@ -55,8 +58,10 @@ export interface UserIntelligenceDocument extends BotBlockerScope {
   /** Internal authoritative Passport account reference. This remains absent
    * until a later Passport phase verifies and binds a real Passport user. */
   passportUserId?: string;
-  /** Non-unique, server-derived lookup evidence. Phase 15 owns derivation
-   * and matching; Phase 6 only fixes the durable, project-scoped boundary. */
+  /** Server-derived, non-unique lookup evidence. Phase 15 owns derivation
+   * and matching; Phase 6 only fixes the durable, project-scoped boundary.
+   * The fingerprint remains a keyed hash; IP observations store the raw
+   * address (see `GateSessionDocument.ip`). */
   fingerprintHash: string;
   ipObservations: IpObservation[];
   latestEvidence?: BrowserEvidence;
@@ -151,7 +156,7 @@ export async function ensureBotBlockerIntelligenceIndexes(db: Db): Promise<void>
         projectId: 1,
         siteId: 1,
         fingerprintHash: 1,
-        "ipObservations.ipHash": 1,
+        "ipObservations.ip": 1,
         lastObservedAt: -1,
       },
     ),
@@ -160,7 +165,7 @@ export async function ensureBotBlockerIntelligenceIndexes(db: Db): Promise<void>
         customerId: 1,
         projectId: 1,
         siteId: 1,
-        "ipObservations.ipHash": 1,
+        "ipObservations.ip": 1,
         lastObservedAt: -1,
       },
     ),

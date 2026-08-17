@@ -3,6 +3,7 @@ import type { Db } from "mongodb";
 import type { ProductionConfig } from "./config.js";
 import {
   BotBlockerIntelligencePersistence,
+  type IpObservation,
 } from "./botblocker-intelligence-persistence.js";
 import type { BotBlockerSiteDocument } from "./botblocker-site-persistence.js";
 import type {
@@ -69,17 +70,21 @@ export class BotBlockerOperationsService {
       options,
     );
     return {
-      visitors: visitors.map((visitor) => ({
-        visitorId: visitor._id,
-        siteId: visitor.siteId,
-        gateSessionCount: visitor.gateSessionCount,
-        behaviorReportCount: visitor.behaviorReportCount,
-        pageViewCount: visitor.pageViewCount ?? 0,
-        totalPageDurationMs: visitor.totalPageDurationMs ?? 0,
-        totalActiveDurationMs: visitor.totalActiveDurationMs ?? 0,
-        firstObservedAt: visitor.firstObservedAt.toISOString(),
-        lastObservedAt: visitor.lastObservedAt.toISOString(),
-      })),
+      visitors: visitors.map((visitor) => {
+        const ip = latestIp(visitor.ipObservations);
+        return {
+          visitorId: visitor._id,
+          siteId: visitor.siteId,
+          ...(ip ? { ip } : {}),
+          gateSessionCount: visitor.gateSessionCount,
+          behaviorReportCount: visitor.behaviorReportCount,
+          pageViewCount: visitor.pageViewCount ?? 0,
+          totalPageDurationMs: visitor.totalPageDurationMs ?? 0,
+          totalActiveDurationMs: visitor.totalActiveDurationMs ?? 0,
+          firstObservedAt: visitor.firstObservedAt.toISOString(),
+          lastObservedAt: visitor.lastObservedAt.toISOString(),
+        };
+      }),
       nextCursor:
         visitors.length === options.limit
           ? visitors.at(-1)?.lastObservedAt.toISOString()
@@ -179,4 +184,20 @@ export class BotBlockerOperationsService {
       })),
     };
   }
+}
+
+/**
+ * The visitor's raw IP for the site-owner visitor report (see the Phase 16
+ * network-intelligence design's IP-hash reversal). A brand-new profile
+ * seeds `ipObservations` with exactly one entry (the session's IP); a
+ * later session only merges into an *existing* profile when its IP is
+ * already one of that profile's observations (`openGateSession`'s
+ * fingerprint-and-IP match), which updates that same entry in place
+ * rather than adding a second one. So today there is at most one entry —
+ * there is no "earlier IP" to choose between — and this reads it plainly
+ * instead of implying a history that the matching rule above never
+ * actually produces.
+ */
+function latestIp(observations: IpObservation[]): string | undefined {
+  return observations[0]?.ip;
 }

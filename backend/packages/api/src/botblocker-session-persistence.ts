@@ -41,7 +41,7 @@ export class BotBlockerSessionPersistence {
     scope: BotBlockerScope;
     gateSessionId: string;
     fingerprintHash: string;
-    ipHash?: string;
+    ip?: string;
     evidence: BrowserEvidence;
     now: Date;
   }): Promise<GateSessionDocument> {
@@ -62,12 +62,12 @@ export class BotBlockerSessionPersistence {
           return;
         }
 
-        const matched = input.ipHash
+        const matched = input.ip
           ? await this.#userIntelligence.findOne(
             {
               ...input.scope,
               fingerprintHash: input.fingerprintHash,
-              "ipObservations.ipHash": input.ipHash,
+              "ipObservations.ip": input.ip,
               lastObservedAt: { $gte: botBlockerMatchCutoff(input.now) },
             },
             { session, sort: { lastObservedAt: -1 } },
@@ -81,7 +81,7 @@ export class BotBlockerSessionPersistence {
               $set: {
                 ipObservations: updateIpObservations(
                   matched.ipObservations,
-                  input.ipHash,
+                  input.ip,
                   input.now,
                 ),
                 latestEvidence: input.evidence,
@@ -98,7 +98,7 @@ export class BotBlockerSessionPersistence {
             _id: userId,
             ...input.scope,
             fingerprintHash: input.fingerprintHash,
-            ipObservations: updateIpObservations([], input.ipHash, input.now),
+            ipObservations: updateIpObservations([], input.ip, input.now),
             latestEvidence: input.evidence,
             gateSessionCount: 1,
             behaviorReportCount: 0,
@@ -119,7 +119,7 @@ export class BotBlockerSessionPersistence {
           ...input.scope,
           userIntelligenceId: userId,
           fingerprintHash: input.fingerprintHash,
-          ...(input.ipHash ? { ipHash: input.ipHash } : {}),
+          ...(input.ip ? { ip: input.ip } : {}),
           state: "active",
           lastAppliedSequence: -1,
           startedAt: input.now,
@@ -150,16 +150,16 @@ function sameScope(
 
 function updateIpObservations(
   current: IpObservation[],
-  ipHash: string | undefined,
+  ip: string | undefined,
   now: Date,
 ): IpObservation[] {
-  if (!ipHash) return current;
-  const existing = current.find((observation) => observation.ipHash === ipHash);
+  if (!ip) return current;
+  const existing = current.find((observation) => observation.ip === ip);
   if (!existing) {
     return [
       ...current,
       {
-        ipHash,
+        ip,
         firstObservedAt: now,
         lastObservedAt: now,
         observationCount: 1,
@@ -167,7 +167,7 @@ function updateIpObservations(
     ];
   }
   return current.map((observation) =>
-    observation.ipHash === ipHash
+    observation.ip === ip
       ? {
           ...observation,
           lastObservedAt: now,

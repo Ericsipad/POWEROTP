@@ -6,6 +6,7 @@ import { createBotBlockerKeyRing } from "@powerotp/api/botblocker-config.js";
 import { BotBlockerIngestionPersistence } from "@powerotp/api/botblocker-ingestion-persistence.js";
 import { BotBlockerIngestionService } from "@powerotp/api/botblocker-ingestion-service.js";
 import { BotBlockerIntelligencePersistence } from "@powerotp/api/botblocker-intelligence-persistence.js";
+import { BotBlockerIpBlacklistPersistence } from "@powerotp/api/botblocker-ip-blacklist-persistence.js";
 import { BotBlockerOperationsService } from "@powerotp/api/botblocker-operations-service.js";
 import { BotBlockerPolicyControlService } from "@powerotp/api/botblocker-policy-control-service.js";
 import { BotBlockerPolicyPersistence } from "@powerotp/api/botblocker-policy-persistence.js";
@@ -52,6 +53,7 @@ export interface ServerContext {
   botBlockerRuntimeSecurity: BotBlockerRuntimeSecurity;
   botBlockerVisitorTokens: BotBlockerVisitorTokenService;
   botBlockerIngestion: BotBlockerIngestionService;
+  botBlockerIpBlacklist: BotBlockerIpBlacklistPersistence;
   botBlockerPolicy: BotBlockerPolicyService;
   botBlockerPolicyControl: BotBlockerPolicyControlService;
   botBlockerOperations: BotBlockerOperationsService;
@@ -150,6 +152,7 @@ async function buildServerContext(): Promise<ServerContext> {
     new BotBlockerIngestionPersistence(dataStores.db, dataStores.client),
     config,
   );
+  const botBlockerIpBlacklist = new BotBlockerIpBlacklistPersistence(dataStores.db);
   const botBlockerPolicyPersistence = new BotBlockerPolicyPersistence(
     dataStores.db,
     dataStores.client,
@@ -208,6 +211,7 @@ async function buildServerContext(): Promise<ServerContext> {
     botBlockerRuntimeSecurity,
     botBlockerVisitorTokens,
     botBlockerIngestion,
+    botBlockerIpBlacklist,
     botBlockerPolicy,
     botBlockerPolicyControl,
     botBlockerOperations,

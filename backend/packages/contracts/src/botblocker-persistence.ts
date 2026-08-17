@@ -8,6 +8,7 @@ import {
   BrowserEvidenceSchema,
   ReportSequenceSchema,
   SiteIdSchema,
+  TrustedProxyIpSchema,
 } from "./botblocker.js";
 import { VerificationTypeSchema } from "./verification.js";
 
@@ -27,15 +28,9 @@ export const ServerFingerprintHashSchema = z
   .string()
   .regex(/^[a-f0-9]{64}$/, "Fingerprint hash must be lowercase SHA-256 hex");
 
-/** A keyed, server-derived lookup value. The raw IP is intentionally absent
- * from every durable contract, and this value is never a unique identity. */
-export const ServerIpHashSchema = z
-  .string()
-  .regex(/^[a-f0-9]{64}$/, "IP hash must be lowercase SHA-256 hex");
-
 export const IpObservationSchema = z
   .object({
-    ipHash: ServerIpHashSchema,
+    ip: TrustedProxyIpSchema,
     firstObservedAt: z.string().datetime(),
     lastObservedAt: z.string().datetime(),
     observationCount: z.number().int().positive(),
@@ -52,7 +47,7 @@ export const GateSessionRecordSchema = ScopedRecordSchema.extend({
   gateSessionId: OpaqueIdSchema,
   userIntelligenceId: OpaqueIdSchema,
   fingerprintHash: ServerFingerprintHashSchema,
-  ipHash: ServerIpHashSchema.optional(),
+  ip: TrustedProxyIpSchema.optional(),
   state: z.enum(["active", "ended"]),
   latestDecision: BotBlockerDecisionOutcomeSchema.optional(),
   lastAppliedSequence: z.number().int().min(-1),

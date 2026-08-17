@@ -56,9 +56,10 @@ const ProductionConfigSchema = z.object({
   BOTBLOCKER_WEBHOOK_ENDPOINT_SECRET: z.string().min(32).optional(),
   BOTBLOCKER_VISITOR_TOKEN_SECRET: z.string().min(32).optional(),
   /**
-   * Independent keyed-lookup domain for pseudonymous BotBlocker browser
-   * environment and trusted-IP hashes. Raw IPs and caller-supplied
-   * fingerprint hashes are never persisted.
+   * Independent keyed-lookup domain for the pseudonymous BotBlocker browser
+   * environment (fingerprint) hash. Caller-supplied fingerprint hashes are
+   * never accepted. The trusted request IP is stored raw (not hashed) for
+   * site-owner visitor reporting and return-visit correlation.
    */
   BOTBLOCKER_INTELLIGENCE_HASH_SECRET: z.string().min(32).optional(),
   BOTBLOCKER_RUNTIME_ORIGIN: z

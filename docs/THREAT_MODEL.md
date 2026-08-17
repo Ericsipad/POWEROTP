@@ -495,13 +495,16 @@ it twice. A conflicting or older sequence is rejected. Event TTLs remain anchore
 reported occurrence time, while session/intelligence TTLs refresh from the server receipt time,
 using the approved 548-day retention and 30-day matching window.
 
-Fingerprint and IP lookup values are HMAC-SHA-256 values derived only on the server under the
-independent `BOTBLOCKER_INTELLIGENCE_HASH_SECRET`; raw IP addresses and browser-supplied
-fingerprint hashes are not durable inputs or fields. Fingerprint material is the already-strict
-sanitized evidence object. A recent profile match requires both the derived fingerprint and a
-matching keyed IP observation within the same customer/project/site and 30-day window; a
-repeated IP alone never establishes visitor identity. When trusted IP context is unavailable,
-the session is still retained without an IP hash and is not merged into an earlier profile on
+The fingerprint lookup value is an HMAC-SHA-256 hash derived only on the server under the
+independent `BOTBLOCKER_INTELLIGENCE_HASH_SECRET`; browser-supplied fingerprint hashes are never
+a durable input or field. Fingerprint material is the already-strict sanitized evidence object.
+The trusted request IP is retained raw (not hashed): it is not treated as identity/PII because it
+is never linked to a Supabase account record, and the platform's own design explicitly needs the
+raw value for two purposes — showing it in the site owner's own visitor report, and using it as a
+return-visit correlation signal. A recent profile match requires both the derived fingerprint and
+a matching raw-IP observation within the same customer/project/site and 30-day window; a repeated
+IP alone never establishes visitor identity. When trusted IP context is unavailable, the session
+is still retained without an IP observation and is not merged into an earlier profile on
 fingerprint evidence alone.
 
 ### Public MCP generator

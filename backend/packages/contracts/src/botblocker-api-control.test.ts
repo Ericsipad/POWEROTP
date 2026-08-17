@@ -6,6 +6,10 @@ import {
   CustomerVisitorsQuerySchema,
   OperatorBotBlockerHealthResponseSchema,
   OperatorDecisionTraceEntrySchema,
+  OperatorIpBlacklistEntrySchema,
+  OperatorIpBlacklistMutationSchema,
+  OperatorIpBlacklistQuerySchema,
+  OperatorIpBlacklistRevokeRequestSchema,
   OperatorPolicyPublicationRequestSchema,
   OperatorRapidListMutationSchema,
 } from "./botblocker-api-control.js";
@@ -17,6 +21,7 @@ describe("customer visitor contracts", () => {
   const visitor = {
     visitorId: "visitor_0123456789",
     siteId: SITE_ID,
+    ip: "203.0.113.5",
     latestDecision: "allow",
     gateSessionCount: 2,
     behaviorReportCount: 4,
@@ -54,6 +59,91 @@ describe("customer visitor contracts", () => {
     assert.equal(
       CustomerVisitorsQuerySchema.safeParse({
         projectId: "project_012345678",
+      }).success,
+      false,
+    );
+  });
+});
+
+describe("operator IP blacklist contracts", () => {
+  const mutation = {
+    ip: "203.0.113.5",
+    reason: "Confirmed scraper",
+    provenance: "operator_manual",
+  };
+
+  it("accepts a v4 or v6 mutation and rejects a malformed IP", () => {
+    assert.equal(OperatorIpBlacklistMutationSchema.safeParse(mutation).success, true);
+    assert.equal(
+      OperatorIpBlacklistMutationSchema.safeParse({
+        ...mutation,
+        ip: "2001:db8::1",
+        provenance: "automatic_detection",
+      }).success,
+      true,
+    );
+    assert.equal(
+      OperatorIpBlacklistMutationSchema.safeParse({
+        ...mutation,
+        ip: "not-an-ip",
+      }).success,
+      false,
+    );
+  });
+
+  it("rejects caller-supplied identity, scores, or unknown fields", () => {
+    for (const forbidden of ["entryId", "createdBy", "createdAt", "family", "score"]) {
+      assert.equal(
+        OperatorIpBlacklistMutationSchema.safeParse({
+          ...mutation,
+          [forbidden]: "caller-value",
+        }).success,
+        false,
+      );
+    }
+  });
+
+  it("requires a family for the list query", () => {
+    assert.equal(OperatorIpBlacklistQuerySchema.safeParse({}).success, false);
+    assert.equal(
+      OperatorIpBlacklistQuerySchema.safeParse({ family: "v4" }).success,
+      true,
+    );
+    assert.equal(
+      OperatorIpBlacklistQuerySchema.safeParse({ family: "v8" }).success,
+      false,
+    );
+  });
+
+  it("accepts a full entry and rejects a caller-supplied score", () => {
+    const entry = {
+      entryId: "bl4_0123456789abcdef",
+      family: "v4",
+      ip: "203.0.113.5",
+      reason: "Confirmed scraper",
+      provenance: "operator_manual",
+      createdBy: "usr_platform_admin_1",
+      createdAt: NOW,
+      updatedAt: NOW,
+    };
+    assert.equal(OperatorIpBlacklistEntrySchema.safeParse(entry).success, true);
+    assert.equal(
+      OperatorIpBlacklistEntrySchema.safeParse({ ...entry, score: 95 }).success,
+      false,
+    );
+  });
+
+  it("accepts a bare entryId revoke request only", () => {
+    assert.equal(
+      OperatorIpBlacklistRevokeRequestSchema.safeParse({
+        entryId: "bl4_0123456789abcdef",
+      }).success,
+      true,
+    );
+    assert.equal(
+      OperatorIpBlacklistRevokeRequestSchema.safeParse({
+        entryId: "bl4_0123456789abcdef",
+        reason: "unexpected",
       }).success,
       false,
     );

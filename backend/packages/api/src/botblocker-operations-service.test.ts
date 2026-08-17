@@ -48,7 +48,17 @@ function fixture() {
         _id: "bui_1234567890123456",
         ...scope,
         fingerprintHash: "a".repeat(64),
-        ipObservations: [{ ipHash: "b".repeat(64) }],
+        // openGateSession's matching rule never produces more than one
+        // observation per profile in practice (see botblocker-operations
+        // -service.ts's `latestIp` doc comment); this fixture reflects that.
+        ipObservations: [
+          {
+            ip: "203.0.113.5",
+            firstObservedAt: now,
+            lastObservedAt: now,
+            observationCount: 3,
+          },
+        ],
         gateSessionCount: 2,
         behaviorReportCount: 4,
         pageViewCount: 4,
@@ -106,6 +116,7 @@ describe("BotBlockerOperationsService", () => {
     assert.equal(response.visitors.length, 1);
     assert.equal(response.visitors[0]?.visitorId, "bui_1234567890123456");
     assert.equal(response.visitors[0]?.totalActiveDurationMs, 81_000);
+    assert.equal(response.visitors[0]?.ip, "203.0.113.5");
     assert.equal("fingerprintHash" in response.visitors[0]!, false);
     assert.equal("ipObservations" in response.visitors[0]!, false);
     await assert.rejects(

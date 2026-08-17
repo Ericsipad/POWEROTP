@@ -107,7 +107,7 @@ class MemoryIngestionStore {
     scope: BotBlockerScope;
     gateSessionId: string;
     fingerprintHash: string;
-    ipHash?: string;
+    ip?: string;
     evidence: BrowserEvidence;
     now: Date;
   }) {
@@ -122,7 +122,7 @@ class MemoryIngestionStore {
       ...input.scope,
       userIntelligenceId: `bui_${input.gateSessionId}`,
       fingerprintHash: input.fingerprintHash,
-      ...(input.ipHash ? { ipHash: input.ipHash } : {}),
+      ...(input.ip ? { ip: input.ip } : {}),
       state: "active",
       lastAppliedSequence: -1,
       startedAt: input.now,
@@ -217,7 +217,7 @@ describe("BotBlockerIngestionService", () => {
     assert.equal(store.riskEvents.size, 1);
   });
 
-  it("derives stable keyed fingerprint and normalized IP hashes server-side", async () => {
+  it("derives a stable keyed fingerprint hash and stores a normalized raw IP", async () => {
     const store = new MemoryIngestionStore();
     const service = createService(store);
     await service.startSession({
@@ -234,13 +234,12 @@ describe("BotBlockerIngestionService", () => {
     });
 
     assert.match(store.opened[0]!.fingerprintHash, /^[a-f0-9]{64}$/);
-    assert.match(store.opened[0]!.ipHash!, /^[a-f0-9]{64}$/);
+    assert.equal(store.opened[0]!.ip, "2001:db8::1");
     assert.equal(
       store.opened[0]!.fingerprintHash,
       store.opened[1]!.fingerprintHash,
     );
-    assert.equal(store.opened[0]!.ipHash, store.opened[1]!.ipHash);
-    assert.equal(JSON.stringify(store.opened).includes("2001:db8"), false);
+    assert.equal(store.opened[0]!.ip, store.opened[1]!.ip);
   });
 
   it("rejects prohibited raw fields before persistence", async () => {

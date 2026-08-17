@@ -181,7 +181,7 @@ describe("BotBlocker intelligence persistence", () => {
       (index) =>
         index.collection === "userIntelligence" &&
         index.keys.fingerprintHash === 1 &&
-        index.keys["ipObservations.ipHash"] === 1 &&
+        index.keys["ipObservations.ip"] === 1 &&
         index.keys.lastObservedAt === -1,
     ));
   });
@@ -191,7 +191,7 @@ describe("BotBlocker intelligence persistence", () => {
     await ensureBotBlockerIntelligenceIndexes(indexDb(captured));
 
     const ipIndex = captured.find(
-      (index) => index.keys["ipObservations.ipHash"] === 1,
+      (index) => index.keys["ipObservations.ip"] === 1,
     );
     assert.ok(ipIndex);
     assert.notEqual(ipIndex.options?.unique, true);

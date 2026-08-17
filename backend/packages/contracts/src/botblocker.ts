@@ -491,6 +491,9 @@ export const botBlockerErrorCodes = [
   "invalid_timeout",
   "invalid_evidence",
   "unknown_site",
+  /** Phase 16: an operator-referenced record (e.g. an IP blacklist entry)
+   * does not exist in the caller's addressed collection. */
+  "unknown_entry",
   "authentication_required",
   "invalid_request",
   "replay_detected",

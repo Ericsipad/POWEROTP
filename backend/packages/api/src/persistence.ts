@@ -3,6 +3,7 @@ import type { Db } from "mongodb";
 
 import { ensureBillingIndexes } from "./billing-persistence.js";
 import { ensureBotBlockerIntelligenceIndexes } from "./botblocker-intelligence-persistence.js";
+import { ensureBotBlockerIpBlacklistIndexes } from "./botblocker-ip-blacklist-persistence.js";
 import { ensureBotBlockerPolicyIndexes } from "./botblocker-policy-persistence.js";
 import { ensureBotBlockerSiteCredentialIndexes } from "./botblocker-site-credential-persistence.js";
 import { ensureBotBlockerSiteIndexes } from "./botblocker-site-persistence.js";
@@ -230,6 +231,7 @@ export async function ensureIndexes(db: Db) {
     ensureIndexStep("botBlockerSite", () => ensureBotBlockerSiteIndexes(db)),
     ensureIndexStep("botBlockerSiteCredential", () => ensureBotBlockerSiteCredentialIndexes(db)),
     ensureIndexStep("botBlockerIntelligence", () => ensureBotBlockerIntelligenceIndexes(db)),
+    ensureIndexStep("botBlockerIpBlacklist", () => ensureBotBlockerIpBlacklistIndexes(db)),
     ensureIndexStep("botBlockerPolicy", () => ensureBotBlockerPolicyIndexes(db)),
   ]);
 }
