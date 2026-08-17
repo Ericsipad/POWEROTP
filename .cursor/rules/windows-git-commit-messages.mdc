@@ -31,3 +31,15 @@ Do NOT use `$msg | Out-File -FilePath commit-msg.txt -Encoding utf8` or
 
 For single-line commit messages, `git commit -m "..."` needs no temp file and has
 no BOM risk — prefer it when the message is one line.
+
+## Separate gotcha: don't write the literal words "git commit" inside the message
+
+The harness appends an attribution `--trailer "Co-authored-by: ..."` after any
+literal occurrence of the substring "git commit" anywhere in the shell command
+text — including inside a commit-message string/variable, not just the actual
+`git commit` invocation. If your commit subject/body itself contains the phrase
+"git commit" (e.g. describing a fix to commit-message handling), PowerShell then
+fails to parse the injected trailer with `The '<' operator is reserved for future
+use.` Avoid writing the literal two-word phrase "git commit" inside a commit
+message's text; rephrase (e.g. "commit messages" instead of "git commit
+messages") when the commit is about git/commit tooling itself.
