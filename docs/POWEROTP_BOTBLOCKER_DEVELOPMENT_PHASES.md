@@ -33,6 +33,13 @@ mouse-directness, scroll smoothness/speed aggregates, and honeypot activations. 
 saved to the visitor session and may revise a
 previous `allow` or valid clearance to `otp`.
 
+Behavior reports are separate from the broad browser/device fingerprint vector. Phase 17 corrects
+the incomplete Phase 10/15 implementation by collecting bounded browser, hardware, rendering,
+font, audio, and capability components through a pinned industry-standard collector. Raw
+fingerprint components are retained on the Mongo master; only a server-derived HMAC of the
+approved stable subset is used for exact rapid lookup. Page content, form values, passwords, raw
+keystrokes, clicked text, and chronological pointer trails remain prohibited.
+
 The customer chooses a decision timeout from 50 through 2,000 ms; 200 ms is the
 recommended default. Timeout/network failure publishes fail-open access state but does not
 cancel the pending decision. A late `otp` updates the recommendation. POWEROTP never alters
@@ -345,16 +352,40 @@ admin audit, lookup, and signed snapshots. Allowlist maps to `allow`; blacklist 
 
 ### Phase 17 — Proprietary scoring
 
-After the user supplies exact weights, decay, closest-match, confidence, and threshold
-rules, aggregate every initial/later behavior report into its `userIntelligence` profile and
-recalculate that profile deterministically on every accepted update. Store model/input
-versions and evaluate VPN, mobile, CGNAT, IPv6, privacy-browser, headless, datacenter,
-and residential-proxy cases. Browser/middleware observations are inputs, never decision
-authority. Split before editing if model design exceeds one session.
+**Design status:** approved and saved in
+[`POWEROTP_BOTBLOCKER_PHASE17_PROPRIETARY_SCORING_PLAN.md`](POWEROTP_BOTBLOCKER_PHASE17_PROPRIETARY_SCORING_PLAN.md);
+implementation has not started.
+
+Correct the incomplete fingerprint boundary first: collect and retain a broad, bounded,
+versioned browser/device vector using pinned FingerprintJS v5 components mapped into
+POWEROTP-owned contracts. Derive one exact server-side HMAC from the approved stable subset.
+Profile matching uses an authoritative binding first, otherwise that exact HMAC; IP alone never
+merges profiles. When authoritative proof sees a changed stable hash, replace the row's current
+hash.
+
+Before implementing aggregation, run the dedicated Phase 17A design session that inventories the
+actual accepted behavior/risk-event shapes and defines the operator-admin formulas and aggregation
+semantics that convert each accepted session input into a `userIntelligence` update. Do not invent
+that mapping. Keep `gateSessions` and linked `riskEvents` physically split but treat them as one
+logical 90-day session dataset; keep aggregated `userIntelligence` profiles for 548 days.
+
+Maintain cumulative running averages and direct profile fields, plus separate system-wide and
+same-site exact-IP profile counts for 1, 7, and 30 days. A second operator-admin configuration
+selects scoreable profile fields, validated restricted math, weights, and a validated final-total
+formula. Recalculate and overwrite the profile's one current `0..100` score on every accepted
+update. Missing inputs are excluded; unconfigured scoring is typed unavailable. Store no prior
+scores and no scoring-model/input version. Formula changes apply on the next accepted update.
+
+Initial RapidAuth preserves blacklist-first precedence, then awaits the current profile score
+within the existing 50–2,000 ms timeout. Later accepted updates enqueue a signed project-specific
+data-ready callback; middleware verifies it and pulls authoritative session data with the scoped
+visitor token. Local headless detection remains advisory only. CGNAT is not a direct observable
+signal, and IPv4/IPv6 remain lookup/storage families rather than score inputs. Split execution into
+the plan's fresh 17A–17G subphases.
 
 ### Phase 18 — Customer risk/OTP policy
 
-Add the 1–100 dashboard policy and score-band-to-enabled-OTP mapping, signed policy
+Add the 0–100 dashboard policy and score-band-to-enabled-OTP mapping, signed policy
 release, readiness/balance validation, fallback behavior, and immutable audit events.
 
 ### Phase 19 — OTP orchestration

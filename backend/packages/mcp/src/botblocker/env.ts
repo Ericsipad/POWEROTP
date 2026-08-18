@@ -47,12 +47,14 @@ export const BOTBLOCKER_ENV_VARS: readonly PowerOtpEnvVar[] = [
     name: "POWEROTP_WEBHOOK_SIGNING_SECRET",
     required: true,
     description:
-      "Independent 256-bit secret returned exactly once in the atomic project creation setup " +
-      "response and stored encrypted by PowerOTP. Verifies the signed timestamp and body of the " +
-      "challenge-status callback POWEROTP sends to /_powerotp/webhooks/challenge-status, using " +
+      "Project-specific 256-bit callback secret returned exactly once in the atomic project " +
+      "creation setup response and stored encrypted by PowerOTP. Verifies the signed timestamp " +
+      "and body of POWEROTP project callbacks, including challenge-status and planned BotBlocker " +
+      "session-data-ready notifications, using " +
       "the same powerotp-signature: t=<unix-ms>,v1=<base64url HMAC-SHA256 of `${t}.${rawBody}`> " +
       "header scheme as other PowerOTP callbacks. Verify the signature and a recent timestamp " +
-      "(5 minute window) before trusting a callback.",
+      "(5 minute window) before trusting a callback. A data-ready callback only prompts an " +
+      "authoritative pull with that visitor session's scoped token.",
   },
 ];
 

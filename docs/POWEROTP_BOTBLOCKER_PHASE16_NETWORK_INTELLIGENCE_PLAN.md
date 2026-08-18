@@ -1,10 +1,8 @@
 # BotBlocker Phase 16 — Network intelligence design plan
 
-**Status: design only, not implemented.** No code in this repository has been changed to
-implement anything described here. This document is the durable, repo-tracked record of a
-design session so a fresh session (on any machine, or a cloud agent with no access to this
-machine's local Cursor plan cache) can pick up execution with full context. It is not an
-as-built entry — do not cite it as evidence anything below has shipped.
+**Status: implementation complete (2026-08-17).** This document remains the durable design record;
+its eight-step execution breakdown links to the dated as-built evidence for what actually shipped.
+Do not use design prose by itself as as-built evidence.
 
 Ground truth for what has actually shipped remains
 [`POWEROTP_BOTBLOCKER_AS_BUILT.md`](POWEROTP_BOTBLOCKER_AS_BUILT.md). The canonical phase
@@ -54,11 +52,12 @@ mistakes:
    reason is pure latency: a small, single-purpose, indexed table is faster to scan than an entry
    mixed into a larger multi-purpose list, and this directly serves the sub-50ms decision-latency
    target already stated in `POWEROTP_BOTBLOCKER_PLAN.md`.
-4. **Fingerprinting is the existing Phase 15 mechanism, not a new collection.** It's the
-   already-collected browser fingerprint data (screen resolution, browser type, capabilities,
-   etc. — `BrowserEnvironmentEvidence`/`userIntelligence.fingerprintHash`), used to correlate the
-   same visitor/bot across changing IPs (proxies rotate IPs but often reuse the same browser). No
-   new schema needed for this in Phase 16.
+4. **Phase 16 did not change fingerprinting.** At the time, this plan treated Phase 15's
+   `BrowserEnvironmentEvidence`/`userIntelligence.fingerprintHash` as sufficient. The approved
+   Phase 17 design later corrected that assumption: behavior evidence is not the browser
+   fingerprint, Phase 15 currently hashes the whole changing report, and Phase 17 must add a
+   separate broad browser/device vector plus an exact HMAC of its stable subset. That correction
+   does not alter what Phase 16 itself shipped.
 5. **Enrichment lands on the gate session row, not directly on `userIntelligence`.** Session rows
    accumulate on the existing 5s-initial/30s-recurring cadence; a decision-generator re-running on
    every row change (Phase 17 scope) is what aggregates into `userIntelligence` — this phase
@@ -271,14 +270,16 @@ sequenceDiagram
 
 - No Cloudflare Worker / verify.powerotp.com edge deployment or sync job (Phase 26/27) — that's
   what "rapid"/edge retention actually refers to; this phase only builds the Mongo master tables.
-- No final weighted/thresholded risk score combining network classification with behavior/
-  fingerprint signals (Phase 17, pending the user's exact weights/decay/threshold rules) — this
+- No final risk score combining network classification with profile/behavior/fingerprint signals.
+  The approved Phase 17 plan replaces hardcoded user-supplied weights/decay/threshold assumptions
+  with operator-admin session-to-profile conversion formulas and profile-to-score formulas; this
   phase writes the session-level network input only.
 - No real ASN-to-type classifications populated (separate future "AI research pass" — this phase
   only builds the table and admin API it writes through).
 - No live external vendor HTTP integration until real credentials exist (typed-unavailable stub
   only, aside from the one explicitly-requested seeded placeholder row).
-- No new fingerprinting collection — existing Phase 15 mechanism, unchanged by this phase.
+- No broad fingerprint collection or stable-subset hash correction — approved for Phase 17,
+  unchanged by Phase 16.
 - No Passport/paid-allow blacklist bypass logic (documented future note only — Passport/
   PaidTokenPass isn't implemented yet).
 - No scoring, allow/blacklist decisioning beyond what's described above, Passport/PaidTokenPass

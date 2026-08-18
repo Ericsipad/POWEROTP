@@ -457,10 +457,10 @@ across every customer at once, without needing to know any customer's credential
   never binary floating point. Price/content revisions are versioned so an access exchange is
   auditable against the exact terms accepted.
 
-### Sanitized telemetry and prohibited data
+### Behavior telemetry, fingerprint evidence, and prohibited data
 
-Every browser report is sanitized at the point of collection, before it ever leaves the
-visitor's browser:
+Behavior reports are bounded at the point of collection before leaving the visitor's browser.
+Browser/device fingerprint evidence is a separate versioned input with its own closed schema:
 
 | Allowed | Prohibited |
 | --- | --- |
@@ -470,11 +470,14 @@ visitor's browser:
 | Mouse directness/straight-line metrics plus sparse client-aggregated 32×32 pointer bins (`sampleCount`, bounded `dwellMs`) | Chronological/raw mouse coordinate trails or every pointer event |
 | Scroll smoothness / high-speed aggregate metrics | Raw scroll trails |
 | Honeypot/decoy activations | — |
-| Versioned sensor metadata and fixed-enum `webdriver`/untrusted-event indicators | Raw user-agent strings, plugin/font inventories, arbitrary browser-property scans, raw event details |
+| Versioned behavior-sensor metadata and fixed-enum `webdriver`/untrusted-event indicators | Arbitrary unversioned browser-property scans or raw event details |
+| Versioned, bounded browser/device fingerprint components: UA Client Hints, browser/platform/architecture, screen/device/hardware properties, languages/timezone, supported capabilities, canvas, WebGL, AudioContext, and font outputs | Browser/library-supplied identity authority, arbitrary extension data, unbounded component values |
 | Timing (5s initial, 30s recurring, partial-report triggers) | Raw keystrokes, passwords, emails, DOM snapshots, page content |
 
-Any new telemetry field proposed in a later phase must be checked against this table before
-it is added, and a field that cannot be justified as one of the "Allowed" rows must not ship.
+Any new behavior or fingerprint field must be assigned to the correct versioned closed contract
+and checked against this table before it ships. Fingerprint collection does not permit page
+content, form values, passwords, raw keystrokes, clicked text, chronological pointer trails, or
+unbounded arbitrary properties.
 This mirrors the existing rule that PowerOTP's OTP platform never logs answers, tokens, or
 secrets (see [Enumeration and privacy](#enumeration-and-privacy) and
 [Challenge disclosure or manipulation](#challenge-disclosure-or-manipulation) above).
@@ -491,21 +494,32 @@ Phase 15 applies the same strict schemas again at the authoritative ingestion se
 opening a session or writing an event. MongoDB transactions bind each immutable report/event to
 the authenticated customer/project/site and gate session, advance only a strictly newer
 per-session sequence, and return an exact replay as an idempotent duplicate rather than writing
-it twice. A conflicting or older sequence is rejected. Event TTLs remain anchored to the
-reported occurrence time, while session/intelligence TTLs refresh from the server receipt time,
-using the approved 548-day retention and 30-day matching window.
+it twice. A conflicting or older sequence is rejected. Gate-session headers and linked
+behavior/risk-event inputs use 90-day TTLs. The aggregated `userIntelligence` profile refreshes
+its 548-day TTL from accepted activity.
 
 The fingerprint lookup value is an HMAC-SHA-256 hash derived only on the server under the
 independent `BOTBLOCKER_INTELLIGENCE_HASH_SECRET`; browser-supplied fingerprint hashes are never
-a durable input or field. Fingerprint material is the already-strict sanitized evidence object.
+a durable identity authority. Fingerprint material is a separate broad, bounded, versioned
+browser/device vector collected through a pinned FingerprintJS v5 component collector and mapped
+into POWEROTP-owned contracts. The exact lookup HMAC includes only the approved comparatively
+stable subset; changing browser/OS versions, timezone, language order, window geometry, privacy
+preferences, behavior evidence, and IP are excluded from that HMAC but may remain bounded profile
+evidence.
+
 The trusted request IP is retained raw (not hashed): it is not treated as identity/PII because it
 is never linked to a Supabase account record, and the platform's own design explicitly needs the
 raw value for two purposes — showing it in the site owner's own visitor report, and using it as a
-return-visit correlation signal. A recent profile match requires both the derived fingerprint and
-a matching raw-IP observation within the same customer/project/site and 30-day window; a repeated
-IP alone never establishes visitor identity. When trusted IP context is unavailable, the session
-is still retained without an IP observation and is not merged into an earlier profile on
-fingerprint evidence alone.
+security/correlation signal. Profile selection uses an authoritative server-held binding first,
+then an exact stable-fingerprint HMAC when no binding exists. IP alone never establishes or merges
+identity. When authoritative proof identifies a profile and the stable HMAC changes, replace that
+row's current HMAC. There is no fuzzy, closest-match, partial-hash, subnet-identity, or IP-only
+identity path.
+
+Each profile keeps separate exact-IP reuse counts across all projects and within the same site for
+the latest 1, 7, and 30 days. Those counts are risk inputs, not identity authority. CGNAT-private
+addresses are not observable at POWEROTP, and IPv4/IPv6 family is a lookup/storage distinction,
+not risk by itself.
 
 ### Public MCP generator
 

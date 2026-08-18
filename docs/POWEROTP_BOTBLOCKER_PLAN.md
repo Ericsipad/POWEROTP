@@ -408,16 +408,21 @@ After an access recommendation, the runtime sensor:
   proof.
 
 Behavior reports above are not the complete browser-fingerprint specification. BotBlocker also
-collects a separate, versioned broad browser/device capability vector for session storage and
-later server-side matching. It should include every useful non-secret signal that supported
-browser APIs make available, such as screen geometry/color/depth/pixel ratio, timezone,
-languages, platform, memory/concurrency/touch capabilities, supported APIs and media codecs,
-WebGL, canvas/audio characteristics, and other stable capability outputs added by later sensor
-versions. POWEROTP stores the observed vector with the visitor session before deciding which
-features or combinations receive decision weight. The server canonicalizes the vector and
-derives keyed exact/component/fuzzy matching values; a browser-provided fingerprint hash is
-never accepted as authoritative identity. Cross-site matches remain internal POWEROTP evidence
-and are never exposed as a network-global customer identifier.
+collects a separate, versioned broad browser/device vector for session storage and later
+server-side exact matching. A pinned FingerprintJS v5 collector is mapped into POWEROTP-owned,
+closed, bounded contracts. Available components include UA Client Hints, screen/device/hardware
+properties, platform/architecture, timezone/languages, supported browser capabilities, WebGL,
+canvas, audio, and font outputs. Frequently changing components remain useful profile evidence
+but are excluded from the exact lookup HMAC.
+
+The server canonicalizes only the approved stable subset and derives one keyed exact HMAC; a
+browser-provided fingerprint hash or library visitor ID is never accepted as authoritative
+identity. A valid server-held session/cookie binding (and later an authoritative Passport
+binding) selects its exact profile first; otherwise the exact stable HMAC may match. IP alone
+never merges profiles. When authoritative proof sees a changed stable HMAC, the row's current
+hash is replaced. There is no fuzzy, closest-match, partial-hash, subnet-identity, or IP-only
+identity path. Cross-site correlation remains internal POWEROTP evidence and is never exposed as
+a network-global customer identifier.
 
 Cookie-derived evidence follows actual browser boundaries. Browser JavaScript cannot read
 HttpOnly cookies or another origin's cookies. Arbitrary readable cookie values may be login or
@@ -429,6 +434,19 @@ sites normally set unrelated values, browsers partition third-party state, and d
 rotation prevents cookie matching from being an enforcement mechanism.
 
 Versioned immutable sensor assets are selected through signed policy.
+
+Accepted session inputs update the linked `userIntelligence` profile through a separately
+designed operator-admin conversion layer. Numeric fields use cumulative running averages; direct
+fields update directly. Profiles also keep separate system-wide and same-site exact-IP profile
+counts for 1, 7, and 30 days. A second operator-admin layer enables scoreable profile fields,
+applies validated restricted math and weights, then applies a validated final-total expression to
+produce the current `0..100` risk score. Unconfigured scoring is typed unavailable. Only the
+current aggregate and score are stored; score history and scoring-model versions are not.
+
+`gateSessions` plus linked immutable `riskEvents` form one logical session dataset while remaining
+physically split to avoid unbounded MongoDB documents. Both expire after 90 days.
+`userIntelligence` remains an 18-month aggregate profile. Newer numeric observations dilute older
+ones through the running average; there is no separate time-decay curve.
 
 ### OTP integration
 
@@ -469,6 +487,11 @@ Reuse the existing verification state machine, interaction-token protections, an
 - Retry failed callback deliveries with idempotency and bounded backoff. Multi-instance and
   serverless adapters require a shared concurrency-safe session store so either the callback or
   fallback poll can update the state read by the visitor's next local status request.
+- Reuse the same per-project callback URL, signing secret, delivery queue, retry behavior, and
+  adapter verification boundary for BotBlocker session-data-ready notifications. The callback
+  carries only bounded project/site/session/event binding and tells middleware that authoritative
+  data changed. After verifying it, middleware pulls the current session score/recommendation
+  using that visitor session's scoped token. The callback itself is not decision authority.
 
 ### PowerOTP Passport
 
@@ -613,7 +636,8 @@ adapter.
 The planned primary authenticated rapid-check origin is
 `https://verify.powerotp.com/v1/botblocker/*`. It is not deployed yet and will run on
 Cloudflare Workers, retaining at least 30 days of current user-intelligence, denylisted-IP,
-and fingerprint data. `https://api.powerotp.com` owns authoritative full-history master
+exact stable-fingerprint HMAC mappings, and current profile scores. `https://api.powerotp.com`
+owns authoritative full-history master
 data and is the fallback rapid-check origin when the Worker is unavailable. Operator-only
 routes use the separately authenticated `/v1/control/botblocker/*` namespace on the backend.
 
@@ -668,9 +692,10 @@ visitor listing) is a different traffic class and stays protected by the existin
 session/CSRF/project-ownership boundary instead.
 
 - Project creation generates the project ID, project API key, BotBlocker site ID, endpoint ID,
-  independent webhook signing secret, encrypted signing-secret record, and required audits in
-  one MongoDB transaction. Any failure aborts the operation. There is no lazy site creation,
-  cleanup-hook pseudo-rollback, migration, or backfill.
+  project callback signing secret, encrypted signing-secret record, and required audits in one
+  MongoDB transaction. The callback URL is the project's configured customer endpoint and serves
+  all POWEROTP callback event families. Any failure aborts the operation. There is no lazy site
+  creation, cleanup-hook pseudo-rollback, migration, or backfill.
 - The endpoint uses a strict `bwh_<signed-payload>.<hmac>` form. The payload contains format
   version, a random endpoint ID, project ID, and site ID; a dedicated server-held HMAC secret
   binds all four. Validation is constant-time after strict local syntax/length checks.
@@ -710,7 +735,9 @@ session/CSRF/project-ownership boundary instead.
   project authorization on every management route and safe rendering on every hosted response.
 - Keep ad-revenue qualification server-authoritative and resistant to self-clicks, automated
   click inflation, replay, and customer/visitor collusion.
-- Apply separate retention and decay to IP, network, device, session, account, and Passport evidence.
+- Retain gate-session headers and linked behavior/risk-event inputs for 90 days; retain aggregated
+  `userIntelligence` profiles for 548 days. Numeric profile evidence uses cumulative running
+  averages, not a separate time-decay curve.
 - Perform privacy/legal review before cross-site reputation launch.
 - See [`THREAT_MODEL.md`](THREAT_MODEL.md#botblocker-threat-model) for the full BotBlocker
   threat model, including the state-publication/customer-control boundary, API-key

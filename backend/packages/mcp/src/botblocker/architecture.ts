@@ -74,10 +74,11 @@ export function getBotBlockerDataBoundary() {
         "in the server-side gate session. Every later per-visitor call (assessment, challenge " +
         "launch, polling) forwards only this token — the site credential is never resent.",
       webhookSigningSecret:
-        "Independent 256-bit secret per project, shown once in the atomic project creation response " +
-        "and stored encrypted at rest. Verifies the signed " +
-        "timestamp and body of the challenge-status callback sent to " +
-        "/_powerotp/webhooks/challenge-status before your server trusts it.",
+        "Independent 256-bit callback secret per project, shown once in the atomic project creation " +
+        "response and stored encrypted at rest. It verifies POWEROTP's signed project callback " +
+        "events, including challenge-status and planned BotBlocker session-data-ready notifications. " +
+        "A callback notification is not visitor authority; the adapter pulls current session data " +
+        "with that visitor's scoped token.",
       returningVisitorInstantAllowCookie:
         "A visitor who already received an `allow` gets a signed, long-lived cookie; on a later " +
         "visit the adapter verifies that cookie's signature entirely on its own server and " +
@@ -89,6 +90,18 @@ export function getBotBlockerDataBoundary() {
         "Neither the site credential nor the scoped visitor token. The browser holds only an " +
         "HttpOnly, SameSite gate-session cookie and calls same-origin bridge routes that require " +
         "a non-simple `X-PowerOTP-Bridge: 1` marker plus Fetch Metadata/Origin checks.",
+    },
+    fingerprintBoundary: {
+      collected:
+        "The approved Phase 17 design separates broad, bounded, versioned browser/device " +
+        "fingerprint components from behavior reports. The Mongo master retains those components; " +
+        "page content, form values, raw keystrokes, clicked text, and pointer trails remain prohibited.",
+      exactLookup:
+        "POWEROTP derives one server-side keyed HMAC from the approved stable component subset. " +
+        "Authoritative binding wins first; otherwise only an exact HMAC may match. IP alone never " +
+        "merges profiles, and no browser/library visitor ID or fuzzy match is authoritative.",
+      implementationStatus:
+        "This corrected fingerprint boundary is Phase 17 design, not currently shipped behavior.",
     },
     prohibitedInOutput: [
       "customer credentials or account state",

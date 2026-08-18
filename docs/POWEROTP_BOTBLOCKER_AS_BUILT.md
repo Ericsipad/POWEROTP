@@ -22,8 +22,11 @@ API contracts, an independent Ed25519 trust domain, disabled project/site config
 durable scoped persistence boundaries, immutable signed policy publication/delivery, and the
 complete authenticated central HTTP surface. Runtime site credentials use an independent
 hashed credential domain. Phase 15 makes browser-assessment and risk-event ingestion real while
-the response remains typed unavailable for unimplemented decision/scoring work rather than
-fabricating a decision, score, challenge result, Passport result, or paid entitlement.
+unimplemented scoring remains typed unavailable rather than fabricating a score, challenge
+result, Passport result, or paid entitlement. Phase 16 makes one visitor-facing decision real:
+an active exact-IP blacklist match produces `otp`; otherwise the decision remains typed
+unavailable while the session stores its resolved ASN/type score and optional vendor-reputation
+snapshot.
 
 Phases 9–13 add the framework-neutral browser gate and continuous sanitized sensor plus raw
 Node HTTP, Express 5, and Next.js 16 App Router wrappers. The wrappers verify signed clearances
@@ -37,9 +40,23 @@ lookup hashes, strict sequence/idempotency handling, and the approved 548-day re
 behavior. Its corrected analytics contract also retains normalized click positions, bounded
 32×32 pointer-density/dwell bins, explicit page ID/name, active/total page time, navigation
 targets, and a server-derived query-free page URL for future project heatmap and navigation
-reports. There is still no scoring, rapid allowlist/blacklist decisioning, OTP orchestration,
+reports. Phase 16 adds dedicated raw-IP blacklist tables, IPv4/IPv6 network-range lookups, ASN
+classification/type-score configuration, and IPv4/IPv6 external-reputation caches. There is
+still no proprietary profile scoring, customer score/OTP policy, OTP orchestration,
 Passport/PaidTokenPass implementation, billing/metering, production BotBlocker key, policy
 release, deployment, or traffic activation.
+
+**Approved design corrections not yet built.** The Phase 17 design in
+`POWEROTP_BOTBLOCKER_PHASE17_PROPRIETARY_SCORING_PLAN.md` supersedes several earlier design
+assumptions without rewriting their historical as-built entries. The shipped Phase 10/15 sensor
+still lacks the approved broad browser/device fingerprint vector; its current hash still covers
+the changing behavior-evidence object; matching still requires exact fingerprint plus IP; and
+sessions/risk events still use 548-day TTLs. Phase 17 is approved to add separate bounded
+FingerprintJS component evidence, derive an exact HMAC from its stable subset, use authoritative
+binding then exact-hash matching without IP-only merges, change session inputs to 90-day TTLs,
+aggregate accepted inputs into `userIntelligence`, calculate the current `0..100` score, and
+notify project middleware through the signed callback/pull flow. None of those Phase 17
+corrections is claimed as implemented here.
 
 The Phase 13 correction establishes a strict state-publication boundary. Middleware uses the
 site credential for first session contact and narrow server-held visitor tokens thereafter,
