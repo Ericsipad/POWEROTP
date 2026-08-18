@@ -150,7 +150,7 @@ describe("fingerprint vector contract", () => {
       { status: "collector_error", code: "collection_failed" },
     ]) {
       const candidate = vector();
-      candidate.components.audio = state;
+      (candidate.components as Record<string, unknown>).audio = state;
       assert.equal(FingerprintVectorSchema.safeParse(candidate).success, true);
     }
   });
