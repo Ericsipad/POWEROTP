@@ -1,7 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { BOTBLOCKER_PROTOCOL_VERSION, type DecisionRevisionEnvelope } from "@powerotp/contracts";
+import {
+  BOTBLOCKER_PROTOCOL_VERSION,
+  FINGERPRINT_COLLECTOR_VERSION,
+  FINGERPRINT_VECTOR_VERSION,
+  fingerprintComponentNames,
+  type DecisionRevisionEnvelope,
+  type FingerprintVector,
+} from "@powerotp/contracts";
 import { Window as HappyWindow } from "happy-dom";
 
 import { createGateBrowserCoordinator } from "./browser.js";
@@ -10,6 +17,14 @@ import type { BrowserBootstrap, ChallengeMetadata } from "./types.js";
 const siteId = "site_1234567890123456";
 const audience = "https://customer.example";
 const gateSessionId = "gate_session_123456789";
+const fingerprint = {
+  fingerprintVersion: FINGERPRINT_VECTOR_VERSION,
+  collectorVersion: FINGERPRINT_COLLECTOR_VERSION,
+  components: Object.fromEntries(
+    fingerprintComponentNames.map((name) => [name, { status: "unavailable" }]),
+  ),
+} as FingerprintVector;
+const fingerprintCollector = { collect: async () => fingerprint };
 
 test("browser bridge derives sensor sequence from trusted bootstrap and applies revisions", async (context) => {
   const window = new HappyWindow({ url: `${audience}/` });
@@ -19,11 +34,12 @@ test("browser bridge derives sensor sequence from trusted bootstrap and applies 
     await window.happyDOM.close();
   });
   const reports: unknown[] = [];
-  const calls: Array<{ path: string; marker: string | null }> = [];
+  const calls: Array<{ path: string; marker: string | null; body?: string }> = [];
   const fetcher = createFetch(async (path, init) => {
     calls.push({
       path,
       marker: new Headers(init?.headers).get("x-powerotp-bridge"),
+      ...(init?.body ? { body: String(init.body) } : {}),
     });
     if (path === "/_powerotp/initial-evidence") return json({ status: "accepted" });
     if (path === "/_powerotp/session") return json(bootstrap(5));
@@ -44,6 +60,7 @@ test("browser bridge derives sensor sequence from trusted bootstrap and applies 
     document: window.document as unknown as Document,
     sensorVersion: "sensor-v1",
     fetch: fetcher,
+    fingerprintCollector,
   });
   coordinator.start();
   await waitFor(() => coordinator.controller.getSnapshot().lifecycle === "observing");
@@ -87,6 +104,11 @@ test("browser bridge derives sensor sequence from trusted bootstrap and applies 
     },
   });
   assert.ok(calls.every((call) => call.marker === "1"));
+  const initial = calls.find((call) => call.path === "/_powerotp/initial-evidence");
+  assert.deepEqual(JSON.parse(initial?.body ?? "{}").fingerprint, fingerprint);
+  assert.equal(JSON.stringify(reports).includes("fingerprint"), false);
+  assert.equal(initial?.body?.includes("siteCredential"), false);
+  assert.equal(initial?.body?.includes("visitorToken"), false);
 });
 
 test("verified OTP remains advisory until explicitly opened", async (context) => {
@@ -120,6 +142,7 @@ test("verified OTP remains advisory until explicitly opened", async (context) =>
     sensorVersion: "sensor-v1",
     pollIntervalMs: 1,
     fetch: fetcher,
+    fingerprintCollector,
   });
   coordinator.start();
   await waitFor(() => coordinator.controller.getSnapshot().lifecycle === "otp_required");
@@ -186,6 +209,7 @@ test("explicit openOtp uses an empty request and polling alone verifies", async 
     sensorVersion: "sensor-v1",
     pollIntervalMs: 1,
     fetch: fetcher,
+    fingerprintCollector,
   });
   coordinator.start();
   await waitFor(() => coordinator?.getSnapshot().lifecycle === "otp_required");

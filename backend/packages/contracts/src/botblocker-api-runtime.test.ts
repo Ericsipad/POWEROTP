@@ -15,6 +15,11 @@ import {
   ReadChallengeRequestSchema,
   RiskEventsRequestSchema,
 } from "./botblocker-api-runtime.js";
+import {
+  FINGERPRINT_COLLECTOR_VERSION,
+  FINGERPRINT_VECTOR_VERSION,
+} from "./fingerprint.js";
+import { fingerprintComponentNames } from "./fingerprint-components.js";
 
 const NOW = 1_786_000_000_000;
 const SITE_ID = "site_0123456789abcdef";
@@ -36,6 +41,13 @@ const evidence = {
   honeypotActivations: [],
 };
 const browser = { protocolVersion: 1, evidence, proofs: {} };
+const fingerprint = {
+  fingerprintVersion: FINGERPRINT_VECTOR_VERSION,
+  collectorVersion: FINGERPRINT_COLLECTOR_VERSION,
+  components: Object.fromEntries(
+    fingerprintComponentNames.map((name) => [name, { status: "unavailable" }]),
+  ),
+};
 const passport = {
   assertionId: "assertion_0123456789",
   siteId: SITE_ID,
@@ -226,6 +238,29 @@ describe("Phase 8 runtime route contracts", () => {
         false,
       );
     }
+  });
+
+  it("transports fingerprint only on initial rapid auth", () => {
+    assert.equal(RapidAuthRequestSchema.safeParse({
+      ...base,
+      payload: {
+        gateSessionId: GATE_ID,
+        request: { siteId: SITE_ID, method: "GET", path: "/" },
+        browser: { ...browser, fingerprint },
+      },
+    }).success, true);
+    assert.equal(BrowserAssessmentRequestSchema.safeParse({
+      ...base,
+      payload: {
+        report: {
+          protocolVersion: 1,
+          trigger: "recurring",
+          sequence,
+          evidence,
+          fingerprint,
+        },
+      },
+    }).success, false);
   });
 
   it("rejects invented proof and entitlement success", () => {

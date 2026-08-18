@@ -1,6 +1,7 @@
 # BotBlocker Phase 17 — Proprietary scoring design plan
 
-**Status: design only, not implemented.** This document is the durable, repo-tracked result of
+**Status: implementation in progress; fingerprint contracts/collector slice complete
+(2026-08-17).** This document is the durable, repo-tracked result of
 the Phase 17 design conversation. It does not claim that fingerprint collection, profile
 aggregation, scoring, callback delivery, or rapid-server synchronization has shipped.
 
@@ -240,12 +241,14 @@ profile scores on verify servers. This plan defines the source data but does not
 
 ## Execution breakdown
 
-The approved Phase 17A design is complete, but implementation has not started. Execute the
-remaining work in dependency-ordered fresh sessions:
+The approved Phase 17A design is complete and implementation has started. Execute the remaining
+work in dependency-ordered fresh sessions:
 
-1. **Fingerprint contracts and collector.** Add the exact pinned FingerprintJS dependency,
-   monitoring-disabled once-per-new-session collection, bounded versioned POWEROTP contracts,
-   typed component availability, and prohibited-data tests.
+1. **Status: complete (2026-08-17). Fingerprint contracts and collector.** Added the exact pinned
+   FingerprintJS dependency, monitoring-disabled once-per-new-session collection, bounded
+   versioned POWEROTP contracts, typed component availability, initial authenticated bridge
+   transport, and prohibited-data tests. See
+   [`POWEROTP_BOTBLOCKER_AS_BUILT.md`](POWEROTP_BOTBLOCKER_AS_BUILT.md).
 2. **`fingerprintData` persistence and stable HMAC.** Add the shared one-record-per-profile
    collection, canonical stable-subset HMAC derivation, authoritative/exact matching updates,
    replacement/no-alias semantics, retention, and concurrency tests.

@@ -1,6 +1,7 @@
 # BotBlocker Phase 17A — Fingerprint collection and gate-session profile sync plan
 
-**Status: design approved, not implemented.** This document is the durable result of the
+**Status: implementation in progress; fingerprint contracts/collector slice complete
+(2026-08-17).** This document is the durable result of the
 Phase 17A design session. Despite the historical filename, this phase does not design the
 separate `riskEvents` behavior reducer. It defines:
 
@@ -386,9 +387,11 @@ session reports independently.
 
 This design is larger than one implementation session. Execute in fresh sessions:
 
-1. **Fingerprint contracts and collector.** Add the pinned dependency, monitoring-disabled
-   once-per-session collection, strict POWEROTP-owned contracts, component availability mapping,
-   and prohibited-data tests.
+1. **Status: complete (2026-08-17). Fingerprint contracts and collector.** Added the pinned
+   dependency, monitoring-disabled once-per-session collection, strict POWEROTP-owned contracts,
+   component availability mapping, initial authenticated bridge transport, and prohibited-data
+   tests. See the dated Phase 17 fingerprint-contracts/collector entry in
+   [`POWEROTP_BOTBLOCKER_AS_BUILT.md`](POWEROTP_BOTBLOCKER_AS_BUILT.md).
 2. **`fingerprintData` persistence and exact hash.** Add collection/indexes, canonical stable
    HMAC derivation, authoritative/exact-hash matching updates, retention, and concurrency tests.
 3. **Gate-session profile synchronization.** Add explicit blacklist observation, selected direct

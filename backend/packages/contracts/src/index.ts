@@ -13,6 +13,8 @@ export * from "./botblocker-proofs.js";
 export * from "./botblocker-signing.js";
 export * from "./botblocker-site.js";
 export * from "./challenges.js";
+export * from "./fingerprint-components.js";
+export * from "./fingerprint.js";
 export * from "./modal-sessions.js";
 export * from "./nodes.js";
 export * from "./projects.js";

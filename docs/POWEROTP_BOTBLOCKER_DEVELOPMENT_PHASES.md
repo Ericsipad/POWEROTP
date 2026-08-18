@@ -352,12 +352,14 @@ admin audit, lookup, and signed snapshots. Allowlist maps to `allow`; blacklist 
 
 ### Phase 17 — Proprietary scoring
 
-**Design status:** approved and saved in
+**Implementation status:** in progress. The fingerprint contracts and once-per-gate-session
+collector slice completed on 2026-08-17; persistence, stable HMAC/matching, profile
+synchronization, scoring, callbacks, reducers, and external-vendor profile integration remain.
+The approved design is saved in
 [`POWEROTP_BOTBLOCKER_PHASE17_PROPRIETARY_SCORING_PLAN.md`](POWEROTP_BOTBLOCKER_PHASE17_PROPRIETARY_SCORING_PLAN.md);
 the approved gate-session synchronization subplan is saved in
 [`POWEROTP_BOTBLOCKER_PHASE17A_SESSION_INPUT_REDUCER_PLAN.md`](POWEROTP_BOTBLOCKER_PHASE17A_SESSION_INPUT_REDUCER_PLAN.md).
 Despite its historical filename, that subplan does not design the separate `riskEvents` reducer.
-Implementation has not started.
 
 Correct the incomplete fingerprint boundary first: collect and retain a broad, bounded,
 versioned browser/device vector using exactly pinned `@fingerprintjs/fingerprintjs` v5.2.0 with

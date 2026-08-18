@@ -1,0 +1,12 @@
+---
+description: Generate implementation handoffs only after push and remote confirmation
+alwaysApply: true
+---
+
+# Handoff prompt ordering
+
+- A next-session or end-of-session handoff prompt is the final operation of an implementation session.
+- Do not generate the handoff after local implementation or local verification alone.
+- Generate it only after the completed work has been committed, pushed, and the pushed remote CI/result has been checked and confirmed working.
+- If commit/push has not been explicitly authorized yet, stop before the handoff prompt and report that the implementation is awaiting commit/push authorization.
+- After authorization, commit and push, confirm the remote result once, then print the fresh-session prompt last.

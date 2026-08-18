@@ -3327,3 +3327,56 @@ exercised indirectly via `BotBlockerNetworkIntelligenceService`'s and
 and requires a fresh planning session with the user's own weights/decay/threshold rules. No `.env`
 file was read or changed. No migration or seed was performed. No commit or push was performed by
 this session unless the user explicitly requested it; git status was left for the user to review.
+
+## 2026-08-17 — BotBlocker Phase 17 (partial): fingerprint contracts and collector
+
+**Status: first Phase 17 production slice complete.** Added the shared, versioned browser
+fingerprint contract and once-per-new-gate-session collector. This entry marks only execution
+breakdown step 1 complete; Phase 17 as a whole remains in progress.
+
+**Contracts.** Added `fingerprint-components.ts` and `fingerprint.ts` under
+`backend/packages/contracts/src` and exported them from the shared package. The
+`fingerprintVersion: 1`, `collectorVersion: "5.2.0"` vector contains exactly the 42
+FingerprintJS v5.2.0 components approved in the Phase 17A plan. Every component is a closed
+`available` value or one of `unavailable`, `blocked`, `skipped`, `unstable`, `unsupported`, or
+bounded `collector_error/collection_failed`. Values enforce finite numbers, safe/ranged
+integers, fixed enums, strict nested objects, bounded strings and arrays, and a 56 KiB total
+vector cap. Canvas, WebGL, audio, and locale library sentinel values are reduced to the matching
+typed state. No library visitor ID, confidence, client/component hash, raw error, duration,
+arbitrary component/property, page/form/authentication data, URL query, or fragment belongs to
+the contract. `InitialBrowserProofEvidenceSchema` now carries the vector as an optional sibling
+of behavior `evidence`, preserving typed absence for older clients and keeping all behavior
+report schemas unchanged.
+
+**Collector and bridge.** Added `libraries/gate-core/src/fingerprint-collector.ts` using exactly
+pinned `@fingerprintjs/fingerprintjs` `5.2.0` from the installed package, with
+`load({ monitoring: false })`; no CDN loader or statistics request is used. The collector maps
+only the fixed component inventory and never returns FingerprintJS identity/confidence/error
+authority. A scoped in-memory promise cache keyed by gate-session ID prevents retries or browser
+coordinator re-creation from rerunning probes for the same session while a new gate session gets
+its own collection. `gate-node`'s browser coordinator obtains the current HttpOnly-bound session
+bootstrap first, collects for that returned session ID, and posts the optional vector through
+the existing same-origin initial-evidence bridge. The server-held site credential is added only
+inside the existing first-contact service boundary; neither it nor the scoped visitor token,
+profile ID, stable HMAC, or server authorization value is exposed to browser code or bridge
+responses. Five-second, 30-second, navigation, hide, and exit behavior reports neither recollect
+nor embed fingerprint data.
+
+**Focused tests and verification.** Added contract coverage for a complete available vector,
+all required component wrappers, all typed unavailable states, finite/range/safe-integer and
+nested string/array/object bounds, total payload size, strict unknown-field rejection, library
+authority rejection, and prohibited page/form/authentication data. Collector tests cover
+`monitoring: false`, same-session retry/re-render deduplication, new-session recollection,
+v5.2.0 tuple/sentinel mapping, selected future profile fields, and bounded failure handling.
+Browser/runtime and raw Node bridge tests cover optional absence, initial-only transport,
+credential separation, and continued exclusion from recurring reports. Focused builds passed
+for `@powerotp/contracts`, `@powerotp/gate-core`, and `@powerotp/gate-node`. Their workspace test
+suites passed respectively **181/181**, **45/45**, and **21/21**, including the unchanged sensor
+cadence and sanitization suites. No full-monorepo verification was run.
+
+**Explicitly not shipped.** This slice adds no `fingerprintData` MongoDB collection or record,
+retention/index, server canonicalization, stable HMAC, profile matching/change/alias behavior,
+gate-session-to-`userIntelligence` synchronizer, current/prior IP update, scoring engine or admin
+UI, callback, `riskEvents` reducer, external IP-vendor profile mapping, migration, seed,
+deployment, or traffic activation. No `.env` file was read or changed. No commit or push was
+performed; the working tree remains for user review.

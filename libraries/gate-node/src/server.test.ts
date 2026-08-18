@@ -6,7 +6,11 @@ import { afterEach, test } from "node:test";
 import { signSiteClearance } from "@powerotp/botblocker-signing";
 import {
   BOTBLOCKER_PROTOCOL_VERSION,
+  FINGERPRINT_COLLECTOR_VERSION,
+  FINGERPRINT_VECTOR_VERSION,
+  fingerprintComponentNames,
   type DecisionRevisionEnvelope,
+  type FingerprintVector,
 } from "@powerotp/contracts";
 
 import { createPowerOtpServer } from "./server.js";
@@ -19,6 +23,13 @@ const webhookId = `bwh_${"A".repeat(120)}.${"B".repeat(43)}`;
 const audience = "https://customer.example";
 const siteCredential = "potp_bb_secret_that_stays_server_side_123456";
 const visitorToken = "visitor_token_server_only_12345678901234567890";
+const fingerprint = {
+  fingerprintVersion: FINGERPRINT_VECTOR_VERSION,
+  collectorVersion: FINGERPRINT_COLLECTOR_VERSION,
+  components: Object.fromEntries(
+    fingerprintComponentNames.map((name) => [name, { status: "unavailable" }]),
+  ),
+} as FingerprintVector;
 const keyPair = generateKeyPairSync("ed25519");
 const verificationKeys = {
   active: { keyId: "key_1234567890123456", publicKey: keyPair.publicKey },
@@ -312,6 +323,7 @@ test("first contact uses bounded evidence and credential, later calls use only t
   let firstCredential: string | undefined;
   let firstPath: string | undefined;
   let initialRoute: string | undefined;
+  let transportedFingerprint: FingerprintVector | undefined;
   let laterToken: string | undefined;
   const { origin } = await start({
     services: {
@@ -320,6 +332,7 @@ test("first contact uses bounded evidence and credential, later calls use only t
         firstCredential = request.siteCredential;
         firstPath = request.context.path;
         initialRoute = request.browser.evidence.routePath;
+        transportedFingerprint = request.browser.fingerprint;
         return Promise.resolve({
           status: "decision",
           visitorToken,
@@ -357,7 +370,7 @@ test("first contact uses bounded evidence and credential, later calls use only t
     }),
   });
   assert.equal(invalidEvidence.status, 400);
-  await submitInitialEvidence(origin, cookie);
+  await submitInitialEvidence(origin, cookie, fingerprint);
   await fetch(`${origin}/api/intervening`, { headers: { cookie } });
   const delivered = await fetch(`${origin}/_powerotp/decision`, {
     method: "POST",
@@ -369,6 +382,7 @@ test("first contact uses bounded evidence and credential, later calls use only t
   assert.equal(firstCredential, siteCredential);
   assert.equal(firstPath, "/private");
   assert.equal(initialRoute, "/");
+  assert.deepEqual(transportedFingerprint, fingerprint);
   assert.ok(!JSON.stringify(deliveredBody).includes(visitorToken));
   assert.ok(!JSON.stringify(deliveredBody).includes(siteCredential));
 
@@ -863,13 +877,18 @@ async function fetchJson(url: string): Promise<unknown> {
   return response.json();
 }
 
-async function submitInitialEvidence(origin: string, cookie: string): Promise<void> {
+async function submitInitialEvidence(
+  origin: string,
+  cookie: string,
+  fingerprintVector?: FingerprintVector,
+): Promise<void> {
   const response = await fetch(`${origin}/_powerotp/initial-evidence`, {
     method: "POST",
     headers: bridgeHeaders(cookie, true),
     body: JSON.stringify({
       protocolVersion: BOTBLOCKER_PROTOCOL_VERSION,
       proofs: {},
+      ...(fingerprintVector ? { fingerprint: fingerprintVector } : {}),
       evidence: {
         routePath: "/",
         clicks: [],

@@ -15,6 +15,11 @@ export {
   type ValidatedDecision,
 } from "./decision.js";
 export {
+  createFingerprintCollector,
+  type FingerprintCollector,
+  type FingerprintCollectorOptions,
+} from "./fingerprint-collector.js";
+export {
   createPageLock,
   type PageLock,
   type PageLockOptions,

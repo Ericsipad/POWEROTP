@@ -10,6 +10,7 @@ import {
   createAuthoritativePoller,
   createChallengeMessageHandler,
   createContinuousBrowserSensor,
+  createFingerprintCollector,
   createGateController,
   createPageLock,
   createSensorEvidenceAccumulator,
@@ -17,6 +18,7 @@ import {
   type ChallengeUxMessage,
   type GateController,
   type GateEffect,
+  type FingerprintCollector,
   type PageLock,
   type DecisionVerification,
 } from "@powerotp/gate-core";
@@ -33,6 +35,7 @@ export interface GateBrowserOptions {
   pollIntervalMs?: number;
   fetch?: typeof fetch;
   initialProofs?: InitialBrowserProofEvidence["proofs"];
+  fingerprintCollector?: Pick<FingerprintCollector, "collect">;
   onError?: (code: "bootstrap" | "bridge") => void;
 }
 
@@ -54,6 +57,16 @@ export async function createGateBrowserCoordinator(
   options: GateBrowserOptions,
 ): Promise<GateBrowserCoordinator> {
   const fetcher = options.fetch ?? options.window.fetch.bind(options.window);
+  const bootstrap = await getJson<BrowserBootstrap>(fetcher, "/_powerotp/session").catch(
+    () => {
+      options.onError?.("bootstrap");
+      throw new Error("POWEROTP gate bootstrap unavailable");
+    },
+  );
+  const fingerprint = await (
+    options.fingerprintCollector ??
+    createFingerprintCollector({ scope: options.window })
+  ).collect(bootstrap.gateSessionId);
   const initialBrowser = InitialBrowserProofEvidenceSchema.parse({
     protocolVersion: BOTBLOCKER_PROTOCOL_VERSION,
     evidence: createSensorEvidenceAccumulator({
@@ -63,18 +76,13 @@ export async function createGateBrowserCoordinator(
       options.window.location.pathname,
       pageDimensions(options.document),
     ),
+    fingerprint,
     proofs: options.initialProofs ?? {},
   });
   await postJson(fetcher, "/_powerotp/initial-evidence", initialBrowser).catch(() => {
     options.onError?.("bootstrap");
     throw new Error("POWEROTP initial evidence bridge unavailable");
   });
-  const bootstrap = await getJson<BrowserBootstrap>(fetcher, "/_powerotp/session").catch(
-    () => {
-      options.onError?.("bootstrap");
-      throw new Error("POWEROTP gate bootstrap unavailable");
-    },
-  );
   let challenge: ChallengeMetadata | undefined;
   let lock: PageLock | undefined;
   let messageHandler: ((event: MessageEvent<unknown>) => boolean) | undefined;

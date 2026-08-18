@@ -10,6 +10,11 @@ import {
   type InitialBrowserProofEvidence,
 } from "./botblocker-browser.js";
 import { BOTBLOCKER_PROTOCOL_VERSION } from "./botblocker.js";
+import {
+  FINGERPRINT_COLLECTOR_VERSION,
+  FINGERPRINT_VECTOR_VERSION,
+} from "./fingerprint.js";
+import { fingerprintComponentNames } from "./fingerprint-components.js";
 
 const sequence = {
   gateSessionId: "gate_session_123456789",
@@ -51,6 +56,27 @@ describe("initial browser proof and evidence", () => {
       proofs: { passport: { verified: true } },
     };
     assert.equal(InitialBrowserProofEvidenceSchema.safeParse(fabricatedApproval).success, false);
+  });
+
+  it("keeps fingerprint absence compatible and accepts the separate vector", () => {
+    const absent = InitialBrowserProofEvidenceSchema.parse(initialEvidence());
+    assert.equal(absent.fingerprint, undefined);
+    const fingerprint = {
+      fingerprintVersion: FINGERPRINT_VECTOR_VERSION,
+      collectorVersion: FINGERPRINT_COLLECTOR_VERSION,
+      components: Object.fromEntries(
+        fingerprintComponentNames.map((name) => [
+          name,
+          { status: "unavailable" },
+        ]),
+      ),
+    };
+    const present = InitialBrowserProofEvidenceSchema.parse({
+      ...initialEvidence(),
+      fingerprint,
+    });
+    assert.deepEqual(present.fingerprint, fingerprint);
+    assert.equal("fingerprint" in present.evidence, false);
   });
 
   it("does not accept unsigned clearance as an initial proof", () => {

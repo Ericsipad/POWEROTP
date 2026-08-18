@@ -10,6 +10,7 @@ import {
   PaidTokenPassAssertionSchema,
   PassportAssertionSchema,
 } from "./botblocker-proofs.js";
+import { FingerprintVectorSchema } from "./fingerprint.js";
 
 /**
  * Bounded, browser-presentable material for an initial assessment. These are
@@ -20,6 +21,7 @@ export const InitialBrowserProofEvidenceSchema = z
   .object({
     protocolVersion: BotBlockerProtocolVersionSchema,
     evidence: BrowserEvidenceSchema,
+    fingerprint: FingerprintVectorSchema.optional(),
     proofs: z
       .object({
         clearance: SignedSiteClearanceSchema.optional(),
