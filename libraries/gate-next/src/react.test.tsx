@@ -4,6 +4,8 @@ import { test } from "node:test";
 
 import {
   BOTBLOCKER_PROTOCOL_VERSION,
+  FINGERPRINT_COLLECTOR_VERSION,
+  FINGERPRINT_VECTOR_VERSION,
   type DecisionRevisionEnvelope,
 } from "@powerotp/contracts";
 import { Window as HappyWindow } from "happy-dom";
@@ -21,6 +23,13 @@ import {
 const siteId = "site_1234567890123456";
 const audience = "https://customer.example";
 const siteCredential = "potp_bb_secret_that_stays_server_side_123456";
+const fingerprintCollector = {
+  collect: async () => ({
+    fingerprintVersion: FINGERPRINT_VECTOR_VERSION,
+    collectorVersion: FINGERPRINT_COLLECTOR_VERSION,
+    components: {},
+  } as const),
+};
 
 test("client entry contains no credential or environment boundary", async () => {
   const source = await readFile(new URL("./react.tsx", import.meta.url), "utf8");
@@ -92,6 +101,7 @@ test("root gate persists through App Router-style history navigation and sequenc
           window={window as unknown as Window}
           document={window.document as unknown as Document}
           fetch={fetcher}
+          fingerprintCollector={fingerprintCollector}
         />,
       );
     });
@@ -143,6 +153,7 @@ test("verified OTP does not change customer DOM or open an iframe automatically"
           window={window as unknown as Window}
           document={window.document as unknown as Document}
           fetch={fetcher}
+          fingerprintCollector={fingerprintCollector}
         />,
       );
     });
@@ -187,6 +198,7 @@ test("App Router provider publishes ordered snapshots to customer root logic", a
           window={window as unknown as Window}
           document={window.document as unknown as Document}
           fetch={fetcher}
+          fingerprintCollector={fingerprintCollector}
         >
           <RecommendationFixture onSnapshot={(value) => {
             lifecycles.push(value.snapshot.lifecycle);
@@ -245,6 +257,7 @@ test("customer explicitly invokes argument-free openOtp after OTP recommendation
           window={window as unknown as Window}
           document={window.document as unknown as Document}
           fetch={fetcher}
+          fingerprintCollector={fingerprintCollector}
         >
           <RecommendationFixture onSnapshot={(value) => {
             current = value;

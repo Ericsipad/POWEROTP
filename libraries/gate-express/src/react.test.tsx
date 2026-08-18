@@ -7,6 +7,8 @@ import { afterEach, test } from "node:test";
 
 import {
   BOTBLOCKER_PROTOCOL_VERSION,
+  FINGERPRINT_COLLECTOR_VERSION,
+  FINGERPRINT_VECTOR_VERSION,
   type DecisionRevisionEnvelope,
 } from "@powerotp/contracts";
 import { Window as HappyWindow } from "happy-dom";
@@ -25,6 +27,13 @@ const siteCredential = "potp_bb_secret_that_stays_server_side_123456";
 const keyPair = generateKeyPairSync("ed25519");
 const verificationKeys = {
   active: { keyId: "key_1234567890123456", publicKey: keyPair.publicKey },
+};
+const fingerprintCollector = {
+  collect: async () => ({
+    fingerprintVersion: FINGERPRINT_VECTOR_VERSION,
+    collectorVersion: FINGERPRINT_COLLECTOR_VERSION,
+    components: {},
+  } as const),
 };
 const servers: Server[] = [];
 
@@ -122,6 +131,7 @@ test("React root starts the trusted bridge sensor and applies decision revisions
           window={window as unknown as Window}
           document={window.document as unknown as Document}
           fetch={fetcher}
+          fingerprintCollector={fingerprintCollector}
         />,
       );
     });

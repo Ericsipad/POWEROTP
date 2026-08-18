@@ -24,6 +24,7 @@ export interface PowerOtpNextProviderProps {
   document?: Document;
   fetch?: typeof fetch;
   initialProofs?: GateBrowserOptions["initialProofs"];
+  fingerprintCollector?: GateBrowserOptions["fingerprintCollector"];
   initialSnapshot?: GateSnapshot;
   onError?: (code: "bootstrap" | "bridge") => void;
 }
@@ -59,6 +60,7 @@ export function PowerOtpNextProvider({
   document: suppliedDocument,
   fetch: suppliedFetch,
   initialProofs,
+  fingerprintCollector,
   initialSnapshot,
   onError,
 }: PowerOtpNextProviderProps) {
@@ -79,6 +81,7 @@ export function PowerOtpNextProvider({
       ...(pollIntervalMs === undefined ? {} : { pollIntervalMs }),
       ...(suppliedFetch ? { fetch: suppliedFetch } : {}),
       ...(initialProofs ? { initialProofs } : {}),
+      ...(fingerprintCollector ? { fingerprintCollector } : {}),
       ...(onError ? { onError } : {}),
     })
       .then((created) => {
@@ -96,6 +99,7 @@ export function PowerOtpNextProvider({
     };
   }, [
     initialProofs,
+    fingerprintCollector,
     onError,
     pollIntervalMs,
     sensorVersion,

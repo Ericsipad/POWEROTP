@@ -3361,7 +3361,9 @@ the existing same-origin initial-evidence bridge. The server-held site credentia
 inside the existing first-contact service boundary; neither it nor the scoped visitor token,
 profile ID, stable HMAC, or server authorization value is exposed to browser code or bridge
 responses. Five-second, 30-second, navigation, hide, and exit behavior reports neither recollect
-nor embed fingerprint data.
+nor embed fingerprint data. The Express and Next React entry points forward the same optional
+collector dependency used by the shared browser coordinator, allowing deterministic browser
+tests without running real canvas, audio, font, or WebGL probes in Happy DOM.
 
 **Focused tests and verification.** Added contract coverage for a complete available vector,
 omitted missing components, every present component wrapper, all typed unavailable states,
@@ -3371,10 +3373,12 @@ authority rejection, and prohibited page/form/authentication data. Collector tes
 `monitoring: false`, same-session retry/re-render deduplication, new-session recollection,
 v5.2.0 tuple/sentinel mapping, selected future profile fields, and bounded failure handling.
 Browser/runtime and raw Node bridge tests cover optional absence, initial-only transport,
-credential separation, and continued exclusion from recurring reports. Focused builds passed
-for `@powerotp/contracts`, `@powerotp/gate-core`, and `@powerotp/gate-node`. Their workspace test
-suites passed respectively **181/181**, **46/46**, and **21/21**, including the unchanged sensor
-cadence and sanitization suites. No full-monorepo verification was run.
+credential separation, and continued exclusion from recurring reports. Focused builds and
+strict typechecks passed for `@powerotp/contracts`, `@powerotp/gate-core`,
+`@powerotp/gate-node`, `@powerotp/gate-express`, and `@powerotp/gate-next`. Their workspace test
+suites passed respectively **181/181**, **46/46**, **21/21**, **22/22**, and **27/27**, including
+the unchanged sensor cadence and sanitization suites. No full-monorepo verification was run
+locally.
 
 **Explicitly not shipped.** This slice adds no `fingerprintData` MongoDB collection or record,
 retention/index, server canonicalization, stable HMAC, profile matching/change/alias behavior,

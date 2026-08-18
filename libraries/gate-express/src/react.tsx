@@ -11,6 +11,7 @@ export interface PowerOtpBrowserGateProps {
   document?: Document;
   fetch?: typeof fetch;
   initialProofs?: GateBrowserOptions["initialProofs"];
+  fingerprintCollector?: GateBrowserOptions["fingerprintCollector"];
   onError?: (code: "bootstrap" | "bridge") => void;
 }
 
@@ -21,6 +22,7 @@ export function PowerOtpBrowserGate({
   document: suppliedDocument,
   fetch: suppliedFetch,
   initialProofs,
+  fingerprintCollector,
   onError,
 }: PowerOtpBrowserGateProps) {
   useEffect(() => {
@@ -37,6 +39,7 @@ export function PowerOtpBrowserGate({
       ...(pollIntervalMs === undefined ? {} : { pollIntervalMs }),
       ...(suppliedFetch ? { fetch: suppliedFetch } : {}),
       ...(initialProofs ? { initialProofs } : {}),
+      ...(fingerprintCollector ? { fingerprintCollector } : {}),
       ...(onError ? { onError } : {}),
     })
       .then((created) => {
@@ -55,6 +58,7 @@ export function PowerOtpBrowserGate({
     };
   }, [
     onError,
+    fingerprintCollector,
     initialProofs,
     pollIntervalMs,
     sensorVersion,
