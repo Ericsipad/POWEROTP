@@ -76,9 +76,10 @@ repository `.env` file.
 - `BOTBLOCKER_RUNTIME_ORIGIN`: optional exact HTTPS origin for the runtime API. The
   planned primary public origin is `https://verify.powerotp.com`; leave it unset until
   the Cloudflare Worker is deployed. The Worker will retain at least 30 days of current
-  user-intelligence, denylisted-IP, and fingerprint data. `https://api.powerotp.com`
-  remains the authoritative full-history master-data service and fallback rapid-check
-  origin when the Worker is unavailable.
+  user-intelligence, denylisted-IP, and user-row-derived verify lookup data.
+  `https://api.powerotp.com` remains the authoritative full-history master-data service and
+  required fallback rapid-check origin when the Worker is unavailable or cannot resolve a
+  lookup.
 - `INTERACTION_TOKEN_SECRET`: at least 32 random bytes
 - `CONFIG_ENCRYPTION_KEY`: at least 32 random bytes, independent from the token secret
 - `SESSION_HASH_SECRET`: at least 32 random bytes, independent from other secrets

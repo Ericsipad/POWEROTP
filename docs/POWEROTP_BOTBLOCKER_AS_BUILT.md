@@ -35,9 +35,10 @@ default every unbacked central capability to typed unavailable. The framework pa
 credential-free React root helpers without rewriting application streams or uploads; the
 Next.js wrapper also provides native Node-runtime Proxy handling and App Router/discovery
 handlers. Phase 15 adds transactional, project-scoped visitor sessions, 30-day
-fingerprint-plus-IP matching, immutable sanitized behavior reports/risk events, server-keyed
-lookup hashes, strict sequence/idempotency handling, and the approved 548-day retention
-behavior. Its corrected analytics contract also retains normalized click positions, bounded
+server-keyed fingerprint matching, immutable sanitized behavior reports/risk events, strict
+sequence/idempotency handling, and the shipped 548-day retention behavior. IP is retained raw
+and is not required by the current fingerprint match. Its corrected analytics contract also
+retains normalized click positions, bounded
 32×32 pointer-density/dwell bins, explicit page ID/name, active/total page time, navigation
 targets, and a server-derived query-free page URL for future project heatmap and navigation
 reports. Phase 16 adds dedicated raw-IP blacklist tables, IPv4/IPv6 network-range lookups, ASN
@@ -46,17 +47,23 @@ still no proprietary profile scoring, customer score/OTP policy, OTP orchestrati
 Passport/PaidTokenPass implementation, billing/metering, production BotBlocker key, policy
 release, deployment, or traffic activation.
 
-**Approved design corrections not yet built.** The Phase 17 design in
+**Approved design corrections not yet built.** The Phase 17 fingerprint contracts and
+once-per-gate-session browser collector are shipped, but the persistence/session-identity
+corrections are not. The Phase 17 design in
 `POWEROTP_BOTBLOCKER_PHASE17_PROPRIETARY_SCORING_PLAN.md` supersedes several earlier design
-assumptions without rewriting their historical as-built entries. The shipped Phase 10/15 sensor
-still lacks the approved broad browser/device fingerprint vector; its current hash still covers
-the changing behavior-evidence object; matching still requires exact fingerprint plus IP; and
-sessions/risk events still use 548-day TTLs. Phase 17 is approved to add separate bounded
-FingerprintJS component evidence, derive an exact HMAC from its stable subset, use authoritative
-binding then exact-hash matching without IP-only merges, change session inputs to 90-day TTLs,
-aggregate accepted inputs into `userIntelligence`, calculate the current `0..100` score, and
-notify project middleware through the signed callback/pull flow. None of those Phase 17
-corrections is claimed as implemented here.
+assumptions without rewriting their historical as-built entries. Current backend ingestion still
+derives a fingerprint HMAC before raw/profile persistence, uses that HMAC for profile matching,
+does not write the complete initial request as the first risk event, has no persistent
+user-intelligence-bound return cookie, does not refresh the 30-minute visitor token at minute 29,
+and still applies 548-day TTLs to sessions/risk events. The approved target keeps inbound IP and
+fingerprint data raw; binds through the signed site-return cookie, Passport, or exact raw
+fingerprint; stores only safe token metadata on the durable session row; has middleware store the
+bearer and initiate/replace it on minute-29 refresh; derives the one versioned verify lookup hash
+from the stable-source values during `userIntelligence` row creation/update; uses verify as primary with the home
+`userIntelligence` lookup as fallback; changes session inputs to 90-day TTLs; aggregates accepted
+inputs; calculates the current `0..100` score; and notifies middleware through the signed
+callback/pull flow. Those target persistence and runtime corrections are not claimed as
+implemented here.
 
 The Phase 13 correction establishes a strict state-publication boundary. Middleware uses the
 site credential for first session contact and narrow server-held visitor tokens thereafter,
@@ -2250,6 +2257,12 @@ groups instead of one flat list:
   `get_botblocker_environment_variables`'s output for detail. Phase 14 made no runtime code
   change and did not build the key-delivery mechanism itself.
 
+> Superseded target semantics: this paragraph records the earlier session-bound clearance design.
+> The approved persistent credential is now `powerotp_site_return`, bound to one
+> `userIntelligence` row across sessions. It grants immediate local access while active reporting
+> starts and may later be revoked or replaced by an OTP recommendation. The Phase 17 plans are
+> authoritative for future implementation.
+
 **Automatic key delivery scheduled as Phase 14A, not left as a flagged runtime anomaly.** The
 user's final correction: not-yet-built simply means "an upcoming phase," and it belongs in the
 main plan on the appropriate phase, with current-phase docs noting the hand-off — not framed as
@@ -2321,6 +2334,11 @@ otherwise. No customer-hosted CleanDataPage route was created. No migration, see
 server configuration, remote mutation, commit, push, or deployment was performed.
 
 ## 2026-08-15 — BotBlocker Phase 15: real intelligence/event ingestion
+
+> Historical implementation record: the matching, hashing, initial-event, cookie, token-refresh,
+> and retention behavior below records what Phase 15 shipped. It is not the current target design.
+> The authoritative corrections are summarized under **Current status** and specified in the
+> Phase 17/17A plans; do not carry the old keyed-fingerprint/IP assumptions into later work.
 
 **Outcome.** Implemented the authoritative MongoDB writer used by the existing
 `POST /v1/botblocker/browser-assessment` and `POST /v1/botblocker/risk-events` central API

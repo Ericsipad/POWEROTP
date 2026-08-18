@@ -59,9 +59,9 @@ export const BOTBLOCKER_ENV_VARS: readonly PowerOtpEnvVar[] = [
 ];
 
 /**
- * Enables the returning-visitor instant-allow cookie: a visitor who already received an
- * `allow` gets it again instantly from a signed, long-lived cookie, checked entirely on your
- * server without a fresh decision. Obtain this key pair for your site from PowerOTP.
+ * Verifies the signed, persistent, site-scoped return credential bound to one user-intelligence
+ * row. It publishes immediate local access while the active session starts; later authoritative
+ * updates may revoke access or require OTP. Obtain this key pair for your site from PowerOTP.
  */
 export const BOTBLOCKER_VERIFICATION_KEY_ENV_VARS: readonly PowerOtpEnvVar[] = [
   {

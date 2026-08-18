@@ -152,8 +152,9 @@ in [`POWEROTP_BOTBLOCKER_AS_BUILT.md`](POWEROTP_BOTBLOCKER_AS_BUILT.md) says so.
 The planned primary BotBlocker rapid-check boundary is
 `https://verify.powerotp.com/v1/botblocker/*`. It is not deployed yet. It will run on
 Cloudflare Workers and retain at least 30 days of current user-intelligence, denylisted-IP,
-and fingerprint data. `https://api.powerotp.com` remains the authoritative full-history
-master-data service and the fallback rapid-check origin when the Worker is unavailable.
+and versioned verify lookup data. `https://api.powerotp.com` remains the authoritative
+full-history master-data service and the required fallback rapid-check origin when the Worker is
+unavailable or cannot resolve the lookup.
 The Worker must preserve the existing authentication/audience semantics. Operator traffic
 crosses a distinct, authenticated
 `/v1/control/botblocker/*` boundary and must never be authorized by a runtime site credential.
@@ -201,12 +202,16 @@ This is a trust boundary, not merely a packaging choice:
   any equivalent customer-wide authority.
 - The gate-session token is short-lived, revocable, audience/site/session-bound, and held by the
   adapter. Browser requests use only the HttpOnly local session cookie; the adapter forwards
-  the scoped token server-to-server.
+  the scoped token server-to-server. It expires after 30 minutes. At minute 29 the middleware
+  sends the refresh request and replaces the rotated bearer in its server-side gate session
+  without changing the session or profile binding.
 - Phase 13C makes this separation explicit in the shared Node service boundary: bounded initial
   proof/evidence plus trusted request context use the site credential once, the returned opaque
   token is stored only in the server session, and later assessment, iframe-launch, and polling
   calls receive only that token. Browser bridge responses and framework request state expose
   neither value.
+- Durable session storage contains only the token ID, expiry, and a one-way nonce/token digest,
+  never the reusable bearer. A database read therefore cannot directly replay visitor authority.
 - `gate.openOtp()` accepts no method, policy, or content selection and never accepts a site
   credential. The server derives the iframe launch from the authenticated site/session's
   authoritative `otp` decision.
@@ -254,6 +259,13 @@ This is a trust boundary, not merely a packaging choice:
   privilege change (e.g. anonymous visitor to Passport holder) without a fresh signed
   assertion; this prevents an attacker from fixating a pre-verification session ID and
   inheriting a later-verified visitor's clearance.
+- The persistent `powerotp_site_return` cookie is a signed, HttpOnly, site-scoped credential bound
+  to one `userIntelligence` row, not to one gate session. It grants immediate local access on a
+  repeat visit while a fresh/active session begins reporting. Expiry, deletion, signature
+  failure, or authoritative revocation removes that fast path, and later session updates may
+  revoke access or require OTP. `powerotp_gate` remains active-session state and
+  `powerotp_access` remains short-lived session clearance; neither substitutes for the return
+  credential.
 - `userIntelligence` remains the behavior/risk profile before and after identification. Only an
   authoritative verified account/Passport/paid-entitlement flow may create or change its
   `identityBindings` association; browser telemetry and customer-supplied user IDs cannot.
@@ -491,18 +503,19 @@ The future viewer opens the server-derived `audience origin + sanitized routePat
 uses a browser-supplied full URL or query string. Page labels are opt-in customer-authored
 `data-powerotp-page-*` attributes, not scraped content.
 
-Phase 15 applies the same strict schemas again at the authoritative ingestion service before
-opening a session or writing an event. MongoDB transactions bind each immutable report/event to
-the authenticated customer/project/site and gate session, advance only a strictly newer
-per-session sequence, and return an exact replay as an idempotent duplicate rather than writing
-it twice. A conflicting or older sequence is rejected. Gate-session headers and linked
-behavior/risk-event inputs use 90-day TTLs. The aggregated `userIntelligence` profile refreshes
-its 548-day TTL from accepted activity.
+The target authoritative ingestion service applies the same strict schemas before opening a
+session or writing an event. The complete first middleware request is retained as the session
+snapshot and initial immutable risk event, including available trusted IP, browser/fingerprint,
+request, proof, and risk data. MongoDB transactions bind every report/event to the authenticated
+customer/project/site and gate session, advance only a strictly newer per-session sequence, and
+return an exact replay as an idempotent duplicate rather than writing it twice. A conflicting or
+older sequence is rejected. Gate-session headers and linked behavior/risk-event inputs use
+90-day TTLs. The aggregated `userIntelligence` profile refreshes its 548-day TTL from accepted
+activity.
 
-The fingerprint lookup value is an HMAC-SHA-256 hash derived only on the server under the
-independent `BOTBLOCKER_INTELLIGENCE_HASH_SECRET`; browser-supplied fingerprint hashes are never
-a durable identity authority. Fingerprint material is a separate broad, bounded, versioned
-browser/device vector collected once per new gate session through exactly pinned
+Inbound fingerprint and IP values are retained raw and are never hashed for ingestion or home
+matching. Fingerprint material is a separate broad, bounded, versioned browser/device vector
+collected once per new gate session through exactly pinned
 `@fingerprintjs/fingerprintjs` v5.2.0 with monitoring disabled and mapped into POWEROTP-owned
 contracts. The library visitor ID and confidence result are discarded. Component failures are
 reduced to bounded typed availability; arbitrary raw collector errors are not retained.
@@ -511,19 +524,23 @@ The full current vector is stored in the shared `fingerprintData` collection, on
 per `userIntelligence` profile. It is replaced by a newer accepted gate session and is not copied
 wholesale onto the hot profile row, emitted every five/30 seconds, or retained as historical hash
 aliases. Only the approved selected latest-successful fields are synchronized to
-`userIntelligence`; a missing newer component cannot erase a prior successful selected value. The
-exact lookup HMAC includes only the approved comparatively stable subset. Changing browser/OS
-versions, timezone, language order, window/frame geometry, privacy preferences, storage state,
-behavior evidence, and IP are excluded from that HMAC but may remain bounded evidence.
+`userIntelligence`; a missing newer component cannot erase a prior successful selected value.
+During `userIntelligence` creation/update, the server writes the approved comparatively stable
+source fields to the row and derives an HMAC-SHA-256 from those row values under the independent
+`BOTBLOCKER_INTELLIGENCE_HASH_SECRET`. The one versioned result is stored on that row for
+verify-server publication.
+Changing browser/OS versions, timezone, language order, window/frame geometry, privacy
+preferences, storage state, behavior evidence, and IP are excluded from that verify hash but may
+remain bounded evidence.
 
 The trusted request IP is retained raw (not hashed): it is not treated as identity/PII because it
 is never linked to a Supabase account record, and the platform's own design explicitly needs the
 raw value for two purposes — showing it in the site owner's own visitor report, and using it as a
-security/correlation signal. Profile selection uses an authoritative server-held binding first,
-then an exact stable-fingerprint HMAC when no binding exists. IP alone never establishes or merges
-identity. When authoritative proof identifies a profile and the stable HMAC changes, replace that
-row's current HMAC. There is no fuzzy, closest-match, partial-hash, subnet-identity, or IP-only
-identity path.
+security/correlation signal. Home profile selection uses the signed user-intelligence-bound
+site-return cookie or authoritative Passport first, then exact raw-fingerprint comparison when
+neither exists. IP alone never establishes or merges identity. When a later accepted profile
+update changes the user-row-derived verify lookup value, replace that row's current field without
+aliases. There is no fuzzy, closest-match, partial-hash, subnet-identity, or IP-only identity path.
 
 Each profile keeps the current exact trusted IP and a unique LRU of at most 20 prior IPs. Each
 entry carries only that observation's optional configured ASN score and explicit dedicated

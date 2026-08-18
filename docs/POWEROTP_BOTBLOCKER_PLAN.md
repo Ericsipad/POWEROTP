@@ -308,8 +308,13 @@ telemetry can create it. The browser sensor never scrapes email, password, or fo
 
 ### Tokens and cookies
 
-- `powerotp_access`: 2–5 minute site clearance verified locally.
-- `powerotp_site_return`: longer site credential used to request fresh clearance; it cannot override server revocation.
+- `powerotp_gate`: HttpOnly adapter cookie for the active visitor session. It identifies adapter
+  state but is not the persistent user identity or an authorization grant.
+- `powerotp_access`: 2–5 minute signed clearance for the active visitor session, verified locally.
+- `powerotp_site_return`: signed, persistent, site-scoped credential bound to the exact
+  `userIntelligence` row. Its presence grants the returning browser immediate local access while
+  active session reporting starts or resumes. A later authoritative update may revoke that access
+  or require OTP; the cookie never overrides server revocation.
 - Gate token: seconds-long, one-time, original-route-bound challenge state.
 - Human Passport root: optional device-key-bound registration installed after a person completes
   a challenge and explicitly chooses persistent Passport access; valid for up to one year and
@@ -321,6 +326,40 @@ telemetry can create it. The browser sensor never scrapes email, password, or fo
   network-global identifier.
 
 Immediate remote revocation and zero lookups cannot both be guaranteed. Short access lifetime, fast edge refresh, and compact signed revocation filters provide the practical balance.
+
+### Authoritative session identity and persistence
+
+These rules govern every current and future BotBlocker implementation plan:
+
+1. The visitor session token is the write authority for one visitor session. Its session ID joins
+   the session header, initial risk event, later risk events, and linked `userIntelligence` row.
+   Initial contact creates the session row first, then issues a 30-minute server-held visitor
+   token and writes only its token ID, expiry, and one-way nonce/token digest metadata to that
+   session row before returning. The reusable bearer token is never persisted or exposed to the
+   browser; it is written only to the middleware's server-side gate session. At minute 29 the
+   middleware sends the refresh request, POWEROTP rotates the safe metadata on the same durable
+   session row, and the middleware replaces the bearer in its server-side gate session without
+   changing the session ID or `userIntelligence` binding.
+2. Every initial middleware session request carries the available trusted IP, browser/device
+   fingerprint, request context, proofs, and risk evidence. The server saves that request rather
+   than discarding it: the session snapshot and first immutable `riskEvents` row are written, the
+   raw fingerprint vector is retained in `fingerprintData`, and the linked `userIntelligence`
+   profile is created or updated before the caller receives the initial result.
+3. Inbound IP, browser, fingerprint, and risk values remain raw. POWEROTP does not hash incoming
+   fingerprint or IP data and does not use a separate inbound fingerprint hash as identity.
+   A valid `powerotp_site_return` credential, authoritative Passport, or exact raw-fingerprint
+   match may bind a new session and its risk rows to an existing `userIntelligence` row. IP alone
+   never selects or merges a profile.
+4. The `userIntelligence` create/update writes the approved stable device fields needed by the
+   verify recipe and derives one versioned keyed verify lookup hash from that row's values in the
+   same profile persistence operation. The hash is not derived earlier from the inbound payload
+   or directly from `fingerprintData`. The resulting lookup field is stored on that
+   `userIntelligence` row and later published to verify servers. It is the only
+   fingerprint-derived hash in the design.
+5. `verify.powerotp.com` performs the primary edge lookup when available. It retains the bounded
+   30-day lookup/profile material needed for rapid decisions. If verify is unavailable or cannot
+   complete the lookup, the middleware or edge service falls back to the authoritative home API
+   and its MongoDB `userIntelligence` data. No planned phase may omit this fallback.
 
 ### Passport: install once, allow across participating sites
 
@@ -365,8 +404,10 @@ canonical in
 [`PASSPORT_BUSINESS_AND_LEGAL_PLAN.md`](PASSPORT_BUSINESS_AND_LEGAL_PLAN.md#4-passport-delivery-and-the-cookie-constraint).
 
 Whichever path grants access—local site clearance, validated Passport, or RapidAuth `allow`—the
-same continuous observation starts. The first behavior report is sent at five seconds, complete
-intervals are sent every 30 seconds, and navigation/hide/close/exit sends a partial interval.
+same continuous observation starts. The complete initial middleware request is already the first
+saved risk event; it is not discarded while waiting for the sensor. The first follow-up behavior
+report is sent at five seconds, complete intervals are sent every 30 seconds, and
+navigation/hide/close/exit sends a partial interval.
 The browser sends no Passport root, global identity, site credential, or scoped visitor token.
 The adapter resolves the HttpOnly local gate session and uses its server-held scoped token so
 POWEROTP attaches each report to the correct site session, private human-or-agent
@@ -422,28 +463,29 @@ The complete current vector is retained for 548 days in the shared platform-leve
 `fingerprintData` collection, one record per `userIntelligence` profile. A newer accepted gate
 session replaces the current vector; no five-/30-second fingerprint-document stream or historical
 hash-alias list exists. The hot `userIntelligence` row receives only the approved selected
-latest-successful fields: `osCpu`, screen width/height, `platform`, the three `touchSupport`
-values, `vendor`, `architecture`, and `applePay`. An unavailable newer component leaves the last
-successful selected profile value unchanged. Frequently changing components may remain useful
-bounded evidence but are excluded from the exact lookup HMAC.
+latest-successful scoring fields: `osCpu`, screen width/height, `platform`, the three
+`touchSupport` values, `vendor`, `architecture`, and `applePay`. The same row also retains the
+bounded internal stable-source fields required by the approved verify recipe; those are not
+additional operator scoring fields. An unavailable newer component leaves the last successful
+selected profile value unchanged. Frequently changing components may remain useful bounded
+evidence but are excluded from the verify lookup hash.
 
-The server canonicalizes only the approved stable subset and derives one keyed exact HMAC; a
-browser-provided fingerprint hash or library visitor ID is never accepted as authoritative
-identity. A valid server-held session/cookie binding (and later an authoritative Passport
-binding) selects its exact profile first; otherwise the exact stable HMAC may match. IP alone
-never merges profiles. When authoritative proof sees a changed stable HMAC, the row's current
-hash is replaced. There is no fuzzy, closest-match, partial-hash, subnet-identity, or IP-only
-identity path. Cross-site correlation remains internal POWEROTP evidence and is never exposed as
-a network-global customer identifier.
+During `userIntelligence` creation/update, after its stable-source fields are written, the server
+canonicalizes those row values and derives the versioned keyed verify lookup hash on that same row.
+A browser-provided fingerprint hash or library visitor ID is never accepted. Verify may use that
+published hash for its primary edge lookup. The authoritative home lookup uses a valid
+user-intelligence-bound site-return cookie, Passport, or exact raw fingerprint comparison; it
+does not create another inbound hash. IP alone never merges profiles. There is no fuzzy,
+closest-match, partial-hash, subnet-identity, or IP-only identity path. Cross-site correlation
+remains internal POWEROTP evidence and is never exposed as a network-global customer identifier.
 
 Cookie-derived evidence follows actual browser boundaries. Browser JavaScript cannot read
 HttpOnly cookies or another origin's cookies. Arbitrary readable cookie values may be login or
 session bearer credentials and therefore must not be copied into browser reports. A customer
-may explicitly classify named, non-secret first-party cookies as matching inputs; the adapter
-then sends them through a dedicated bounded path for server-side keyed derivation and does not
-persist or expose the raw value. Cookie presence or a derived match is evidence only: unrelated
-sites normally set unrelated values, browsers partition third-party state, and deletion or
-rotation prevents cookie matching from being an enforcement mechanism.
+may explicitly classify named, non-secret first-party cookies as risk inputs, but those values
+are not identity authority. The dedicated `powerotp_site_return` credential is signed,
+HttpOnly, site-scoped, and bound to one `userIntelligence` row; it is the persistent returning-user
+binding. Deletion, expiry, or authoritative revocation removes its local-pass effect.
 
 Versioned immutable sensor assets are selected through signed policy.
 
@@ -455,12 +497,13 @@ separate system-wide and same-site distinct-profile counts for the current exact
 and 30 days. IP history is risk evidence only and never selects, merges, automatically flags, or
 blacklists a profile.
 
-Apply fingerprint/session synchronization at most once per accepted gate session in one MongoDB
-transaction that validates full scope, conditionally marks the synchronization, updates the linked
-`fingerprintData` and `userIntelligence` rows, and commits before score or callback use. Server
-observation time plus a gate-session-ID tie-breaker prevents stale sessions from overwriting newer
-direct fields; concurrent IP changes cannot lose an accepted update, and failure leaves no partial
-state.
+Apply initial request persistence and fingerprint/session synchronization at most once per
+accepted gate session in one MongoDB transaction that validates full scope, writes the session
+snapshot and initial immutable risk event, conditionally marks synchronization, updates the linked
+`fingerprintData` and `userIntelligence` rows, and commits before verify-hash derivation, score, or
+callback use. Server observation time plus a gate-session-ID tie-breaker prevents stale sessions
+from overwriting newer direct fields; concurrent IP changes cannot lose an accepted update, and
+failure leaves no partial state.
 
 The detailed `riskEvents` behavior/risk reducer remains separately deferred until its field
 mappings and aggregation semantics are approved. External IP-vendor profile fields likewise wait
@@ -663,10 +706,11 @@ adapter.
 The planned primary authenticated rapid-check origin is
 `https://verify.powerotp.com/v1/botblocker/*`. It is not deployed yet and will run on
 Cloudflare Workers, retaining at least 30 days of current user-intelligence, denylisted-IP,
-exact stable-fingerprint HMAC mappings, and current profile scores. `https://api.powerotp.com`
+versioned verify lookup mappings, and current profile scores. `https://api.powerotp.com`
 owns authoritative full-history master
-data and is the fallback rapid-check origin when the Worker is unavailable. Operator-only
-routes use the separately authenticated `/v1/control/botblocker/*` namespace on the backend.
+data and is the required fallback rapid-check origin when the Worker is unavailable or cannot
+resolve the lookup. Operator-only routes use the separately authenticated
+`/v1/control/botblocker/*` namespace on the backend.
 
 Every visitor runtime route below requires an immutable, self-validating project-scoped
 `webhookId` path segment (see "Project-scoped webhook endpoint" below). Malformed or forged
@@ -678,6 +722,7 @@ anonymous, cacheable read with no credential to protect, and already uses the lo
 public `siteId` for the same routing purpose.
 
 - `POST /v1/botblocker/rapid-auth/{webhookId}`
+- `POST /v1/botblocker/visitor-token-refresh/{webhookId}`
 - `POST /v1/botblocker/browser-assessment/{webhookId}`
 - `POST /v1/botblocker/risk-events/{webhookId}`
 - `POST /v1/botblocker/challenges/{webhookId}`
@@ -729,9 +774,11 @@ session/CSRF/project-ownership boundary instead.
 - `webhookId` is immutable: it has no patch, rotation, or replacement API. It is safe to expose
   in setup configuration because it routes requests but grants no visitor or customer authority.
 - Initial contact validates the path, resolves the exact project/site, confirms readiness,
-  authenticates the site credential, creates the visitor session, and returns a 30-minute token.
-  Every later report/challenge operation must present that token with matching
-  project/site/session/audience claims.
+  authenticates the site credential, saves the complete initial request as session plus initial
+  risk event, creates or binds `userIntelligence`, persists safe token metadata, and returns a
+  30-minute token. Every later report/challenge operation must present that token with matching
+  project/site/session/audience claims; at minute 29 middleware sends the refresh request and
+  replaces the bearer in its server-side gate session.
 - Because the platform's advisory model is fail-open by design (a decision timeout or unreachable
   backend never blocks the customer's site), an attacker who can cheaply flood a fixed global
   runtime URL gains a cheap way to degrade or bypass BotBlocker for every customer at once. Site

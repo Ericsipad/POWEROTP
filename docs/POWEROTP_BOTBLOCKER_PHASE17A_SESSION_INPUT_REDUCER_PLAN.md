@@ -40,6 +40,16 @@ Nothing in this document is as-built evidence.
    one product feature.
 6. **FingerprintJS supplies no IP or IP-reputation data.** IP is trusted server request context.
    ASN classification and external reputation are independent server-side sources.
+7. **Raw persistence precedes the only fingerprint-derived hash.** No inbound fingerprint or IP
+   value is hashed. The first request is saved to the session, an initial immutable risk event,
+   `fingerprintData`, and the linked `userIntelligence` profile. During that profile's
+   create/update, the approved stable-source fields are written to the row and converted into the
+   versioned verify lookup hash stored on the same row.
+8. **Session and user identity are separate.** The 30-minute visitor token authorizes writes for
+   one session. At minute 29 the middleware requests refresh and replaces the bearer in its own
+   server-side gate session without changing that session ID. The signed persistent site-return
+   cookie binds the browser to one `userIntelligence` row across sessions; a valid cookie grants
+   immediate local access while continued reports may revoke access or require OTP.
 
 ## Actual current session storage
 
@@ -52,10 +62,13 @@ The current implementation physically splits one logical session dataset:
   `gateSessionId` and `userIntelligenceId`.
 - `userIntelligence` is the long-lived aggregate profile.
 
-The first contact creates the gate-session header. The five-second, recurring 30-second, and
-partial navigation/hide/exit reports write immutable detail to `riskEvents` while advancing the
-linked gate session's accepted sequence and timestamps. This physical split remains because it
-preserves bounded MongoDB documents and indexed ordering/idempotency.
+The current pre-persistence fingerprint hash and omission of the initial risk-event row are
+implementation gaps, not the target design. First contact must create the gate-session header and
+write the complete initial middleware request as the first immutable `riskEvents` row, including
+its available IP, browser/fingerprint, request, proof, and risk evidence. The five-second,
+recurring 30-second, and partial navigation/hide/exit reports append immutable detail while
+advancing the linked gate session's accepted sequence and timestamps. This physical split remains
+because it preserves bounded MongoDB documents and indexed ordering/idempotency.
 
 The approved Phase 17 retention correction remains:
 
@@ -158,9 +171,11 @@ It stores only the current full vector, not one high-volume record every five or
 Collection occurs once per new gate session; a newer accepted session replaces the current
 vector. The previous vector is not retained as a hash alias or historical fingerprint row.
 
-### Stable exact-hash subset
+### User-row verify lookup subset
 
-Canonicalize and HMAC the previously approved comparatively stable subset:
+This is the previously approved verify lookup recipe. It is not an inbound fingerprint hash and
+is not used before raw persistence. During `userIntelligence` creation/update, write this
+comparatively stable source subset to the row, then canonicalize and HMAC those row values:
 
 - platform family;
 - CPU architecture and bitness;
@@ -180,15 +195,19 @@ geometry, privacy preferences, storage state, and changing API availability from
 Those values may remain in the full bounded vector.
 
 The server alone canonicalizes and derives the HMAC under
-`BOTBLOCKER_INTELLIGENCE_HASH_SECRET`. Authoritative binding selects a profile first; otherwise
-an exact stable HMAC may match. IP alone never selects or merges profiles. When authoritative
-proof identifies a profile and a new derivable hash differs, replace the current hash; retain no
-aliases.
+`BOTBLOCKER_INTELLIGENCE_HASH_SECRET`, then stores the resulting versioned verify lookup field on
+that same `userIntelligence` row in the profile persistence operation. The value comes from the
+row, not directly from the inbound request or `fingerprintData`. Verify servers may use that
+published field as their primary edge lookup. The home API fallback selects a profile through the
+signed user-intelligence-bound site-return cookie, an authoritative Passport, or exact
+raw-fingerprint comparison. IP alone never selects or merges profiles. When a later accepted
+profile update produces a different derivable verify hash, replace the current field and retain
+no aliases.
 
 ## Fingerprint fields synchronized to `userIntelligence`
 
-Only the following selected FingerprintJS values are copied from the full current vector onto
-the hot `userIntelligence` row:
+Only the following selected FingerprintJS values are exposed as hot operator scoring fields on
+the `userIntelligence` row:
 
 1. `osCpu`;
 2. `screenResolution` (`width` and `height`);
@@ -201,6 +220,11 @@ the hot `userIntelligence` row:
 Names remain the same between `fingerprintData` and `userIntelligence`. These are direct latest
 successful values, not averages. Averaging categorical/capacity values could create a value that
 was never observed (for example, an average of four and eight CPU cores).
+
+Separately, `userIntelligence` retains the bounded internal stable-source fields listed in the
+verify recipe so creation/update can derive the lookup hash from that row. Those internal source
+fields are not additional operator scoring fields and do not move the complete fingerprint vector
+onto the hot row.
 
 If a newly collected component is unavailable, synchronization performs no update for that
 selected field. The last successfully synchronized profile value remains available. The complete
@@ -312,10 +336,11 @@ exist, scoring continues with present profile inputs.
 
 ## Deferred `riskEvents` profile updater
 
-The immutable detailed fields under `riskEvents.recordType: "behavior_report"` and
-`riskEvents.recordType: "risk_signal"` are already collected. Their conversion into
-`userIntelligence` remains a separate later design session because it must explicitly decide
-behavior aggregation and formulas without invention.
+The complete initial middleware request must be written immediately as its own immutable risk
+event; that write is not deferred. The detailed fields under later
+`riskEvents.recordType: "behavior_report"` and `riskEvents.recordType: "risk_signal"` are already
+collected. Their conversion into `userIntelligence` remains a separate later design session
+because it must explicitly decide behavior aggregation and formulas without invention.
 
 That future session must inventory and map:
 
@@ -335,18 +360,29 @@ blank and excluded from scoring.
 
 ## Atomic sequence, concurrency, and idempotency
 
-Implementation must apply one fingerprint/session synchronization at most once per gate session.
-The MongoDB transaction must:
+Implementation must apply one initial request and fingerprint/session synchronization at most
+once per gate session. The session-open operation must:
 
 1. validate complete customer/project/site/session scope;
-2. require the server-accepted gate-session state;
-3. conditionally mark that gate session's fingerprint/profile synchronization as applied;
-4. create or update only its linked `fingerprintData` and `userIntelligence` rows;
-5. update selected latest-successful fingerprint fields;
-6. update current IP/history and exact-IP reuse counts;
-7. refresh applicable retention timestamps; and
-8. commit before current score recalculation or callback behavior uses the changed
+2. create the gate-session row from the complete initial request;
+3. write that request as the initial immutable risk event;
+4. bind or create the `userIntelligence` row through the signed site-return cookie, Passport, or
+   exact raw-fingerprint comparison;
+5. create or update its linked `fingerprintData` and `userIntelligence` rows;
+6. update selected latest-successful fingerprint fields;
+7. update current IP/history and exact-IP reuse counts;
+8. conditionally mark that gate session's fingerprint/profile synchronization as applied;
+9. refresh applicable retention timestamps; and
+10. commit before current score recalculation or callback behavior uses the changed
    `userIntelligence` row.
+
+After the session row exists, issue the 30-minute visitor token and persist only its token ID,
+expiry, and one-way nonce/token digest metadata on that row before returning; never persist the
+reusable bearer. The middleware writes the bearer to its server-side gate session. At minute 29
+the middleware sends the refresh request; POWEROTP updates safe metadata on the same durable
+session row and returns the rotated bearer for the middleware to replace in its gate session.
+During `userIntelligence` creation/update, derive and store the versioned verify lookup hash from
+the stable-source fields just written to that row; a missing hash never discards the raw records.
 
 The conditional gate-session marker is the primary idempotency boundary. Concurrent exact
 replays must produce one applied update and one idempotent duplicate result.
@@ -379,8 +415,9 @@ session reports independently.
 - Missing trusted IP: omit current-IP/history/reuse updates; never fabricate an address.
 - Missing ASN classification score: omit `asnScore`; never substitute zero.
 - Missing external vendor result: omit all external reputation fields.
-- Missing stable-hash inputs: store the vector and typed hash unavailability; authoritative
-  binding may still identify the profile, but no fabricated hash or partial fuzzy match exists.
+- Missing verify-hash inputs: keep the saved raw vector and mark the user-row-derived lookup field
+  unavailable; cookie, Passport, or exact raw-fingerprint matching may still identify the profile,
+  but no fabricated hash or partial fuzzy match exists.
 - Database/transaction failure: no partial profile/fingerprint/session application and no score
   or callback based on uncommitted data.
 
@@ -393,18 +430,24 @@ This design is larger than one implementation session. Execute in fresh sessions
    component availability mapping, initial authenticated bridge transport, and prohibited-data
    tests. See the dated Phase 17 fingerprint-contracts/collector entry in
    [`POWEROTP_BOTBLOCKER_AS_BUILT.md`](POWEROTP_BOTBLOCKER_AS_BUILT.md).
-2. **`fingerprintData` persistence and exact hash.** Add collection/indexes, canonical stable
-   HMAC derivation, authoritative/exact-hash matching updates, retention, and concurrency tests.
-3. **Gate-session profile synchronization.** Add explicit blacklist observation, selected direct
+2. **Initial session persistence and identity binding.** Save the complete initial request as the
+   session snapshot and first risk event; bind through the persistent user-intelligence cookie,
+   Passport, or exact raw fingerprint; persist safe visitor-token metadata; write the bearer only
+   to middleware server-side session state; and have middleware request/replace it at minute 29.
+3. **`fingerprintData` persistence and verify lookup field.** Add collection/indexes, raw vector
+   persistence, the bounded stable-source projection on `userIntelligence`, same-row
+   creation/update HMAC derivation, retention, edge-publication input, and concurrency tests. Do
+   not add inbound hash matching.
+4. **Gate-session profile synchronization.** Add explicit blacklist observation, selected direct
    fingerprint fields, current IP, 20-entry unique LRU history, two sets of rolling reuse counts,
    and transactional at-most-once application.
-4. **Profile scoring configuration/runtime.** Score present `userIntelligence` fields, including
+5. **Profile scoring configuration/runtime.** Score present `userIntelligence` fields, including
    transient bounded history aggregates, while missing inputs remain excluded.
-5. **Project callback/pull updates.** Notify middleware after committed profile/score changes
+6. **Project callback/pull updates.** Notify middleware after committed profile/score changes
    using the existing project callback boundary and scoped visitor-token pull.
-6. **Deferred `riskEvents` reducer design/implementation.** Run its own mapping session before
+7. **Deferred `riskEvents` reducer design/implementation.** Run its own mapping session before
    writing the behavior reducer.
-7. **Deferred external IP profile/scoring integration.** Select a real vendor first, approve its
+8. **Deferred external IP profile/scoring integration.** Select a real vendor first, approve its
    bounded profile fields, then append and score them.
 
 The canonical Phase 17 roadmap must be reconciled to this split before implementation claims are

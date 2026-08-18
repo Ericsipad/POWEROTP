@@ -70,9 +70,12 @@ export function getBotBlockerDataBoundary() {
         "thereafter. Used once per new visitor for first-contact session creation. Never sent " +
         "to a browser, logged, placed in a URL, or accepted as an MCP tool argument.",
       scopedVisitorToken:
-        "An opaque token minted during site-credential-authenticated first contact. Stored only " +
-        "in the server-side gate session. Every later per-visitor call (assessment, challenge " +
-        "launch, polling) forwards only this token — the site credential is never resent.",
+        "A 30-minute opaque token minted after the first-contact session row exists. The adapter " +
+        "holds the reusable bearer server-side; durable session storage keeps only token ID, " +
+        "expiry, and one-way digest metadata. At minute 29 middleware sends the refresh request " +
+        "and replaces the rotated bearer in its server-side gate session without changing the " +
+        "session or user-intelligence binding. Every later per-visitor call forwards only this " +
+        "token — the site credential is never resent.",
       webhookSigningSecret:
         "Independent 256-bit callback secret per project, shown once in the atomic project creation " +
         "response and stored encrypted at rest. It verifies POWEROTP's signed project callback " +
@@ -80,29 +83,34 @@ export function getBotBlockerDataBoundary() {
         "currently unavailable. A callback notification is not visitor authority; the adapter pulls " +
         "current session data with that visitor's scoped token.",
       returningVisitorInstantAllowCookie:
-        "A visitor who already received an `allow` gets a signed, long-lived cookie; on a later " +
-        "visit the adapter verifies that cookie's signature entirely on its own server and " +
-        "grants `allow` instantly, without waiting on a fresh decision or even reaching " +
-        "PowerOTP (this also keeps working through a PowerOTP outage). An active OTP challenge " +
-        "or a revoked/replaced clearance always takes precedence over this cookie. Checking the " +
-        "signature uses your site's verificationKeys value, obtained from PowerOTP.",
+        "`powerotp_site_return` is a signed, persistent, site-scoped credential bound to the exact " +
+        "user-intelligence row. On a later visit the adapter verifies it locally and publishes " +
+        "immediate access while starting the active visitor session. Continued reports may revoke " +
+        "the credential or require OTP; expiry, deletion, invalid signature, active OTP, and " +
+        "authoritative revocation take precedence. It is distinct from the gate-session cookie " +
+        "and short-lived access clearance. Signature verification uses the site's verificationKeys.",
       browserReceives:
-        "Neither the site credential nor the scoped visitor token. The browser holds only an " +
-        "HttpOnly, SameSite gate-session cookie and calls same-origin bridge routes that require " +
-        "a non-simple `X-PowerOTP-Bridge: 1` marker plus Fetch Metadata/Origin checks.",
+        "Neither the site credential nor the scoped visitor token. The browser HTTP stack may hold " +
+        "HttpOnly, SameSite gate-session, site-return, and short-clearance cookies; browser " +
+        "JavaScript cannot read them. Same-origin bridge routes require a non-simple " +
+        "`X-PowerOTP-Bridge: 1` marker plus Fetch Metadata/Origin checks.",
     },
     fingerprintBoundary: {
       collected:
         "Broad, bounded, versioned browser/device fingerprint components are separate from behavior " +
-        "reports. When collection is available, the Mongo master retains those components; page " +
+        "reports. The complete first middleware request is retained as the session snapshot and " +
+        "initial risk event, and the Mongo master retains raw components without inbound hashing; page " +
         "content, form values, raw keystrokes, clicked text, and pointer trails remain prohibited.",
       exactLookup:
-        "POWEROTP derives one server-side keyed HMAC from the approved stable component subset. " +
-        "Authoritative binding wins first; otherwise only an exact HMAC may match. IP alone never " +
-        "merges profiles, and no browser/library visitor ID or fuzzy match is authoritative.",
+        "During user-intelligence creation/update, POWEROTP writes the approved stable-source " +
+        "fields and derives one versioned keyed verify lookup from those row values, storing it " +
+        "on that same row for edge publication. Home matching uses the signed site-return " +
+        "credential, Passport, or exact raw fingerprint comparison. IP alone never merges profiles, " +
+        "and no browser/library visitor ID or fuzzy match is authoritative.",
       implementationStatus:
-        "Expanded fingerprint component collection and stable-subset exact lookup are currently " +
-        "unavailable in the public integration.",
+        "Expanded fingerprint component collection is present, but raw-first persistence, the " +
+        "user-row verify lookup, user-intelligence return binding, and edge publication " +
+        "are currently unavailable in the public integration.",
     },
     prohibitedInOutput: [
       "customer credentials or account state",

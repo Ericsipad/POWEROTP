@@ -23,8 +23,9 @@ for one of exactly two decisions:
 - `otp`: publish an OTP recommendation and expose the single argument-free `gate.openOtp()` API
   for explicit customer use.
 
-The first behavior report is sent after five seconds. Further reports are sent every
-30 seconds and when a partial interval ends because of navigation, page hide, or exit.
+The complete initial middleware request is saved immediately as the session snapshot and first
+risk event. The first follow-up behavior report is sent after five seconds. Further reports are
+sent every 30 seconds and when a partial interval ends because of navigation, page hide, or exit.
 Reports contain sanitized route paths (no query or fragment), element categories and
 explicit `data-powerotp-id` values, document-normalized click points, bounded 32×32 pointer
 heatmap bins, explicit page ID/name, page active/total time, and navigation targets (never
@@ -36,9 +37,10 @@ previous `allow` or valid clearance to `otp`.
 Behavior reports are separate from the broad browser/device fingerprint vector. Phase 17 corrects
 the incomplete Phase 10/15 implementation by collecting bounded browser, hardware, rendering,
 font, audio, and capability components through a pinned industry-standard collector. Raw
-fingerprint components are retained on the Mongo master; only a server-derived HMAC of the
-approved stable subset is used for exact rapid lookup. Page content, form values, passwords, raw
-keystrokes, clicked text, and chronological pointer trails remain prohibited.
+fingerprint components are retained on the Mongo master without inbound hashing. Only after the
+raw profile write does the server derive the one versioned verify lookup HMAC from the approved
+stable subset and store it on `userIntelligence` for edge publication. Page content, form values,
+passwords, raw keystrokes, clicked text, and chronological pointer trails remain prohibited.
 
 The customer chooses a decision timeout from 50 through 2,000 ms; 200 ms is the
 recommended default. Timeout/network failure publishes fail-open access state but does not
@@ -175,13 +177,15 @@ adapter-side client that consumes it.
 The planned primary authenticated rapid-check origin is
 `https://verify.powerotp.com/v1/botblocker/*`. It is not deployed yet. Phase 27 deploys
 it on Cloudflare Workers with at least 30 days of current user-intelligence,
-denylisted-IP, and fingerprint data. `https://api.powerotp.com` remains the
-authoritative full-history master-data service and fallback rapid-check origin.
+denylisted-IP, and user-row-derived verify lookup data. `https://api.powerotp.com` remains the
+authoritative full-history master-data service and required fallback rapid-check origin when the
+edge is unavailable or cannot resolve a lookup.
 Operator routes are separately authenticated under `/v1/control/botblocker/*`.
 
 Create permanent authenticated/rate-limited route handlers for:
 
 - `POST /v1/botblocker/rapid-auth`
+- `POST /v1/botblocker/visitor-token-refresh`
 - `POST /v1/botblocker/browser-assessment`
 - `POST /v1/botblocker/risk-events`
 - `POST /v1/botblocker/challenges`
@@ -225,6 +229,13 @@ credential. Inactive project/site readiness returns typed `offline`; adapters fa
 ordinary runtime calls while offline, and use bounded readiness polling. `offline` and
 `fail_open` remain lifecycle states, never decisions. `GET /v1/botblocker/policy/{siteId}` and
 dashboard/customer APIs retain their existing boundaries.
+
+The complete first request is saved as the session snapshot and initial immutable risk event,
+including available trusted IP, browser/fingerprint, request, proof, and risk data. Create the
+session row before returning, persist only token ID/expiry/one-way digest metadata there, and
+never persist the reusable bearer. The middleware writes the bearer to its server-side gate
+session. At minute 29 the middleware sends the refresh request and replaces its stored bearer
+without changing the session ID or linked `userIntelligence` row.
 
 ### Phase 9 — Framework-neutral browser gate
 
@@ -315,9 +326,11 @@ and upgrades. MCP remains public, anonymous, read-only, and credential-free.
 ### Phase 14A — Automatic verification-key delivery
 
 The already-shipped raw Node/Express/Next wrappers require a constructor-supplied Ed25519
-`verificationKeys` value so a returning visitor who already received an `allow` can be granted
-it again instantly from a signed, long-lived cookie, entirely on the customer's own server,
-without waiting on a fresh decision or a PowerOTP round-trip (see
+`verificationKeys` value. The target returning-visitor credential is the signed, persistent,
+site-scoped `powerotp_site_return` cookie bound to the exact `userIntelligence` row. Its presence
+publishes immediate local access while the adapter starts the active visitor session and awaits
+updates that may revoke access or require OTP. It is distinct from the active-session
+`powerotp_gate` cookie and short-lived `powerotp_access` clearance (see
 [`libraries/gate-node/src/cookies.ts`](../libraries/gate-node/src/cookies.ts)). This is the same
 "Signed Policy Client" the plan already describes — Phase 7 built the signed policy release and
 its `GET /v1/botblocker/policy/{siteId}` endpoint, but that endpoint's key set today is a key-*ID*
@@ -353,7 +366,8 @@ admin audit, lookup, and signed snapshots. Allowlist maps to `allow`; blacklist 
 ### Phase 17 — Proprietary scoring
 
 **Implementation status:** in progress. The fingerprint contracts and once-per-gate-session
-collector slice completed on 2026-08-17; persistence, stable HMAC/matching, profile
+collector slice completed on 2026-08-17; complete initial-event persistence, durable return-cookie
+binding, middleware token refresh, raw fingerprint persistence, user-row verify lookup, profile
 synchronization, scoring, callbacks, reducers, and external-vendor profile integration remain.
 The approved design is saved in
 [`POWEROTP_BOTBLOCKER_PHASE17_PROPRIETARY_SCORING_PLAN.md`](POWEROTP_BOTBLOCKER_PHASE17_PROPRIETARY_SCORING_PLAN.md);
@@ -365,19 +379,22 @@ Correct the incomplete fingerprint boundary first: collect and retain a broad, b
 versioned browser/device vector using exactly pinned `@fingerprintjs/fingerprintjs` v5.2.0 with
 monitoring disabled and expensive probes run once per new gate session. FingerprintJS is only a
 component collector: discard its visitor ID and confidence result, map failures to bounded typed
-availability, and derive one exact server-side HMAC from the approved stable subset. Profile
-matching uses an authoritative binding first, otherwise that exact HMAC; IP alone never merges
-profiles. When authoritative proof sees a changed stable hash, replace the current hash without
-retaining aliases.
+availability, and persist its raw vector without inbound hashing. Profile matching uses the
+signed user-intelligence-bound site-return cookie or Passport first, otherwise exact raw
+fingerprint comparison on the home API; IP alone never merges profiles. Only after raw
+fingerprint collection, write the approved stable-source fields during `userIntelligence`
+creation/update and derive the one versioned verify lookup HMAC from those row values; replace
+that current field without retaining aliases.
 
 Store one current complete bounded component vector per profile in the shared `fingerprintData`
 collection, retained for 548 days. Do not place the full vector on the hot `userIntelligence` row
 or create fingerprint rows at five-/30-second behavior-report cadence. The fixed gate-session
-synchronizer copies only the approved latest-successful fingerprint fields, maintains current IP
-and at most 20 unique prior IP entries with observation-time ASN/blacklist values, and refreshes
-separate global and same-site exact-IP distinct-profile counts for 1, 7, and 30 days. Apply it at
-most once per accepted gate session in one transaction before scoring/callback use. Keep
-`gateSessions` and linked `riskEvents` as one logical 90-day session dataset.
+synchronizer copies the approved latest-successful scoring fields plus the bounded internal
+stable-source fields needed for same-row verify derivation, maintains current IP and at most 20
+unique prior IP entries with observation-time ASN/blacklist values, and refreshes separate global
+and same-site exact-IP distinct-profile counts for 1, 7, and 30 days. Apply it at most once per
+accepted gate session in one transaction before scoring/callback use. Keep `gateSessions` and
+linked `riskEvents` as one logical 90-day session dataset.
 
 The `riskEvents` behavior/risk reducer remains a later dedicated design and implementation
 session; do not invent its mappings. External vendor profile/scoring fields also remain deferred
@@ -393,10 +410,11 @@ within the existing 50–2,000 ms timeout. Later accepted updates enqueue a sign
 data-ready callback; middleware verifies it and pulls authoritative session data with the scoped
 visitor token. Local headless detection remains advisory only. CGNAT is not a direct observable
 signal, and IPv4/IPv6 remain lookup/storage families rather than score inputs. Split execution into
-fresh sessions for: fingerprint contracts/collector; `fingerprintData` persistence and stable
-HMAC; gate-session profile synchronization and IP history/counts; scoring configuration/runtime;
-project callback/pull; the later `riskEvents` reducer; and later external IP profile/scoring
-integration.
+fresh sessions for: fingerprint contracts/collector; complete initial request/risk-event
+persistence plus user-intelligence-bound return cookie and middleware-requested minute-29 token
+refresh; `fingerprintData` persistence plus the user-row-derived verify lookup field; gate-session profile
+synchronization and IP history/counts; scoring configuration/runtime; project callback/pull; the
+later `riskEvents` reducer; and later external IP profile/scoring integration.
 
 ### Phase 18 — Customer risk/OTP policy
 
@@ -502,7 +520,8 @@ crosses the boundary. Reuse transactional balance/ledger and reporting patterns.
 
 Publish signed policy and rapid-list snapshots to edge storage with versions, freshness,
 revocation, canary, rollback, and probes. Keep MongoDB and synchronous third-party APIs
-out of the edge hot path.
+out of the edge hot path. Publish the versioned verify lookup field only after it exists on the
+authoritative `userIntelligence` row; do not publish or introduce an inbound fingerprint hash.
 
 ### Phase 27 — Global RapidAuth Worker
 
@@ -510,7 +529,9 @@ Implement globally distributed auth/replay checks, edge-local known decisions, u
 escalation, signed responses, asynchronous event delivery, latency measurement, circuit
 breakers, `https://api.powerotp.com` fallback, canary, and rollback without customer
 reinstall. Retain at least 30 days of current user-intelligence, denylisted-IP, and
-fingerprint data at the edge; authoritative full history remains on the backend.
+verify lookup data at the edge; authoritative full history remains on the backend. Verify is the
+primary lookup when available, and unavailable or unresolved edge lookup always falls back to the
+home API `userIntelligence` lookup.
 
 ### Phase 28 — Shopify integration
 

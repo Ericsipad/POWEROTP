@@ -18,12 +18,14 @@ approve. Phase 17 must correct them rather than build on them:
 1. **Fingerprint evidence is separate from behavior evidence.** Route/click/mouse/scroll/honeypot
    reports are behavior data, not the browser fingerprint. BotBlocker must collect a broad,
    bounded browser/device fingerprint vector including active rendering signals.
-2. **The current fingerprint hash is wrong.** Phase 15 HMACs the entire changing
-   `BrowserEvidence` report. The replacement hash is derived only from a selected stable subset
-   of the new fingerprint vector.
+2. **Inbound fingerprint hashing is wrong.** Phase 15 HMACs incoming evidence before the raw
+   profile write. No inbound fingerprint or IP value is hashed in the target design. During
+   `userIntelligence` creation/update, the server writes the approved stable-source fields and
+   derives the single versioned verify lookup hash from those row values.
 3. **Matching is exact, not fuzzy or closest-match.** A valid authoritative binding wins first;
-   otherwise an exact stable-fingerprint HMAC may match. An exact IP by itself never merges
-   profiles and is used only as a risk/correlation input.
+   the home API may otherwise compare the raw fingerprint exactly. Verify servers may use the
+   published user-row-derived hash as their primary edge lookup. An exact IP by itself never
+   merges profiles and is used only as a risk/correlation input.
 4. **No separate confidence model exists.** The current profile score is calculated from
    operator-selected profile fields. Missing fields are excluded from the calculation.
 5. **Gate-session synchronization is fixed and schema-driven.** Selected fingerprint fields use
@@ -47,24 +49,31 @@ approve. Phase 17 must correct them rather than build on them:
     logical session dataset but remain physically split to avoid unbounded MongoDB documents.
     Both use 90-day TTLs. The shared `fingerprintData` record and aggregated
     `userIntelligence` profile remain 18 months (548 days).
+11. **The initial request is data, not a prelude to data.** Save its complete available trusted
+    IP, browser/fingerprint, request, proof, and risk evidence as the session snapshot and initial
+    immutable risk event before returning the first result.
+12. **Session token and return identity have different scopes.** The visitor token authorizes one
+    session for 30 minutes. At minute 29 middleware sends the refresh request and replaces its
+    server-side bearer without changing identity; the signed persistent site-return cookie binds
+    repeat visits to the same `userIntelligence` row and grants immediate local access while later
+    updates may revoke access or require OTP.
 
 ## Identity and exact matching
 
 Profile selection uses this precedence:
 
-1. A valid existing server-held session/cookie binding identifies its exact
-   `userIntelligence` row.
-2. A future authoritative Passport binding identifies its exact row once Passport exists.
-3. Without authoritative proof, an exact match on the server-derived stable fingerprint HMAC may
-   identify a row.
+1. A valid signed persistent site-return cookie identifies its exact `userIntelligence` row.
+2. An authoritative Passport binding identifies its exact row once Passport exists.
+3. Without authoritative proof, the home API may identify a row by exact comparison of the saved
+   raw fingerprint fields. No pre-persistence fingerprint hash is created for this path.
 4. IP alone never identifies or merges a visitor profile.
 5. No fuzzy score, nearest-neighbor search, partial fingerprint comparison, or IP-subnet identity
    match exists.
 
-When authoritative proof identifies a row and the newly collected stable fingerprint produces a
-different HMAC, replace the row's current fingerprint HMAC. Do not retain hash aliases. Raw
-fingerprint component evidence remains available on the Mongo master for profile updates and
-security analysis.
+After the selected profile and raw fingerprint/profile writes have committed, derive the
+versioned verify lookup hash. When a later accepted session produces a different value, replace
+the row's current verify lookup field and retain no aliases. Raw fingerprint component evidence
+remains available on the Mongo master for home lookup, profile updates, and security analysis.
 
 ## Browser fingerprint collection
 
@@ -91,9 +100,10 @@ Unavailable or browser-restricted components remain explicitly absent; they are 
 Arbitrary DOM/page content, form values, passwords, raw keystrokes, clicked text, and chronological
 pointer trails remain prohibited because they are neither fingerprint nor approved behavior data.
 
-### Stable exact-hash subset
+### User-row verify lookup subset
 
-Canonicalize and HMAC only the comparatively stable identifying subset:
+During `userIntelligence` creation/update, write and then canonicalize/HMAC the comparatively
+stable verify lookup subset from that row:
 
 - platform family plus CPU architecture/bitness and mobile model when available;
 - hardware concurrency, coarsened device memory, and maximum touch points;
@@ -107,15 +117,17 @@ order, exact window/frame dimensions, privacy preferences, storage state, and ch
 availability from the exact HMAC. Retain those collected components separately.
 
 The server performs canonicalization and HMAC derivation using
-`BOTBLOCKER_INTELLIGENCE_HASH_SECRET`. Browser-supplied hashes and visitor IDs are never
-authoritative.
+`BOTBLOCKER_INTELLIGENCE_HASH_SECRET` and stores the single versioned result on
+the same `userIntelligence` row for later edge publication. The input comes from that row rather
+than directly from the inbound payload or `fingerprintData`. Browser-supplied hashes and visitor
+IDs are never authoritative, and no other fingerprint-derived hash is retained.
 
 ## Session data and profile synchronization
 
-`gateSessions` remains the small session header. Immutable accepted behavior reports and risk
-signals remain linked `riskEvents` documents. Both are one logical session dataset and expire
-after 90 days. This preserves indexed idempotency/order checks and avoids MongoDB's 16 MB document
-limit.
+`gateSessions` remains the small session header. The complete initial middleware request is saved
+as its session snapshot and first immutable `riskEvents` row; later accepted behavior reports and
+risk signals append linked events. Both are one logical session dataset and expire after 90 days.
+This preserves indexed idempotency/order checks and avoids MongoDB's 16 MB document limit.
 
 The approved gate-session synchronization design is now durable in
 [`POWEROTP_BOTBLOCKER_PHASE17A_SESSION_INPUT_REDUCER_PLAN.md`](POWEROTP_BOTBLOCKER_PHASE17A_SESSION_INPUT_REDUCER_PLAN.md).
@@ -129,7 +141,9 @@ latest-successful values are copied to the hot `userIntelligence` row under the 
 `osCpu`, `screenResolution.width`, `screenResolution.height`, `platform`,
 `touchSupport.maxTouchPoints`, `touchSupport.touchEvent`, `touchSupport.touchStart`, `vendor`,
 `architecture`, and `applePay`. An unavailable newer component leaves the last successful
-profile value unchanged.
+profile value unchanged. The row separately retains the bounded internal stable-source fields
+used by the verify recipe; those are not additional operator scoring fields and do not duplicate
+the complete fingerprint vector.
 
 `userIntelligence` also gains the current exact trusted IP with that observation's optional
 configured ASN score and explicit exact-IP blacklist result, plus a unique LRU of at most 20
@@ -138,19 +152,25 @@ Maintain separate distinct-profile counts for that exact current IP across all w
 the same website over 1, 7, and 30 days. IP history is risk evidence only; it never identifies,
 merges, automatically flags, or blacklists a profile.
 
-Apply this synchronization at most once per accepted gate session in one MongoDB transaction.
-The transaction validates complete scope, conditionally marks synchronization applied, updates
-the linked `fingerprintData` and `userIntelligence` rows, refreshes retention, and commits before
-scoring or callback behavior uses the result. Server observation time orders competing sessions,
-with `gateSessionId` as the deterministic equal-time tie-breaker. Exact replay is a no-op, stale
+Apply this synchronization at most once per accepted gate session. Create the session snapshot
+and initial risk event, bind or create `userIntelligence`, and update the linked raw
+`fingerprintData` and profile rows. During profile creation/update, derive the verify lookup field
+from the stable-source values written to that row before scoring, callbacks, or returning the
+initial result. Issue the 30-minute visitor token after the session row exists, persist only token
+ID/expiry/digest metadata there, and write the bearer to the middleware's server-side gate
+session. At minute 29 the middleware sends the refresh request, POWEROTP updates safe durable
+metadata, and the middleware replaces its bearer without changing the session or profile binding.
+Server observation time orders competing sessions, with
+`gateSessionId` as the deterministic equal-time tie-breaker. Exact replay is a no-op, stale
 sessions cannot overwrite newer direct values, concurrent IP changes cannot lose an accepted
-update, and database failure leaves no partial synchronization.
+update, and database failure leaves no partial raw synchronization.
 
-The detailed `riskEvents` behavior/risk mapping remains deferred to a dedicated design and
-implementation session. It must explicitly map routes/pages, click categories and normalized
-positions, mouse and scroll aggregates, honeypots, page timing/dimensions, pointer heatmaps,
-navigation targets, automation indicators, and risk-event kinds. Missing fields from that future
-updater do not block scoring; the evaluator uses present fields and omits unavailable inputs.
+Writing the initial risk event is required now. Only the detailed later `riskEvents`
+behavior/risk-to-profile mapping remains deferred to a dedicated design and implementation
+session. It must explicitly map routes/pages, click categories and normalized positions, mouse
+and scroll aggregates, honeypots, page timing/dimensions, pointer heatmaps, navigation targets,
+automation indicators, and risk-event kinds. Missing fields from that future updater do not block
+scoring; the evaluator uses present fields and omits unavailable inputs.
 
 External IP-reputation fields are also deferred. FingerprintJS supplies none. The current
 gate-session synchronizer uses trusted middleware IP, local network/ASN resolution, and the
@@ -187,14 +207,17 @@ sequenceDiagram
     participant RA as RapidAuth
     participant BL as IpBlacklist
     participant UI as UserIntelligence
+    participant RE as RiskEvents
     participant CB as ProjectCallback
 
-    MW->>RA: First request with site credential
+    MW->>RA: First request with raw IP browser fingerprint and risk data
+    RA->>UI: Create session and bind or create profile
+    RA->>RE: Save complete initial request
     RA->>BL: Exact public-IP lookup
     alt Active blacklist match
         RA-->>MW: Session token plus otp
     else No blacklist match
-        RA->>UI: Exact binding or stable-hash match, aggregate and score
+        RA->>UI: Persist raw profile then derive verify lookup and score
         UI-->>RA: Current score or typed unavailable
         RA-->>MW: Session token plus current authoritative result
     end
@@ -206,16 +229,21 @@ sequenceDiagram
     RA-->>MW: Current score and recommendation state
 ```
 
-The first request awaits session creation and blacklist/profile resolution within the existing
-customer-selected 50–2,000 ms timeout. A blacklist match remains an immediate real `otp`
-recommendation. Without a blacklist match, Phase 17 supplies the current risk score. Phase 18
-applies customer sensitivity/OTP-type policy to that score; Phase 17 must not invent that policy.
+The first request awaits session creation, complete initial-event persistence, token metadata
+write, and blacklist/profile resolution within the existing customer-selected 50–2,000 ms
+timeout. A blacklist match remains an immediate real `otp` recommendation. Without a blacklist
+match, Phase 17 supplies the current risk score. Phase 18 applies customer sensitivity/OTP-type
+policy to that score; Phase 17 must not invent that policy. A valid signed site-return cookie may
+grant immediate local access before this work completes, but the active session still starts and
+later authoritative updates may revoke that access or require OTP.
 
 Later accepted reports recalculate the profile and enqueue a small signed data-ready callback.
 The callback is advisory notification, not visitor authorization: customer middleware verifies
 the project callback signature and binding, then pulls authoritative session data using that
 visitor session's scoped token. Existing bounded retry/idempotency/SSRF protections and polling
-fallback patterns are reused.
+fallback patterns are reused. At minute 29 middleware sends the active token refresh request and
+writes the rotated bearer back to its own server-side gate session while preserving its session
+ID and `userIntelligence` binding.
 
 Local middleware/browser headless detection may publish an immediate advisory recommendation for
 customer code. It never opens OTP, alters customer content, or becomes browser-supplied decision
@@ -224,8 +252,10 @@ authority.
 ## Rapid/verify server publication
 
 The Mongo master owns full `userIntelligence` profiles. Future Phase 26/27 edge publication keeps
-at least 30 days of current exact fingerprint HMAC mappings, exact-IP intelligence, and current
-profile scores on verify servers. This plan defines the source data but does not deploy
+at least 30 days of current versioned verify lookup mappings, exact-IP intelligence, and current
+profile scores on verify servers. Verify is the primary rapid lookup when available. Any verify
+unavailability or unresolved lookup falls back to the home API and authoritative Mongo
+`userIntelligence` lookup. This plan defines the source data but does not deploy
 `verify.powerotp.com` or invent a temporary synchronization consumer.
 
 ## Explicit exclusions
@@ -249,20 +279,25 @@ work in dependency-ordered fresh sessions:
    versioned POWEROTP contracts, typed component availability, initial authenticated bridge
    transport, and prohibited-data tests. See
    [`POWEROTP_BOTBLOCKER_AS_BUILT.md`](POWEROTP_BOTBLOCKER_AS_BUILT.md).
-2. **`fingerprintData` persistence and stable HMAC.** Add the shared one-record-per-profile
-   collection, canonical stable-subset HMAC derivation, authoritative/exact matching updates,
-   replacement/no-alias semantics, retention, and concurrency tests.
-3. **Gate-session profile synchronization and IP evidence.** Add explicit blacklist observation,
+2. **Initial session persistence and durable identity binding.** Save the full first request as
+   session plus initial risk event, implement the user-intelligence-bound site-return cookie,
+   store safe visitor-token metadata, have middleware request and store the rotated bearer at
+   minute 29, and preserve revocation/OTP updates.
+3. **`fingerprintData` persistence and verify lookup field.** Add the shared
+   one-record-per-profile raw collection, bounded stable-source fields on `userIntelligence`,
+   same-row creation/update HMAC derivation, replacement/no-alias semantics, retention, and
+   concurrency tests. Do not add inbound hash matching.
+4. **Gate-session profile synchronization and IP evidence.** Add explicit blacklist observation,
    selected latest-successful fingerprint fields, current IP, the 20-entry unique prior-IP LRU,
    global/same-site rolling counts, and transactional at-most-once application.
-4. **Scoring configuration/runtime.** Add the approved field registry, restricted validated math,
+5. **Scoring configuration/runtime.** Add the approved field registry, restricted validated math,
    nonnegative weights, final formula, present-field evaluation, current-score replacement, and
    typed-unavailable behavior without invented defaults.
-5. **Project callback/pull.** Extend the existing signed project callback and scoped-token pull
+6. **Project callback/pull.** Extend the existing signed project callback and scoped-token pull
    boundary after committed profile/score updates.
-6. **Deferred `riskEvents` reducer.** Run its dedicated field-by-field design session before
+7. **Deferred `riskEvents` reducer.** Run its dedicated field-by-field design session before
    implementing behavior/risk profile mappings.
-7. **Deferred external IP profile/scoring integration.** Select and confirm a real vendor first,
+8. **Deferred external IP profile/scoring integration.** Select and confirm a real vendor first,
    approve its bounded fields, then append approved profile inputs and scoring registration.
 
 Never begin a later subphase in the same fresh session. Never commit, push, deploy, populate

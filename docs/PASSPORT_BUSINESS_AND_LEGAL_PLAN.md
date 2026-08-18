@@ -253,8 +253,11 @@ Two corrections to the proposed design are load-bearing:
 
 **BotBlocker data cannot be retained indefinitely or split by an unproven human/bot label.**
 Every visitor receives a project-scoped `userIntelligence` record; a new record is created when
-neither an authoritative binding nor the exact stable-fingerprint HMAC identifies one. Gate
-sessions and linked behavior/risk-event inputs are retained for 90 days; aggregated
+neither the signed site-return credential, an authoritative Passport, nor an exact raw
+fingerprint comparison identifies one on the home API. During `userIntelligence` creation/update,
+the server derives the single versioned verify lookup field from source values written to that row
+for primary edge lookup; edge unavailability falls back to the home `userIntelligence` lookup. Gate sessions and linked behavior/risk-event
+inputs are retained for 90 days; aggregated
 `userIntelligence` and challenge records are retained for 18 months under explicit TTL dates. IP
 reuse counts use separate 1-, 7-, and 30-day system-wide and same-site windows, but IP alone never
 merges profiles. The retention periods, broad fingerprint collection, internal cross-site reuse

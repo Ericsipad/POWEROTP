@@ -9,10 +9,10 @@ import { createPowerOtpBotBlocker } from "@powerotp/gate-express";
  * the credential from POST /v1/projects/{projectId}/botblocker/
  * rotate-site-credential.
  *
- * verificationKeys lets a returning visitor who already received an
- * \`allow\` get it again instantly from a signed, long-lived cookie, checked
- * entirely on this server without a fresh decision. Obtain the key pair
- * for your site from PowerOTP.
+ * verificationKeys verifies the signed, persistent site-return credential
+ * bound to one user-intelligence row. It publishes immediate local access
+ * while the active session starts; later updates may revoke access or
+ * require OTP. Obtain the key pair for your site from PowerOTP.
  */
 export const powerOtp = createPowerOtpBotBlocker({
   siteId: process.env.POWEROTP_SITE_ID!,
