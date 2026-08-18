@@ -82,6 +82,7 @@ export const FingerprintComponentsSchema = z
     webGlBasics: fingerprintComponentSchema(values.webGlBasics),
     webGlExtensions: fingerprintComponentSchema(values.webGlExtensions),
   })
+  .partial()
   .strict();
 
 export const FingerprintVectorSchema = z

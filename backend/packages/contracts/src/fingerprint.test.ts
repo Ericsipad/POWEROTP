@@ -116,12 +116,12 @@ describe("fingerprint vector contract", () => {
     });
   });
 
-  it("requires every bounded component and rejects unknown component fields", () => {
+  it("bounds every present component while allowing missing data to be omitted", () => {
     for (const name of fingerprintComponentNames) {
       assert.equal(
         FingerprintComponentValueSchemas[name].safeParse(undefined).success,
         false,
-        `${name} must have a bounded value`,
+        `${name} must have a bounded value when present`,
       );
       const candidate = vector();
       (candidate.components[name] as Record<string, unknown>).unexpected = true;
@@ -133,7 +133,11 @@ describe("fingerprint vector contract", () => {
     }
     const missing = vector();
     delete (missing.components as Record<string, unknown>).fonts;
-    assert.equal(FingerprintVectorSchema.safeParse(missing).success, false);
+    assert.equal(FingerprintVectorSchema.safeParse(missing).success, true);
+    assert.equal(FingerprintVectorSchema.safeParse({
+      ...vector(),
+      components: {},
+    }).success, true);
     assert.equal(FingerprintVectorSchema.safeParse({
       ...vector(),
       components: { ...vector().components, arbitraryProbe: { status: "unavailable" } },

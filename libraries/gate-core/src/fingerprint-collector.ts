@@ -74,7 +74,8 @@ async function collectVector(loadAgent: AgentLoader): Promise<FingerprintVector>
 
   const components: Record<string, unknown> = {};
   for (const name of fingerprintComponentNames) {
-    components[name] = mapComponent(name, raw[name]);
+    const component = mapComponent(name, raw[name]);
+    if (component !== undefined) components[name] = component;
   }
   const parsed = FingerprintVectorSchema.safeParse({
     fingerprintVersion: FINGERPRINT_VECTOR_VERSION,
@@ -88,9 +89,10 @@ function mapComponent(
   name: keyof typeof FingerprintComponentValueSchemas,
   component: RawComponent | undefined,
 ): unknown {
-  if (!component) return { status: "unavailable" };
+  if (!component) return undefined;
   if ("error" in component) return mapError(component.error);
   const mapped = mapSpecialValue(name, component.value);
+  if (mapped === undefined) return undefined;
   if (isUnavailable(mapped)) return { status: mapped };
   const parsed = FingerprintComponentValueSchemas[name].safeParse(mapped);
   return parsed.success
@@ -102,7 +104,7 @@ function mapSpecialValue(
   name: keyof typeof FingerprintComponentValueSchemas,
   value: unknown,
 ): unknown | FingerprintUnavailableStatus {
-  if (value === undefined) return "unavailable";
+  if (value === undefined) return undefined;
   if (name === "audio" && typeof value === "number") {
     if (value === -1) return "skipped";
     if (value === -2) return "unsupported";

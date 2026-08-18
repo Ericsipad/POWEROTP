@@ -128,8 +128,9 @@ The full available component vector stored in `fingerprintData` consists of:
 42. `webGlExtensions`: context attributes, parameters, shader precisions, extensions, extension
     parameters, and unsupported extensions.
 
-Unavailable, blocked, skipped, unstable, or unsupported components remain explicitly typed in
-the full `fingerprintData` vector. Values are never fabricated.
+Missing component data may be omitted without failing collection. When the collector explicitly
+reports unavailable, blocked, skipped, unstable, unsupported, or bounded collector-error state,
+that state remains typed in the `fingerprintData` vector. Values are never fabricated.
 
 ## `fingerprintData` persistence
 

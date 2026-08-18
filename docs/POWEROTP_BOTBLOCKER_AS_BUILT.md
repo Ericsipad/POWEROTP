@@ -3336,10 +3336,11 @@ breakdown step 1 complete; Phase 17 as a whole remains in progress.
 
 **Contracts.** Added `fingerprint-components.ts` and `fingerprint.ts` under
 `backend/packages/contracts/src` and exported them from the shared package. The
-`fingerprintVersion: 1`, `collectorVersion: "5.2.0"` vector contains exactly the 42
-FingerprintJS v5.2.0 components approved in the Phase 17A plan. Every component is a closed
-`available` value or one of `unavailable`, `blocked`, `skipped`, `unstable`, `unsupported`, or
-bounded `collector_error/collection_failed`. Values enforce finite numbers, safe/ranged
+`fingerprintVersion: 1`, `collectorVersion: "5.2.0"` vector recognizes exactly the 42
+FingerprintJS v5.2.0 components approved in the Phase 17A plan. Missing component data is
+omitted without failing the vector. Every present component is a closed `available` value or one
+of `unavailable`, `blocked`, `skipped`, `unstable`, `unsupported`, or bounded
+`collector_error/collection_failed`. Values enforce finite numbers, safe/ranged
 integers, fixed enums, strict nested objects, bounded strings and arrays, and a 56 KiB total
 vector cap. Canvas, WebGL, audio, and locale library sentinel values are reduced to the matching
 typed state. No library visitor ID, confidence, client/component hash, raw error, duration,
@@ -3363,7 +3364,8 @@ responses. Five-second, 30-second, navigation, hide, and exit behavior reports n
 nor embed fingerprint data.
 
 **Focused tests and verification.** Added contract coverage for a complete available vector,
-all required component wrappers, all typed unavailable states, finite/range/safe-integer and
+omitted missing components, every present component wrapper, all typed unavailable states,
+finite/range/safe-integer and
 nested string/array/object bounds, total payload size, strict unknown-field rejection, library
 authority rejection, and prohibited page/form/authentication data. Collector tests cover
 `monitoring: false`, same-session retry/re-render deduplication, new-session recollection,
@@ -3371,7 +3373,7 @@ v5.2.0 tuple/sentinel mapping, selected future profile fields, and bounded failu
 Browser/runtime and raw Node bridge tests cover optional absence, initial-only transport,
 credential separation, and continued exclusion from recurring reports. Focused builds passed
 for `@powerotp/contracts`, `@powerotp/gate-core`, and `@powerotp/gate-node`. Their workspace test
-suites passed respectively **181/181**, **45/45**, and **21/21**, including the unchanged sensor
+suites passed respectively **181/181**, **46/46**, and **21/21**, including the unchanged sensor
 cadence and sanitization suites. No full-monorepo verification was run.
 
 **Explicitly not shipped.** This slice adds no `fingerprintData` MongoDB collection or record,

@@ -4,7 +4,11 @@ import { describe, it } from "node:test";
 import { fingerprintComponentNames } from "@powerotp/contracts";
 import { createFingerprintCollector } from "./fingerprint-collector.js";
 
-function rawComponents() {
+type RawTestComponent =
+  | { value: unknown; duration?: number }
+  | { error: unknown; duration?: number };
+
+function rawComponents(): Record<string, RawTestComponent> {
   return Object.fromEntries(
     fingerprintComponentNames.map((name) => [
       name,
@@ -123,11 +127,24 @@ describe("fingerprint collector", () => {
       status: "available",
       value: { maxTouchPoints: 5, touchEvent: true, touchStart: true },
     });
-    assert.equal(result.components.audio.status, "unstable");
-    assert.equal(result.components.canvas.status, "skipped");
-    assert.equal(result.components.webGlBasics.status, "unsupported");
-    assert.equal(result.components.webGlExtensions.status, "blocked");
-    assert.equal(result.components.dateTimeLocale.status, "unavailable");
+    assert.equal(result.components.audio?.status, "unstable");
+    assert.equal(result.components.canvas?.status, "skipped");
+    assert.equal(result.components.webGlBasics?.status, "unsupported");
+    assert.equal(result.components.webGlExtensions?.status, "blocked");
+    assert.equal(result.components.dateTimeLocale?.status, "unavailable");
+  });
+
+  it("omits components whose data is missing", async () => {
+    const components = rawComponents();
+    delete components.fonts;
+    components.osCpu = { value: undefined };
+    const collector = createFingerprintCollector({
+      scope: {},
+      loadAgent: async () => ({ get: async () => ({ components }) }),
+    });
+    const result = await collector.collect("gate_session_missing_123");
+    assert.equal("fonts" in result.components, false);
+    assert.equal("osCpu" in result.components, false);
   });
 
   it("maps loader failure to bounded errors without throwing", async () => {
@@ -165,6 +182,6 @@ describe("fingerprint collector", () => {
       loadAgent: async () => ({ get: async () => ({ components }) }),
     });
     const result = await collector.collect("gate_session_oversize_12");
-    assert.equal(result.components.webGlExtensions.status, "collector_error");
+    assert.equal(result.components.webGlExtensions?.status, "collector_error");
   });
 });
