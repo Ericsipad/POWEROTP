@@ -4,6 +4,7 @@ import type { Db } from "mongodb";
 import { ensureBillingIndexes } from "./billing-persistence.js";
 import { ensureBotBlockerAsnClassificationIndexes } from "./botblocker-asn-classification-persistence.js";
 import { ensureBotBlockerAsnTypeScoreIndexes } from "./botblocker-asn-type-score-persistence.js";
+import { ensureFingerprintDataIndexes } from "./botblocker-fingerprint-persistence.js";
 import { ensureBotBlockerIntelligenceIndexes } from "./botblocker-intelligence-persistence.js";
 import { ensureBotBlockerIpApiLookupIndexes } from "./botblocker-ip-api-lookup-persistence.js";
 import { ensureBotBlockerIpBlacklistIndexes } from "./botblocker-ip-blacklist-persistence.js";
@@ -235,6 +236,7 @@ export async function ensureIndexes(db: Db) {
     ensureIndexStep("botBlockerSite", () => ensureBotBlockerSiteIndexes(db)),
     ensureIndexStep("botBlockerSiteCredential", () => ensureBotBlockerSiteCredentialIndexes(db)),
     ensureIndexStep("botBlockerIntelligence", () => ensureBotBlockerIntelligenceIndexes(db)),
+    ensureIndexStep("fingerprintData", () => ensureFingerprintDataIndexes(db)),
     ensureIndexStep("botBlockerIpBlacklist", () => ensureBotBlockerIpBlacklistIndexes(db)),
     ensureIndexStep("botBlockerIpApiLookup", () => ensureBotBlockerIpApiLookupIndexes(db)),
     ensureIndexStep("botBlockerNetworkRange", () => ensureBotBlockerNetworkRangeIndexes(db)),

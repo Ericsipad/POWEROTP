@@ -83,7 +83,6 @@ function fixture() {
     _id: "bgs_session_123456789",
     ...scope,
     userIntelligenceId: "bui_owner_123456789",
-    fingerprintHash: "a".repeat(64),
     state: "active",
     lastAppliedSequence: -1,
     startedAt: now,

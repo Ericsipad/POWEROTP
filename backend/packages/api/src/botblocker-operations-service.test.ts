@@ -47,10 +47,6 @@ function fixture() {
       {
         _id: "bui_1234567890123456",
         ...scope,
-        fingerprintHash: "a".repeat(64),
-        // openGateSession's matching rule never produces more than one
-        // observation per profile in practice (see botblocker-operations
-        // -service.ts's `latestIp` doc comment); this fixture reflects that.
         ipObservations: [
           {
             ip: "203.0.113.5",

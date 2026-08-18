@@ -180,8 +180,7 @@ describe("BotBlocker intelligence persistence", () => {
     assert.ok(captured.some(
       (index) =>
         index.collection === "userIntelligence" &&
-        index.keys.fingerprintHash === 1 &&
-        index.keys["ipObservations.ip"] === 1 &&
+        index.keys["fingerprintVerifyLookup.hash"] === 1 &&
         index.keys.lastObservedAt === -1,
     ));
   });

@@ -1,280 +1,418 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { isDeepStrictEqual } from "node:util";
 
-import type { BrowserEvidence } from "@powerotp/contracts";
+import type { BrowserEvidence, FingerprintVector } from "@powerotp/contracts";
 import type { Db, MongoClient } from "mongodb";
 
-import {
-  BOTBLOCKER_MATCH_LOOKBACK_SECONDS,
-  BOTBLOCKER_RETENTION_SECONDS,
-  type GateSessionDocument,
-  type UserIntelligenceDocument,
+import type { FingerprintDataDocument } from "./botblocker-fingerprint-persistence.js";
+import type {
+  GateSessionDocument,
+  UserIntelligenceDocument,
 } from "./botblocker-intelligence-persistence.js";
 import {
   BotBlockerSessionPersistence,
   BotBlockerSessionPersistenceError,
 } from "./botblocker-session-persistence.js";
 
-const now = new Date("2026-08-16T04:00:00.000Z");
+const now = new Date("2026-08-17T12:00:00.000Z");
 const scope = {
   customerId: "usr_owner",
   projectId: "prj_owner_123456789",
   siteId: "bbs_owner_123456789",
 };
-const browserEvidence: BrowserEvidence = {
+const evidence: BrowserEvidence = {
   routePath: "/",
   clicks: [],
   mouseDirectness: { averageDirectnessRatio: 0, sampleCount: 0 },
   scroll: { smoothnessScore: 0, highSpeedEventCount: 0 },
   honeypotActivations: [],
-  environment: {
-    evidenceVersion: 1,
-    sensorVersion: "1.0.0",
-    automationIndicators: [],
-  },
 };
 
-function fixture(existing?: UserIntelligenceDocument | GateSessionDocument) {
-  const gateSessions: GateSessionDocument[] =
-    existing && "userIntelligenceId" in existing ? [existing] : [];
-  const intelligence: UserIntelligenceDocument[] =
-    existing && "gateSessionCount" in existing ? [existing] : [];
-  let matchingCutoff: Date | undefined;
-  const db = {
-    collection(name: string) {
-      if (name === "gateSessions") {
-        return {
-          findOne: async (filter: Record<string, unknown>) =>
-            gateSessions.find((row) => row._id === filter._id) ?? null,
-          insertOne: async (document: GateSessionDocument) => {
-            gateSessions.push(document);
-          },
-        };
-      }
-      if (name === "userIntelligence") {
-        return {
-          findOne: async (filter: {
-            fingerprintHash?: string;
-            "ipObservations.ip"?: string;
-            lastObservedAt?: { $gte: Date };
-          }) => {
-            matchingCutoff = filter.lastObservedAt?.$gte;
-            return intelligence.find(
-              (row) =>
-                row.fingerprintHash === filter.fingerprintHash &&
-                row.ipObservations.some(
-                  (observation) =>
-                    observation.ip === filter["ipObservations.ip"],
-                ) &&
-                (!matchingCutoff || row.lastObservedAt >= matchingCutoff),
-            ) ?? null;
-          },
-          insertOne: async (document: UserIntelligenceDocument) => {
-            intelligence.push(document);
-          },
-          updateOne: async (
-            filter: { _id: string },
-            update: {
-              $set: Partial<UserIntelligenceDocument>;
-              $inc: { gateSessionCount: number };
-            },
-          ) => {
-            const row = intelligence.find((item) => item._id === filter._id)!;
-            Object.assign(row, update.$set);
-            row.gateSessionCount += update.$inc.gateSessionCount;
-          },
-        };
-      }
-      return {
-        findOne: async () => null,
-      };
+function vector(platform = "Win32"): FingerprintVector {
+  return {
+    fingerprintVersion: 1,
+    collectorVersion: "5.2.0",
+    components: {
+      userAgentData: {
+        status: "available",
+        value: { brands: ["Example/140"], mobile: false, platform },
+      },
     },
-  } as unknown as Db;
+  };
+}
+
+function completeVector(): FingerprintVector {
+  return {
+    ...vector("Windows 15"),
+    components: {
+      ...vector("Windows 15").components,
+      userAgentData: {
+        status: "available",
+        value: {
+          brands: ["Example/140"],
+          mobile: false,
+          platform: "Windows 15",
+          architecture: "x86",
+          bitness: "64",
+        },
+      },
+      architecture: { status: "available", value: 255 },
+      hardwareConcurrency: { status: "available", value: 8 },
+      deviceMemory: { status: "available", value: 12 },
+      touchSupport: {
+        status: "available",
+        value: { maxTouchPoints: 0, touchEvent: false, touchStart: false },
+      },
+      screenResolution: {
+        status: "available",
+        value: { width: 1920, height: 1080 },
+      },
+      colorDepth: { status: "available", value: 24 },
+      colorGamut: { status: "available", value: "srgb" },
+      webGlBasics: {
+        status: "available",
+        value: {
+          version: "WebGL 1",
+          vendor: "WebKit",
+          vendorUnmasked: "Google",
+          renderer: "WebGL",
+          rendererUnmasked: "ANGLE",
+          shadingLanguageVersion: "GLSL 1",
+        },
+      },
+      webGlExtensions: {
+        status: "available",
+        value: {
+          contextAttributes: [],
+          parameters: [],
+          shaderPrecisions: [],
+          extensions: [],
+          extensionParameters: [],
+          unsupportedExtensions: [],
+        },
+      },
+      canvas: {
+        status: "available",
+        value: { winding: true, geometry: "geometry", text: "text" },
+      },
+      audio: { status: "available", value: 124 },
+      audioBaseLatency: { status: "available", value: 0.01 },
+      fonts: { status: "available", value: ["Arial"] },
+      fontPreferences: {
+        status: "available",
+        value: {
+          default: 1,
+          apple: 1,
+          serif: 1,
+          sans: 1,
+          mono: 1,
+          min: 1,
+          system: 1,
+        },
+      },
+      vendor: { status: "available", value: "Example Inc." },
+    },
+  };
+}
+
+function fixture(options: {
+  intelligence?: UserIntelligenceDocument[];
+  fingerprints?: FingerprintDataDocument[];
+  failGateInsert?: boolean;
+} = {}) {
+  const gateSessions: GateSessionDocument[] = [];
+  const intelligence = structuredClone(options.intelligence ?? []);
+  const fingerprints = structuredClone(options.fingerprints ?? []);
+  const collection = (name: string) => {
+    const rows = name === "gateSessions"
+      ? gateSessions
+      : name === "userIntelligence"
+      ? intelligence
+      : fingerprints;
+    return {
+      findOne: async (
+        filter: Record<string, unknown>,
+        query?: { sort?: Record<string, number> },
+      ) => {
+        const matches = rows.filter((row) => matchesFilter(row, filter));
+        if (query?.sort && name === "fingerprintData") {
+          (matches as FingerprintDataDocument[]).sort((left, right) =>
+            right.serverObservedAt.getTime() - left.serverObservedAt.getTime() ||
+            right.sourceGateSessionId.localeCompare(left.sourceGateSessionId)
+          );
+        }
+        return matches[0] ?? null;
+      },
+      insertOne: async (document: never) => {
+        if (name === "gateSessions" && options.failGateInsert) {
+          throw new Error("injected gate insert failure");
+        }
+        (rows as unknown[]).push(document);
+      },
+      replaceOne: async (
+        filter: Record<string, unknown>,
+        document: never,
+      ) => {
+        const index = rows.findIndex((row) => matchesFilter(row, filter));
+        if (index < 0) return { matchedCount: 0 };
+        (rows as unknown[])[index] = document;
+        return { matchedCount: 1 };
+      },
+      updateOne: async (
+        filter: Record<string, unknown>,
+        update: {
+          $set?: Record<string, unknown>;
+          $unset?: Record<string, unknown>;
+          $inc?: Record<string, number>;
+        },
+      ) => {
+        const row = rows.find((candidate) => matchesFilter(candidate, filter));
+        if (!row) return { matchedCount: 0 };
+        Object.assign(row, update.$set);
+        for (const key of Object.keys(update.$unset ?? {})) {
+          delete (row as Record<string, unknown>)[key];
+        }
+        for (const [key, amount] of Object.entries(update.$inc ?? {})) {
+          const record = row as Record<string, unknown>;
+          record[key] = Number(record[key] ?? 0) + amount;
+        }
+        return { matchedCount: 1 };
+      },
+    };
+  };
+  const db = { collection } as unknown as Db;
   const client = {
     withSession: async (
       work: (session: {
         withTransaction: (transaction: () => Promise<void>) => Promise<void>;
       }) => Promise<void>,
-    ) => work({ withTransaction: async (transaction) => transaction() }),
+    ) => work({
+      withTransaction: async (transaction) => {
+        const snapshot = structuredClone({
+          gateSessions,
+          intelligence,
+          fingerprints,
+        });
+        try {
+          await transaction();
+        } catch (error) {
+          gateSessions.splice(0, gateSessions.length, ...snapshot.gateSessions);
+          intelligence.splice(0, intelligence.length, ...snapshot.intelligence);
+          fingerprints.splice(0, fingerprints.length, ...snapshot.fingerprints);
+          throw error;
+        }
+      },
+    }),
   } as unknown as MongoClient;
   return {
     persistence: new BotBlockerSessionPersistence(db, client),
     gateSessions,
     intelligence,
-    matchingCutoff: () => matchingCutoff,
+    fingerprints,
   };
 }
 
-describe("BotBlockerSessionPersistence", () => {
-  it("creates scoped session/intelligence records with a keyed fingerprint hash and raw IP", async () => {
-    const state = fixture();
-    const session = await state.persistence.openGateSession({
-      scope,
-      gateSessionId: "bgs_session_123456789",
-      fingerprintHash: "a".repeat(64),
-      ip: "203.0.113.5",
-      evidence: browserEvidence,
-      now,
-    });
-
-    assert.equal(state.gateSessions.length, 1);
-    assert.equal(state.intelligence.length, 1);
-    assert.equal(session.lastAppliedSequence, -1);
-    assert.equal(session.fingerprintHash, "a".repeat(64));
-    assert.equal(session.ip, "203.0.113.5");
-    assert.equal("clientIp" in session, false);
-    assert.equal("rawFingerprint" in session, false);
-    assert.equal(
-      session.retentionExpiresAt.getTime() - now.getTime(),
-      BOTBLOCKER_RETENTION_SECONDS * 1_000,
-    );
-    assert.equal(
-      state.intelligence[0]!.retentionExpiresAt.getTime() - now.getTime(),
-      BOTBLOCKER_RETENTION_SECONDS * 1_000,
-    );
-    assert.equal(
-      now.getTime() - state.matchingCutoff()!.getTime(),
-      BOTBLOCKER_MATCH_LOOKBACK_SECONDS * 1_000,
-    );
-  });
-
-  it("matches only a recent scoped fingerprint and records repeatable IP observations", async () => {
-    const existing: UserIntelligenceDocument = {
-      _id: "bui_existing_123456",
-      ...scope,
-      fingerprintHash: "a".repeat(64),
-      ipObservations: [{
-        ip: "203.0.113.5",
-        firstObservedAt: new Date(now.getTime() - 1_000),
-        lastObservedAt: new Date(now.getTime() - 1_000),
-        observationCount: 1,
-      }],
-      gateSessionCount: 1,
-      behaviorReportCount: 2,
+function profile(
+  id: string,
+  ip = "203.0.113.5",
+): UserIntelligenceDocument {
+  return {
+    _id: id,
+    ...scope,
+    fingerprintVerifySource: { platformFamily: "windows" },
+    fingerprintVerifyLookup: {
+      recipeVersion: 1,
+      status: "unavailable",
+      reason: "missing_stable_inputs",
+    },
+    ipObservations: [{
+      ip,
       firstObservedAt: now,
       lastObservedAt: now,
-      createdAt: now,
-      updatedAt: now,
-      retentionExpiresAt: now,
-    };
-    const state = fixture(existing);
-    const session = await state.persistence.openGateSession({
-      scope,
-      gateSessionId: "bgs_second_123456789",
-      fingerprintHash: "a".repeat(64),
-      ip: "203.0.113.5",
-      evidence: browserEvidence,
-      now,
+      observationCount: 1,
+    }],
+    gateSessionCount: 1,
+    behaviorReportCount: 0,
+    firstObservedAt: now,
+    lastObservedAt: now,
+    createdAt: now,
+    updatedAt: now,
+    retentionExpiresAt: new Date(now.getTime() + 548 * 86_400_000),
+  };
+}
+
+function storedFingerprint(
+  userIntelligenceId: string,
+  platform = "Win32",
+): FingerprintDataDocument {
+  return {
+    _id: userIntelligenceId,
+    ...scope,
+    userIntelligenceId,
+    sourceGateSessionId: "bgs_existing_123456",
+    fingerprintVersion: 1,
+    collectorVersion: "5.2.0",
+    components: vector(platform).components,
+    serverObservedAt: now,
+    firstObservedAt: now,
+    lastObservedAt: now,
+    createdAt: now,
+    updatedAt: now,
+    retentionExpiresAt: new Date(now.getTime() + 548 * 86_400_000),
+  };
+}
+
+function openInput(overrides: Record<string, unknown> = {}) {
+  return {
+    scope,
+    gateSessionId: "bgs_session_m_123456",
+    fingerprint: vector(),
+    verifyHashSecret: "verify-hash-secret-at-least-32-characters",
+    ip: "203.0.113.5",
+    evidence,
+    now,
+    ...overrides,
+  };
+}
+
+describe("BotBlockerSessionPersistence fingerprint selection", () => {
+  it("uses exact raw-fingerprint fallback without requiring an IP match", async () => {
+    const existing = profile("bui_existing_123456", "198.51.100.1");
+    const state = fixture({
+      intelligence: [existing],
+      fingerprints: [storedFingerprint(existing._id)],
     });
+    const session = await state.persistence.openGateSession(openInput());
 
     assert.equal(session.userIntelligenceId, existing._id);
-    assert.equal(existing.gateSessionCount, 2);
-    assert.equal(existing.ipObservations[0]!.observationCount, 2);
     assert.equal(state.intelligence.length, 1);
+    assert.equal(state.intelligence[0]!.gateSessionCount, 2);
   });
 
-  it("never treats a repeated IP by itself as a visitor identity", async () => {
-    const existing: UserIntelligenceDocument = {
-      _id: "bui_existing_123456",
-      ...scope,
-      fingerprintHash: "c".repeat(64),
-      ipObservations: [{
-        ip: "203.0.113.5",
-        firstObservedAt: now,
-        lastObservedAt: now,
-        observationCount: 1,
-      }],
-      gateSessionCount: 1,
-      behaviorReportCount: 0,
-      firstObservedAt: now,
-      lastObservedAt: now,
-      createdAt: now,
-      updatedAt: now,
-      retentionExpiresAt: now,
-    };
-    const state = fixture(existing);
-    const session = await state.persistence.openGateSession({
-      scope,
-      gateSessionId: "bgs_distinct_1234567",
-      fingerprintHash: "a".repeat(64),
-      ip: "203.0.113.5",
-      evidence: browserEvidence,
-      now,
+  it("never selects on IP-only or non-exact fingerprint evidence", async () => {
+    const existing = profile("bui_existing_123456");
+    const state = fixture({
+      intelligence: [existing],
+      fingerprints: [storedFingerprint(existing._id)],
     });
+    const session = await state.persistence.openGateSession(openInput({
+      fingerprint: vector("Linux"),
+    }));
 
     assert.notEqual(session.userIntelligenceId, existing._id);
     assert.equal(state.intelligence.length, 2);
   });
 
-  it("lands the resolved network-intelligence result on the session row at creation time", async () => {
-    const state = fixture();
-    const session = await state.persistence.openGateSession({
-      scope,
-      gateSessionId: "bgs_intel_1234567890",
-      fingerprintHash: "a".repeat(64),
-      ip: "203.0.113.5",
-      evidence: browserEvidence,
-      latestDecision: "otp",
-      networkClassification: {
-        asn: 64500,
-        asnOrg: "Example Org",
-        asnType: "known_proxy",
-        score: 40,
-        requiresApiLookup: true,
-      },
-      ipReputation: { vendor: "acme-ip-intel", score: 70 },
-      now,
-    });
-
-    assert.equal(session.latestDecision, "otp");
-    assert.deepEqual(session.networkClassification, {
-      asn: 64500,
-      asnOrg: "Example Org",
-      asnType: "known_proxy",
-      score: 40,
-      requiresApiLookup: true,
-    });
-    assert.deepEqual(session.ipReputation, { vendor: "acme-ip-intel", score: 70 });
-  });
-
-  it("omits network-intelligence fields entirely when none were resolved", async () => {
-    const state = fixture();
-    const session = await state.persistence.openGateSession({
-      scope,
-      gateSessionId: "bgs_no_intel_123456",
-      fingerprintHash: "a".repeat(64),
-      evidence: browserEvidence,
-      now,
-    });
-
-    assert.equal("latestDecision" in session, false);
-    assert.equal("networkClassification" in session, false);
-    assert.equal("ipReputation" in session, false);
-  });
-
-  it("rejects reuse of a session identifier from another project", async () => {
+  it("gives authoritative binding precedence and replaces the current raw vector", async () => {
+    const bound = profile("bui_bound_123456789");
+    const rawMatch = profile("bui_raw_match_123456");
     const state = fixture({
-      _id: "bgs_shared_123456789",
-      ...scope,
-      userIntelligenceId: "bui_owner_123456789",
-      fingerprintHash: "a".repeat(64),
-      state: "active",
-      lastAppliedSequence: 0,
-      startedAt: now,
-      lastObservedAt: now,
-      createdAt: now,
-      updatedAt: now,
-      retentionExpiresAt: now,
+      intelligence: [bound, rawMatch],
+      fingerprints: [
+        storedFingerprint(bound._id),
+        storedFingerprint(rawMatch._id, "Linux"),
+      ],
     });
+    const session = await state.persistence.openGateSession(openInput({
+      gateSessionId: "bgs_session_z_123456",
+      authoritativeUserIntelligenceId: bound._id,
+      fingerprint: vector("Linux"),
+      now: new Date(now.getTime() + 1),
+    }));
+
+    assert.equal(session.userIntelligenceId, bound._id);
+    assert.equal(
+      state.intelligence[0]!.fingerprintVerifySource?.platformFamily,
+      "linux",
+    );
+    assert.equal(state.fingerprints.length, 2);
+    assert.equal(
+      state.fingerprints.filter((row) => row.userIntelligenceId === bound._id)
+        .length,
+      1,
+    );
+    assert.deepEqual(state.fingerprints[0]!.components, vector("Linux").components);
+    assert.equal("stableFingerprintHash" in state.fingerprints[0]!, false);
+  });
+
+  it("prevents stale and lower equal-time sessions from replacing current raw data", async () => {
+    const bound = profile("bui_bound_123456789");
+    const state = fixture({
+      intelligence: [bound],
+      fingerprints: [storedFingerprint(bound._id)],
+    });
+    await state.persistence.openGateSession(openInput({
+      gateSessionId: "bgs_a_session_123456",
+      authoritativeUserIntelligenceId: bound._id,
+      fingerprint: vector("Linux"),
+      now,
+    }));
+    await state.persistence.openGateSession(openInput({
+      gateSessionId: "bgs_session_old_12345",
+      authoritativeUserIntelligenceId: bound._id,
+      fingerprint: vector("MacIntel"),
+      now: new Date(now.getTime() - 1),
+    }));
+
+    assert.equal(
+      state.intelligence[0]!.fingerprintVerifySource?.platformFamily,
+      "windows",
+    );
+    assert.deepEqual(state.fingerprints[0]!.components, vector().components);
+  });
+
+  it("derives the only fingerprint hash from persisted user-row source fields", async () => {
+    const state = fixture();
+    const session = await state.persistence.openGateSession(openInput({
+      fingerprint: completeVector(),
+    }));
+
+    assert.match(
+      state.intelligence[0]!.fingerprintVerifyLookup?.status === "available"
+        ? state.intelligence[0]!.fingerprintVerifyLookup.hash
+        : "",
+      /^[a-f0-9]{64}$/,
+    );
+    assert.equal("fingerprintHash" in session, false);
+    assert.equal("stableFingerprintHash" in state.fingerprints[0]!, false);
+  });
+
+  it("makes session replay idempotent and rejects cross-scope reuse", async () => {
+    const state = fixture();
+    const first = await state.persistence.openGateSession(openInput());
+    const replay = await state.persistence.openGateSession(openInput());
+    assert.equal(replay._id, first._id);
+    assert.equal(state.gateSessions.length, 1);
+    assert.equal(state.intelligence[0]!.gateSessionCount, 1);
+
     await assert.rejects(
-      state.persistence.openGateSession({
+      state.persistence.openGateSession(openInput({
         scope: { ...scope, projectId: "prj_other_123456789" },
-        gateSessionId: "bgs_shared_123456789",
-        fingerprintHash: "a".repeat(64),
-        evidence: browserEvidence,
-        now,
-      }),
-      BotBlockerSessionPersistenceError,
+      })),
+      (error: unknown) =>
+        error instanceof BotBlockerSessionPersistenceError &&
+        error.code === "scope_mismatch",
     );
   });
+
+  it("rolls back profile and fingerprint writes when session insertion fails", async () => {
+    const state = fixture({ failGateInsert: true });
+    await assert.rejects(
+      state.persistence.openGateSession(openInput()),
+      /injected gate insert failure/,
+    );
+    assert.deepEqual(state.gateSessions, []);
+    assert.deepEqual(state.intelligence, []);
+    assert.deepEqual(state.fingerprints, []);
+  });
 });
+
+function matchesFilter(
+  row: Record<string, unknown>,
+  filter: Record<string, unknown>,
+): boolean {
+  return Object.entries(filter).every(([key, value]) =>
+    isDeepStrictEqual(row[key], value)
+  );
+}

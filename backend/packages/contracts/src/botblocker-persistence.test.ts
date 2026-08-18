@@ -2,12 +2,14 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import type {
+  FingerprintDataRecord,
   GateSessionRecord,
   UserIntelligenceRecord,
 } from "./botblocker-persistence.js";
 import {
   BehaviorReportEventRecordSchema,
   BotBlockerChallengeRecordSchema,
+  FingerprintDataRecordSchema,
   GateSessionRecordSchema,
   RiskSignalEventRecordSchema,
   UserIntelligenceRecordSchema,
@@ -20,7 +22,7 @@ const scope = {
   projectId: "prj_project_123456",
   siteId: "bbs_site_123456789",
 };
-const fingerprintHash = "a".repeat(64);
+const verifyHash = "a".repeat(64);
 const ip = "203.0.113.5";
 const evidence = {
   routePath: "/products",
@@ -34,7 +36,6 @@ const gateSession = {
   ...scope,
   gateSessionId: "bgs_session_123456",
   userIntelligenceId: "bui_visitor_123456",
-  fingerprintHash,
   ip,
   state: "active" as const,
   lastAppliedSequence: -1,
@@ -45,7 +46,72 @@ const gateSession = {
   retentionExpiresAt: later,
 };
 
+const fingerprintData = {
+  ...scope,
+  userIntelligenceId: "bui_visitor_123456",
+  sourceGateSessionId: "bgs_session_123456",
+  fingerprintVersion: 1 as const,
+  collectorVersion: "5.2.0" as const,
+  components: {
+    platform: { status: "available" as const, value: "Win32" },
+    fonts: { status: "unavailable" as const },
+  },
+  serverObservedAt: now,
+  firstObservedAt: now,
+  lastObservedAt: now,
+  createdAt: now,
+  updatedAt: now,
+  retentionExpiresAt: later,
+};
+
 describe("Phase 6 BotBlocker persistence contracts", () => {
+  it("accepts complete and partially omitted raw current fingerprint vectors", () => {
+    assert.equal(
+      FingerprintDataRecordSchema.safeParse(fingerprintData).success,
+      true,
+    );
+    assert.equal(
+      FingerprintDataRecordSchema.safeParse({
+        ...fingerprintData,
+        components: {},
+      }).success,
+      true,
+    );
+  });
+
+  it("keeps fingerprint persistence raw and its fields closed", () => {
+    for (const field of [
+      "visitorId",
+      "confidence",
+      "componentHash",
+      "fingerprintHash",
+      "stableFingerprintHash",
+      "hashStatus",
+      "hashRecipeVersion",
+      "error",
+      "duration",
+      "cookies",
+      "pageContent",
+      "formValue",
+      "email",
+      "password",
+      "query",
+      "fragment",
+      "clickedText",
+      "rawKeystrokes",
+      "pointerTrail",
+    ]) {
+      assert.equal(
+        FingerprintDataRecordSchema.safeParse({
+          ...fingerprintData,
+          [field]: "prohibited",
+        }).success,
+        false,
+        field,
+      );
+    }
+  });
+
   it("accepts a scoped gate session with an IP observation and stale-update state", () => {
     assert.equal(GateSessionRecordSchema.safeParse(gateSession).success, true);
   });
@@ -71,7 +137,12 @@ describe("Phase 6 BotBlocker persistence contracts", () => {
     const intelligence = {
       ...scope,
       userIntelligenceId: "bui_visitor_123456",
-      fingerprintHash,
+      fingerprintVerifySource: { platformFamily: "windows" },
+      fingerprintVerifyLookup: {
+        recipeVersion: 1,
+        status: "unavailable",
+        reason: "missing_stable_inputs",
+      },
       ipObservations: [{
         ip,
         firstObservedAt: now,
@@ -102,7 +173,6 @@ describe("Phase 6 BotBlocker persistence contracts", () => {
     const forgedIntelligence = {
       ...scope,
       userIntelligenceId: "bui_visitor_123456",
-      fingerprintHash,
       ipObservations: [],
       gateSessionCount: 1,
       behaviorReportCount: 1,
@@ -241,6 +311,11 @@ describe("Phase 6 BotBlocker persistence contracts", () => {
   });
 
   it("enforces prohibited fields at compile time", () => {
+    const forgedFingerprint: FingerprintDataRecord = {
+      ...FingerprintDataRecordSchema.parse(fingerprintData),
+      // @ts-expect-error FingerprintJS authority never persists
+      visitorId: "browser-authority",
+    };
     const forgedSession: GateSessionRecord = {
       ...gateSession,
       // @ts-expect-error raw page content is never a persistence field
@@ -250,7 +325,12 @@ describe("Phase 6 BotBlocker persistence contracts", () => {
       ...UserIntelligenceRecordSchema.parse({
         ...scope,
         userIntelligenceId: "bui_visitor_123456",
-        fingerprintHash,
+        fingerprintVerifySource: { platformFamily: "windows" },
+        fingerprintVerifyLookup: {
+          recipeVersion: 1,
+          status: "available",
+          hash: verifyHash,
+        },
         ipObservations: [],
         gateSessionCount: 0,
         behaviorReportCount: 0,
@@ -266,5 +346,6 @@ describe("Phase 6 BotBlocker persistence contracts", () => {
 
     assert.equal("pageContent" in forgedSession, true);
     assert.equal("score" in forgedIntelligence, true);
+    assert.equal("visitorId" in forgedFingerprint, true);
   });
 });

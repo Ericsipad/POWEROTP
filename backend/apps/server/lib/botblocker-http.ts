@@ -106,6 +106,9 @@ export async function rapidAuthMutation(
       },
       gateSessionId: body.gateSessionId,
       evidence: body.payload.browser.evidence,
+      ...(body.payload.browser.fingerprint
+        ? { fingerprint: body.payload.browser.fingerprint }
+        : {}),
       ...(requestIp ? { trustedClientIp: requestIp } : {}),
       ...(intelligence.blacklisted ? { latestDecision: "otp" } : {}),
       ...(intelligence.networkClassification

@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import type {
   BehaviorReport,
   BrowserEvidence,
+  FingerprintVector,
   RiskEventBatch,
 } from "@powerotp/contracts";
 
@@ -61,6 +62,16 @@ function evidence(): BrowserEvidence {
   };
 }
 
+function fingerprint(): FingerprintVector {
+  return {
+    fingerprintVersion: 1,
+    collectorVersion: "5.2.0",
+    components: {
+      platform: { status: "available", value: "Win32" },
+    },
+  };
+}
+
 function report(sequence: number): BehaviorReport {
   return {
     protocolVersion: 1,
@@ -106,7 +117,8 @@ class MemoryIngestionStore {
   openGateSession(input: {
     scope: BotBlockerScope;
     gateSessionId: string;
-    fingerprintHash: string;
+    fingerprint?: FingerprintVector;
+    verifyHashSecret?: string;
     ip?: string;
     evidence: BrowserEvidence;
     now: Date;
@@ -121,7 +133,6 @@ class MemoryIngestionStore {
       _id: input.gateSessionId,
       ...input.scope,
       userIntelligenceId: `bui_${input.gateSessionId}`,
-      fingerprintHash: input.fingerprintHash,
       ...(input.ip ? { ip: input.ip } : {}),
       state: "active",
       lastAppliedSequence: -1,
@@ -217,27 +228,29 @@ describe("BotBlockerIngestionService", () => {
     assert.equal(store.riskEvents.size, 1);
   });
 
-  it("derives a stable keyed fingerprint hash and stores a normalized raw IP", async () => {
+  it("forwards the validated raw fingerprint and normalized raw IP", async () => {
     const store = new MemoryIngestionStore();
     const service = createService(store);
     await service.startSession({
       scope: owner,
       gateSessionId: "bgs_hash_one_123456",
       evidence: evidence(),
+      fingerprint: fingerprint(),
       trustedClientIp: "2001:0DB8:0:0::1",
     });
     await service.startSession({
       scope: owner,
       gateSessionId: "bgs_hash_two_123456",
       evidence: evidence(),
+      fingerprint: fingerprint(),
       trustedClientIp: "2001:db8::1",
     });
 
-    assert.match(store.opened[0]!.fingerprintHash, /^[a-f0-9]{64}$/);
+    assert.deepEqual(store.opened[0]!.fingerprint, fingerprint());
     assert.equal(store.opened[0]!.ip, "2001:db8::1");
     assert.equal(
-      store.opened[0]!.fingerprintHash,
-      store.opened[1]!.fingerprintHash,
+      store.opened[0]!.verifyHashSecret,
+      hashSecret,
     );
     assert.equal(store.opened[0]!.ip, store.opened[1]!.ip);
   });
@@ -279,19 +292,21 @@ describe("BotBlockerIngestionService", () => {
     assert.equal(store.sessions.size, 1);
   });
 
-  it("fails typed-unavailable when the independent hash secret is absent", async () => {
+  it("does not discard raw session data when the verify key is absent", async () => {
+    const store = new MemoryIngestionStore();
     const service = new BotBlockerIngestionService(
-      new MemoryIngestionStore(),
+      store,
       {},
       () => now,
     );
-    await assert.rejects(
-      service.ingestBrowserAssessment(owner, report(0), audience),
-      (error: unknown) =>
-        error instanceof BotBlockerRuntimeError &&
-        error.code === "dependency_unavailable" &&
-        error.unavailable,
-    );
+    await service.startSession({
+      scope: owner,
+      gateSessionId: "bgs_no_secret_123456",
+      evidence: evidence(),
+      fingerprint: fingerprint(),
+    });
+    assert.deepEqual(store.opened[0]!.fingerprint, fingerprint());
+    assert.equal(store.opened[0]!.verifyHashSecret, undefined);
   });
 });
 

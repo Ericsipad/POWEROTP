@@ -12,6 +12,12 @@ import {
   TrustedProxyIpSchema,
 } from "./botblocker.js";
 import { VerificationTypeSchema } from "./verification.js";
+import {
+  FINGERPRINT_COLLECTOR_VERSION,
+  FINGERPRINT_VECTOR_VERSION,
+  FingerprintComponentsSchema,
+} from "./fingerprint.js";
+import { FingerprintComponentValueSchemas } from "./fingerprint-components.js";
 
 const OpaqueIdSchema = z.string().min(16).max(128);
 const ScopedRecordSchema = z.object({
@@ -28,6 +34,102 @@ const RetainedRecordSchema = z.object({
 export const ServerFingerprintHashSchema = z
   .string()
   .regex(/^[a-f0-9]{64}$/, "Fingerprint hash must be lowercase SHA-256 hex");
+
+export const FINGERPRINT_VERIFY_LOOKUP_RECIPE_VERSION = 1;
+
+export const FingerprintDataRecordSchema = ScopedRecordSchema.extend({
+  userIntelligenceId: OpaqueIdSchema,
+  sourceGateSessionId: OpaqueIdSchema,
+  fingerprintVersion: z.literal(FINGERPRINT_VECTOR_VERSION),
+  collectorVersion: z.literal(FINGERPRINT_COLLECTOR_VERSION),
+  components: FingerprintComponentsSchema,
+  serverObservedAt: z.string().datetime(),
+  firstObservedAt: z.string().datetime(),
+  lastObservedAt: z.string().datetime(),
+})
+  .extend(RetainedRecordSchema.shape)
+  .strict()
+  .superRefine((record, context) => {
+    if (
+      Date.parse(record.lastObservedAt) < Date.parse(record.firstObservedAt) ||
+      Date.parse(record.serverObservedAt) !== Date.parse(record.lastObservedAt)
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "Fingerprint observation timestamps must be ordered",
+        path: ["lastObservedAt"],
+      });
+    }
+    if (
+      Date.parse(record.retentionExpiresAt) <= Date.parse(record.lastObservedAt)
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "retentionExpiresAt must follow lastObservedAt",
+        path: ["retentionExpiresAt"],
+      });
+    }
+  });
+
+const normalizedText = z.string().max(1_024);
+const normalizedTextArray = z.array(normalizedText).max(512);
+
+export const FingerprintVerifySourceSchema = z
+  .object({
+    platformFamily: normalizedText,
+    cpu: z.object({
+      architecture: normalizedText,
+      bitness: normalizedText,
+      fingerprintArchitecture:
+        FingerprintComponentValueSchemas.architecture,
+    }).strict(),
+    mobileModel: normalizedText,
+    hardwareConcurrency:
+      FingerprintComponentValueSchemas.hardwareConcurrency,
+    deviceMemoryClass: FingerprintComponentValueSchemas.deviceMemory,
+    maximumTouchPoints: z.number().int().min(0).max(1_024),
+    display: z.object({
+      shorterSide: z.number().int().min(0).max(1_000_000),
+      longerSide: z.number().int().min(0).max(1_000_000),
+      colorDepth: FingerprintComponentValueSchemas.colorDepth,
+      colorGamut: FingerprintComponentValueSchemas.colorGamut,
+    }).strict(),
+    webGl: z.object({
+      basics: FingerprintComponentValueSchemas.webGlBasics,
+      contextAttributes: normalizedTextArray,
+      parameters: normalizedTextArray,
+      shaderPrecisions: normalizedTextArray,
+      extensions: normalizedTextArray.nullable(),
+      extensionParameters: normalizedTextArray,
+      unsupportedExtensions: normalizedTextArray,
+    }).strict(),
+    canvas: FingerprintComponentValueSchemas.canvas,
+    audio: z.object({
+      value: FingerprintComponentValueSchemas.audio,
+      baseLatency: FingerprintComponentValueSchemas.audioBaseLatency,
+    }).strict(),
+    fonts: FingerprintComponentValueSchemas.fonts,
+    fontPreferences: FingerprintComponentValueSchemas.fontPreferences,
+    browser: z.object({
+      vendor: normalizedText,
+      families: z.array(normalizedText).max(32),
+    }).strict(),
+  })
+  .partial()
+  .strict();
+
+export const FingerprintVerifyLookupSchema = z.discriminatedUnion("status", [
+  z.object({
+    recipeVersion: z.literal(FINGERPRINT_VERIFY_LOOKUP_RECIPE_VERSION),
+    status: z.literal("available"),
+    hash: ServerFingerprintHashSchema,
+  }).strict(),
+  z.object({
+    recipeVersion: z.literal(FINGERPRINT_VERIFY_LOOKUP_RECIPE_VERSION),
+    status: z.literal("unavailable"),
+    reason: z.enum(["missing_stable_inputs", "secret_unavailable"]),
+  }).strict(),
+]);
 
 export const IpObservationSchema = z
   .object({
@@ -70,7 +172,6 @@ const GateSessionIpReputationSchema = z
 export const GateSessionRecordSchema = ScopedRecordSchema.extend({
   gateSessionId: OpaqueIdSchema,
   userIntelligenceId: OpaqueIdSchema,
-  fingerprintHash: ServerFingerprintHashSchema,
   ip: TrustedProxyIpSchema.optional(),
   state: z.enum(["active", "ended"]),
   latestDecision: BotBlockerDecisionOutcomeSchema.optional(),
@@ -107,7 +208,8 @@ export const UserIntelligenceRecordSchema = ScopedRecordSchema.extend({
   /** Internal authoritative Passport account reference, populated only
    * after server-side Passport verification. Never browser supplied. */
   passportUserId: OpaqueIdSchema.optional(),
-  fingerprintHash: ServerFingerprintHashSchema,
+  fingerprintVerifySource: FingerprintVerifySourceSchema.optional(),
+  fingerprintVerifyLookup: FingerprintVerifyLookupSchema.optional(),
   ipObservations: z.array(IpObservationSchema),
   latestEvidence: BrowserEvidenceSchema.optional(),
   gateSessionCount: z.number().int().nonnegative(),
@@ -260,6 +362,13 @@ export const BotBlockerChallengeRecordSchema = ScopedRecordSchema.extend({
 
 export type GateSessionRecord = z.infer<typeof GateSessionRecordSchema>;
 export type UserIntelligenceRecord = z.infer<typeof UserIntelligenceRecordSchema>;
+export type FingerprintDataRecord = z.infer<typeof FingerprintDataRecordSchema>;
+export type FingerprintVerifySource = z.infer<
+  typeof FingerprintVerifySourceSchema
+>;
+export type FingerprintVerifyLookup = z.infer<
+  typeof FingerprintVerifyLookupSchema
+>;
 export type DurableRiskEventRecord = z.infer<typeof DurableRiskEventRecordSchema>;
 export type BotBlockerChallengeRecord = z.infer<
   typeof BotBlockerChallengeRecordSchema

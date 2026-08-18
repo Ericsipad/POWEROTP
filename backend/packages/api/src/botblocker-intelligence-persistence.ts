@@ -4,6 +4,8 @@ import type {
   BotBlockerChallengeState,
   BotBlockerDecisionOutcome,
   BrowserEvidence,
+  FingerprintVerifyLookup,
+  FingerprintVerifySource,
   ReportSequence,
   RiskEvent,
   VerificationType,
@@ -54,12 +56,8 @@ export interface GateSessionIpReputation {
 export interface GateSessionDocument extends BotBlockerScope {
   _id: string;
   userIntelligenceId: string;
-  /** Server-derived fingerprint lookup hash. Raw device input is never a
-   * durable field. The trusted request IP is stored raw (not hashed) for
-   * site-owner visitor reporting and return-visit correlation; it is not
-   * treated as identity/PII because it is never linked to a Supabase
-   * account record. */
-  fingerprintHash: string;
+  /** Trusted request IP is stored raw for site-owner reporting and
+   * security correlation. It is never identity authority. */
   ip?: string;
   state: "active" | "ended";
   latestDecision?: BotBlockerDecisionOutcome;
@@ -86,11 +84,11 @@ export interface UserIntelligenceDocument extends BotBlockerScope {
   /** Internal authoritative Passport account reference. This remains absent
    * until a later Passport phase verifies and binds a real Passport user. */
   passportUserId?: string;
-  /** Server-derived, non-unique lookup evidence. Phase 15 owns derivation
-   * and matching; Phase 6 only fixes the durable, project-scoped boundary.
-   * The fingerprint remains a keyed hash; IP observations store the raw
-   * address (see `GateSessionDocument.ip`). */
-  fingerprintHash: string;
+  /** Bounded stable inputs projected from the accepted raw fingerprint.
+   * The lookup is derived from these persisted row values, never directly
+   * from an inbound request or from fingerprintData. */
+  fingerprintVerifySource?: FingerprintVerifySource;
+  fingerprintVerifyLookup?: FingerprintVerifyLookup;
   ipObservations: IpObservation[];
   latestEvidence?: BrowserEvidence;
   gateSessionCount: number;
@@ -183,8 +181,7 @@ export async function ensureBotBlockerIntelligenceIndexes(db: Db): Promise<void>
         customerId: 1,
         projectId: 1,
         siteId: 1,
-        fingerprintHash: 1,
-        "ipObservations.ip": 1,
+        "fingerprintVerifyLookup.hash": 1,
         lastObservedAt: -1,
       },
     ),

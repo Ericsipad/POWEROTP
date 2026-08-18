@@ -1,12 +1,12 @@
-import { createHmac } from "node:crypto";
-
 import {
   BehaviorReportSchema,
   BrowserEvidenceSchema,
+  FingerprintVectorSchema,
   RiskEventBatchSchema,
   type BehaviorReport,
   type BotBlockerDecisionOutcome,
   type BrowserEvidence,
+  type FingerprintVector,
   type RiskEventBatch,
 } from "@powerotp/contracts";
 
@@ -50,6 +50,9 @@ export class BotBlockerIngestionService {
     scope: BotBlockerScope;
     gateSessionId: string;
     evidence: BrowserEvidence;
+    fingerprint?: FingerprintVector;
+    /** Trusted server-held binding only; never copied from browser evidence. */
+    authoritativeUserIntelligenceId?: string;
     trustedClientIp?: string;
     /** Already-resolved fast-immediate-branch network intelligence
      * (Phase 16 step 7's `rapidAuthMutation` wiring) to land on the gate
@@ -61,12 +64,22 @@ export class BotBlockerIngestionService {
     ipReputation?: GateSessionIpReputation;
   }) {
     const evidence = parseEvidence(input.evidence);
+    const fingerprint = input.fingerprint
+      ? parseFingerprint(input.fingerprint)
+      : undefined;
     const now = this.now();
     try {
       return await this.persistence.openGateSession({
         scope: input.scope,
         gateSessionId: input.gateSessionId,
-        fingerprintHash: this.#fingerprintHash(evidence),
+        ...(fingerprint ? { fingerprint } : {}),
+        ...(this.#hashSecret ? { verifyHashSecret: this.#hashSecret } : {}),
+        ...(input.authoritativeUserIntelligenceId
+          ? {
+            authoritativeUserIntelligenceId:
+              input.authoritativeUserIntelligenceId,
+          }
+          : {}),
         ...(input.trustedClientIp
           ? { ip: this.#normalizedIp(input.trustedClientIp) }
           : {}),
@@ -145,19 +158,6 @@ export class BotBlockerIngestionService {
     return result;
   }
 
-  #fingerprintHash(evidence: BrowserEvidence): string {
-    if (!this.#hashSecret) {
-      throw new BotBlockerRuntimeError(
-        "dependency_unavailable",
-        503,
-        true,
-      );
-    }
-    return createHmac("sha256", this.#hashSecret)
-      .update(`botblocker-fingerprint-v1\0${JSON.stringify(evidence)}`)
-      .digest("hex");
-  }
-
   #normalizedIp(value: string): string {
     const normalized = normalizeIp(value);
     if (!normalized) throw new BotBlockerRuntimeError("invalid_request", 400);
@@ -176,6 +176,12 @@ export class BotBlockerIngestionService {
 
 function parseEvidence(candidate: BrowserEvidence): BrowserEvidence {
   const parsed = BrowserEvidenceSchema.safeParse(candidate);
+  if (!parsed.success) throw new BotBlockerRuntimeError("invalid_request", 400);
+  return parsed.data;
+}
+
+function parseFingerprint(candidate: FingerprintVector): FingerprintVector {
+  const parsed = FingerprintVectorSchema.safeParse(candidate);
   if (!parsed.success) throw new BotBlockerRuntimeError("invalid_request", 400);
   return parsed.data;
 }

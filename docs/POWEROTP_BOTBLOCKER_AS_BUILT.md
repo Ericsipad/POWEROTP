@@ -34,10 +34,11 @@ locally, keep site credentials server-only, expose bounded same-origin bridge ro
 default every unbacked central capability to typed unavailable. The framework packages add
 credential-free React root helpers without rewriting application streams or uploads; the
 Next.js wrapper also provides native Node-runtime Proxy handling and App Router/discovery
-handlers. Phase 15 adds transactional, project-scoped visitor sessions, 30-day
+handlers. Phase 15 historically added transactional, project-scoped visitor sessions,
 server-keyed fingerprint matching, immutable sanitized behavior reports/risk events, strict
-sequence/idempotency handling, and the shipped 548-day retention behavior. IP is retained raw
-and is not required by the current fingerprint match. Its corrected analytics contract also
+sequence/idempotency handling, and the shipped 548-day retention behavior. Phase 17 now
+supersedes that inbound-hash matching path with raw fingerprint persistence and exact raw
+comparison. IP remains raw and is never identity authority. The corrected analytics contract also
 retains normalized click positions, bounded
 32×32 pointer-density/dwell bins, explicit page ID/name, active/total page time, navigation
 targets, and a server-derived query-free page URL for future project heatmap and navigation
@@ -47,13 +48,16 @@ still no proprietary profile scoring, customer score/OTP policy, OTP orchestrati
 Passport/PaidTokenPass implementation, billing/metering, production BotBlocker key, policy
 release, deployment, or traffic activation.
 
-**Approved design corrections not yet built.** The Phase 17 fingerprint contracts and
-once-per-gate-session browser collector are shipped, but the persistence/session-identity
-corrections are not. The Phase 17 design in
+**Approved design corrections partially built.** The Phase 17 fingerprint contracts,
+once-per-gate-session browser collector, raw `fingerprintData` persistence, bounded
+`userIntelligence` stable-source projection, and same-row versioned verify lookup derivation are
+shipped. The Phase 17 design in
 `POWEROTP_BOTBLOCKER_PHASE17_PROPRIETARY_SCORING_PLAN.md` supersedes several earlier design
-assumptions without rewriting their historical as-built entries. Current backend ingestion still
-derives a fingerprint HMAC before raw/profile persistence, uses that HMAC for profile matching,
-does not write the complete initial request as the first risk event, has no persistent
+assumptions without rewriting their historical as-built entries. Current backend ingestion no
+longer derives or stores an inbound fingerprint hash: it persists the raw vector, uses only exact
+raw comparison as the non-authoritative home fallback, and stores the sole fingerprint-derived
+hash on `userIntelligence` after projecting its approved row values. It still does not write the
+complete initial request as the first risk event, has no persistent
 user-intelligence-bound return cookie, does not refresh the 30-minute visitor token at minute 29,
 and still applies 548-day TTLs to sessions/risk events. The approved target keeps inbound IP and
 fingerprint data raw; binds through the signed site-return cookie, Passport, or exact raw
@@ -62,7 +66,7 @@ bearer and initiate/replace it on minute-29 refresh; derives the one versioned v
 from the stable-source values during `userIntelligence` row creation/update; uses verify as primary with the home
 `userIntelligence` lookup as fallback; changes session inputs to 90-day TTLs; aggregates accepted
 inputs; calculates the current `0..100` score; and notifies middleware through the signed
-callback/pull flow. Those target persistence and runtime corrections are not claimed as
+callback/pull flow. Those remaining target persistence and runtime corrections are not claimed as
 implemented here.
 
 The Phase 13 correction establishes a strict state-publication boundary. Middleware uses the
@@ -3404,3 +3408,43 @@ gate-session-to-`userIntelligence` synchronizer, current/prior IP update, scorin
 UI, callback, `riskEvents` reducer, external IP-vendor profile mapping, migration, seed,
 deployment, or traffic activation. No `.env` file was read or changed. No commit or push was
 performed; the working tree remains for user review.
+
+## 2026-08-18 — BotBlocker Phase 17 (partial): raw fingerprint persistence and verify lookup
+
+**Status: second Phase 17 production slice complete.** The rapid-auth path now validates and
+forwards the optional raw fingerprint vector to transactional persistence. The shared
+`fingerprintData` collection retains one current 548-day raw vector per `userIntelligence` row.
+Server observation time and gate-session-ID tie-breaking reject stale replacement, exact replay is
+idempotent at the fingerprint-row boundary, conflicting equal-order raw replacement is rejected,
+full scope is enforced, and transaction failure leaves no partial fingerprint/profile/session
+write. The collection has a unique profile relationship, scoped raw-lookup support, and TTL indexes.
+
+**Identity and hash boundary.** The former pre-persistence fingerprint HMAC and its copies on
+`gateSessions` and `fingerprintData` are removed. Without a trusted profile binding, home
+persistence may select an existing profile only by exact equality of the saved raw version,
+collector version, and complete component object; IP is not part of selection. A trusted
+server-held profile binding takes precedence. No fuzzy, partial, closest, subnet, IP-only, or
+inbound-hash match exists.
+
+For an accepted current vector, persistence projects only the approved bounded stable-source
+categories onto `userIntelligence`: normalized platform family; CPU architecture/bitness and
+collector architecture; optional mobile model; hardware concurrency; coarsened memory; maximum
+touch points; stable display class; bounded WebGL outputs; canvas/audio/font/font-preference
+outputs; and browser vendor/family without full versions. Existing successful source categories
+survive a later unavailable category. The versioned HMAC-SHA-256 lookup is then derived from that
+projected user-row object under `BOTBLOCKER_INTELLIGENCE_HASH_SECRET` and stored only as
+`fingerprintVerifyLookup` on the same row. Missing source fields or an unavailable key produce a
+typed unavailable lookup without dropping the raw vector. A changed accepted row source replaces
+the current lookup; no aliases are retained.
+
+**Focused verification.** `@powerotp/contracts` build passed and its suite passed **183/183**
+tests across 46 suites. `@powerotp/api` build passed and its final suite passed **314/314** tests
+across 87 suites. The touched `@powerotp/backend` server wiring passed `tsc --noEmit`. No
+full-repository verification was run.
+
+**Explicitly not shipped.** This slice does not claim the complete initial middleware request or
+initial immutable risk-event write, persistent site-return cookie, Passport binding, safe durable
+visitor-token metadata, minute-29 refresh, middleware bearer replacement, selected operator
+scoring-field synchronization, IP history/reuse aggregation, profile scoring, callbacks, reducer,
+external-vendor profile mapping, edge publication, or global verify Worker. No environment file,
+migration, seed, deployment, or customer traffic was changed. No commit or push was performed.

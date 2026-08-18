@@ -1,9 +1,21 @@
-import type { BotBlockerDecisionOutcome, BrowserEvidence } from "@powerotp/contracts";
+import type {
+  BotBlockerDecisionOutcome,
+  BrowserEvidence,
+  FingerprintVerifySource,
+  FingerprintVector,
+} from "@powerotp/contracts";
 import type { Db, MongoClient } from "mongodb";
 
 import {
+  deriveFingerprintVerifyLookup,
+  projectFingerprintVerifySource,
+} from "./botblocker-fingerprint-hash.js";
+import {
+  FingerprintPersistence,
+  FingerprintPersistenceError,
+} from "./botblocker-fingerprint-persistence.js";
+import {
   BotBlockerIntelligencePersistence,
-  botBlockerMatchCutoff,
   botBlockerRetentionExpiresAt,
   createUserIntelligenceId,
   type BotBlockerScope,
@@ -15,7 +27,13 @@ import {
 } from "./botblocker-intelligence-persistence.js";
 
 export class BotBlockerSessionPersistenceError extends Error {
-  constructor(readonly code: "scope_mismatch" | "session_not_found") {
+  constructor(
+    readonly code:
+      | "scope_mismatch"
+      | "session_not_found"
+      | "authoritative_binding_not_found"
+      | "conflicting_replay",
+  ) {
     super(code);
     this.name = "BotBlockerSessionPersistenceError";
   }
@@ -25,6 +43,7 @@ export class BotBlockerSessionPersistence {
   readonly #client: MongoClient;
   readonly #gateSessions;
   readonly #userIntelligence;
+  readonly #fingerprints: FingerprintPersistence;
   readonly #reads: BotBlockerIntelligencePersistence;
 
   constructor(db: Db, client: MongoClient) {
@@ -32,6 +51,7 @@ export class BotBlockerSessionPersistence {
     this.#gateSessions = db.collection<GateSessionDocument>("gateSessions");
     this.#userIntelligence =
       db.collection<UserIntelligenceDocument>("userIntelligence");
+    this.#fingerprints = new FingerprintPersistence(db);
     this.#reads = new BotBlockerIntelligencePersistence(db);
   }
 
@@ -42,7 +62,13 @@ export class BotBlockerSessionPersistence {
   async openGateSession(input: {
     scope: BotBlockerScope;
     gateSessionId: string;
-    fingerprintHash: string;
+    fingerprint?: FingerprintVector;
+    /** Independent server-only HMAC key. It is used only after stable source
+     * values have been projected onto the user-intelligence row. */
+    verifyHashSecret?: string;
+    /** Trusted server-held binding only. This value is never read from a
+     * browser payload. */
+    authoritativeUserIntelligenceId?: string;
     ip?: string;
     evidence: BrowserEvidence;
     /** Set only when the fast-immediate branch's network intelligence
@@ -71,42 +97,77 @@ export class BotBlockerSessionPersistence {
           return;
         }
 
-        const matched = input.ip
-          ? await this.#userIntelligence.findOne(
-            {
-              ...input.scope,
-              fingerprintHash: input.fingerprintHash,
-              "ipObservations.ip": input.ip,
-              lastObservedAt: { $gte: botBlockerMatchCutoff(input.now) },
-            },
-            { session, sort: { lastObservedAt: -1 } },
-          )
-          : null;
-        const userId = matched?._id ?? userIntelligenceId;
-        if (matched) {
-          await this.#userIntelligence.updateOne(
-            { _id: matched._id, ...input.scope },
-            {
-              $set: {
-                ipObservations: updateIpObservations(
-                  matched.ipObservations,
-                  input.ip,
-                  input.now,
-                ),
-                latestEvidence: input.evidence,
-                lastObservedAt: input.now,
-                updatedAt: input.now,
-                retentionExpiresAt: botBlockerRetentionExpiresAt(input.now),
-              },
-              $inc: { gateSessionCount: 1 },
-            },
+        let matched: UserIntelligenceDocument | null = null;
+        if (input.authoritativeUserIntelligenceId) {
+          const bound = await this.#userIntelligence.findOne(
+            { _id: input.authoritativeUserIntelligenceId },
             { session },
           );
-        } else {
+          if (!bound) {
+            throw new BotBlockerSessionPersistenceError(
+              "authoritative_binding_not_found",
+            );
+          }
+          if (!sameScope(bound, input.scope)) {
+            throw new BotBlockerSessionPersistenceError("scope_mismatch");
+          }
+          matched = bound;
+        } else if (input.fingerprint) {
+          const fingerprintMatch = await this.#fingerprints.findExactVector(
+            input.scope,
+            input.fingerprint,
+            session,
+          );
+          if (fingerprintMatch) {
+            matched = await this.#userIntelligence.findOne(
+              { _id: fingerprintMatch.userIntelligenceId, ...input.scope },
+              { session },
+            );
+            if (!matched) {
+              throw new BotBlockerSessionPersistenceError("session_not_found");
+            }
+          }
+        }
+        const userId = matched?._id ?? userIntelligenceId;
+        let fingerprintAccepted = false;
+
+        if (input.fingerprint) {
+          try {
+            const write = await this.#fingerprints.writeCurrent(
+              {
+                scope: input.scope,
+                userIntelligenceId: userId,
+                gateSessionId: input.gateSessionId,
+                vector: input.fingerprint,
+                observedAt: input.now,
+              },
+              session,
+            );
+            fingerprintAccepted = write.outcome === "accepted";
+          } catch (error) {
+            if (error instanceof FingerprintPersistenceError) {
+              throw new BotBlockerSessionPersistenceError(
+                error.code === "scope_mismatch"
+                  ? "scope_mismatch"
+                  : "conflicting_replay",
+              );
+            }
+            throw error;
+          }
+        }
+
+        const fingerprintProfile = fingerprintAccepted && input.fingerprint
+          ? fingerprintProfileFields(
+            matched?.fingerprintVerifySource,
+            input.fingerprint,
+            input.verifyHashSecret,
+          )
+          : {};
+        if (!matched) {
           const intelligence: UserIntelligenceDocument = {
             _id: userId,
             ...input.scope,
-            fingerprintHash: input.fingerprintHash,
+            ...fingerprintProfile,
             ipObservations: updateIpObservations([], input.ip, input.now),
             latestEvidence: input.evidence,
             gateSessionCount: 1,
@@ -121,13 +182,32 @@ export class BotBlockerSessionPersistence {
             retentionExpiresAt: botBlockerRetentionExpiresAt(input.now),
           };
           await this.#userIntelligence.insertOne(intelligence, { session });
+        } else {
+          await this.#userIntelligence.updateOne(
+            { _id: matched._id, ...input.scope },
+            {
+              $set: {
+                ipObservations: updateIpObservations(
+                  matched.ipObservations,
+                  input.ip,
+                  input.now,
+                ),
+                latestEvidence: input.evidence,
+                lastObservedAt: input.now,
+                updatedAt: input.now,
+                retentionExpiresAt: botBlockerRetentionExpiresAt(input.now),
+                ...fingerprintProfile,
+              },
+              $inc: { gateSessionCount: 1 },
+            },
+            { session },
+          );
         }
 
         result = {
           _id: input.gateSessionId,
           ...input.scope,
           userIntelligenceId: userId,
-          fingerprintHash: input.fingerprintHash,
           ...(input.ip ? { ip: input.ip } : {}),
           state: "active",
           ...(input.latestDecision ? { latestDecision: input.latestDecision } : {}),
@@ -151,6 +231,27 @@ export class BotBlockerSessionPersistence {
     }
     return result;
   }
+}
+
+function fingerprintProfileFields(
+  current: FingerprintVerifySource | undefined,
+  vector: FingerprintVector,
+  secret: string | undefined,
+): Pick<
+  UserIntelligenceDocument,
+  "fingerprintVerifySource" | "fingerprintVerifyLookup"
+> {
+  const fingerprintVerifySource = {
+    ...current,
+    ...projectFingerprintVerifySource(vector),
+  };
+  return {
+    fingerprintVerifySource,
+    fingerprintVerifyLookup: deriveFingerprintVerifyLookup(
+      fingerprintVerifySource,
+      secret,
+    ),
+  };
 }
 
 function sameScope(
