@@ -272,14 +272,15 @@ evaluator may expose transient numeric inputs without persisting redundant deriv
 - current ASN score;
 - number of distinct prior IPs (`recentIpHistory.length`);
 - average prior-IP ASN score:
-  `sum(recentIpHistory[].asnScore) / recentIpHistory.length`;
+  `sum(available recentIpHistory[].asnScore) / number of available prior ASN scores`;
 - operator-configured aggregation of the stored `blacklisted` booleans; and
 - the six global/same-site 1/7/30-day reuse counts.
 
 The current IP is excluded from the prior-IP average. When history is empty, prior-IP count is
 the real value `0`, while prior-IP ASN average and blacklist ratio-style calculations are
-unavailable and omitted to prevent division by zero. No hardcoded score contribution, formula,
-weight, or threshold is supplied by this plan.
+unavailable and omitted to prevent division by zero. If history exists but none of its entries
+has an ASN score, the prior-IP ASN average is likewise unavailable and omitted. No hardcoded
+score contribution, formula, weight, or threshold is supplied by this plan.
 
 ## External IP-reputation data
 
@@ -342,7 +343,8 @@ The MongoDB transaction must:
 5. update selected latest-successful fingerprint fields;
 6. update current IP/history and exact-IP reuse counts;
 7. refresh applicable retention timestamps; and
-8. trigger current score recalculation from the changed `userIntelligence` row.
+8. commit before current score recalculation or callback behavior uses the changed
+   `userIntelligence` row.
 
 The conditional gate-session marker is the primary idempotency boundary. Concurrent exact
 replays must produce one applied update and one idempotent duplicate result.

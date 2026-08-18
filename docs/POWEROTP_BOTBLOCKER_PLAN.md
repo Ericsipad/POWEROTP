@@ -1,7 +1,7 @@
 # PowerOTP BotBlocker Development Plan
 
-Last updated: 2026-08-15 (locked the state-publication-only integration boundary, broad
-fingerprint collection, and callback-first OTP status; execution remains governed by
+Last updated: 2026-08-17 (locked the state-publication-only integration boundary, bounded
+fingerprint persistence/gate-session synchronization, and callback-first OTP status; execution remains governed by
 [`POWEROTP_BOTBLOCKER_DEVELOPMENT_PHASES.md`](POWEROTP_BOTBLOCKER_DEVELOPMENT_PHASES.md))
 
 Execution is split into small, dependency-ordered fresh-session phases in
@@ -86,8 +86,9 @@ and a previous `allow` or clearance may be revised to `otp`.
   These labels never cause POWEROTP code to alter customer content or access.
 - Every visitor is reassessed continuously, not just once: an initial browser/behavior report
   five seconds after load, recurring reports every 30 seconds, and partial reports on route
-  navigation, page hide, close, or site exit. Every report is saved to the visitor's session
-  and aggregated into its `userIntelligence` profile before scoring is rerun. Any update may
+  navigation, page hide, close, or site exit. Every accepted report is saved to the visitor's
+  session. Approved profile updaters synchronize their available fields before scoring is rerun;
+  a missing or not-yet-mapped field is omitted and never blocks the entire score. Any update may
   revise a prior `allow` or valid clearance to `otp`. If the profile is identity-bound, the
   same authoritative risk change may suspend its Passport or paid-agent fast path until the
   server-defined OTP/recovery requirement succeeds; browser middleware reports evidence but
@@ -292,6 +293,7 @@ Add durable, decaying entities instead of one global bad-IP flag:
 - `siteSessions`
 - `deviceReputations`
 - `networkReputations`
+- `fingerprintData` (one current bounded full fingerprint vector per `userIntelligence` profile)
 - `identityBindings` (authoritative association from one or more project-scoped
   `userIntelligence` profiles to an opaque/keyed internal user reference)
 - `riskEvents`
@@ -408,12 +410,22 @@ After an access recommendation, the runtime sensor:
   proof.
 
 Behavior reports above are not the complete browser-fingerprint specification. BotBlocker also
-collects a separate, versioned broad browser/device vector for session storage and later
-server-side exact matching. A pinned FingerprintJS v5 collector is mapped into POWEROTP-owned,
-closed, bounded contracts. Available components include UA Client Hints, screen/device/hardware
-properties, platform/architecture, timezone/languages, supported browser capabilities, WebGL,
-canvas, audio, and font outputs. Frequently changing components remain useful profile evidence
-but are excluded from the exact lookup HMAC.
+collects a separate, versioned broad browser/device vector once per new gate session for later
+server-side exact matching. Exactly pinned `@fingerprintjs/fingerprintjs` v5.2.0 runs with
+monitoring disabled and is mapped into POWEROTP-owned, closed, bounded contracts. Its visitor ID
+and confidence result are discarded; component failures become bounded typed availability rather
+than arbitrary retained errors. Available components include UA Client Hints,
+screen/device/hardware properties, platform/architecture, timezone/languages, supported browser
+capabilities, WebGL, canvas, audio, and font outputs.
+
+The complete current vector is retained for 548 days in the shared platform-level
+`fingerprintData` collection, one record per `userIntelligence` profile. A newer accepted gate
+session replaces the current vector; no five-/30-second fingerprint-document stream or historical
+hash-alias list exists. The hot `userIntelligence` row receives only the approved selected
+latest-successful fields: `osCpu`, screen width/height, `platform`, the three `touchSupport`
+values, `vendor`, `architecture`, and `applePay`. An unavailable newer component leaves the last
+successful selected profile value unchanged. Frequently changing components may remain useful
+bounded evidence but are excluded from the exact lookup HMAC.
 
 The server canonicalizes only the approved stable subset and derives one keyed exact HMAC; a
 browser-provided fingerprint hash or library visitor ID is never accepted as authoritative
@@ -435,18 +447,33 @@ rotation prevents cookie matching from being an enforcement mechanism.
 
 Versioned immutable sensor assets are selected through signed policy.
 
-Accepted session inputs update the linked `userIntelligence` profile through a separately
-designed operator-admin conversion layer. Numeric fields use cumulative running averages; direct
-fields update directly. Profiles also keep separate system-wide and same-site exact-IP profile
-counts for 1, 7, and 30 days. A second operator-admin layer enables scoreable profile fields,
-applies validated restricted math and weights, then applies a validated final-total expression to
-produce the current `0..100` risk score. Unconfigured scoring is typed unavailable. Only the
-current aggregate and score are stored; score history and scoring-model versions are not.
+Accepted gate-session inputs update the linked `userIntelligence` profile through fixed,
+schema-driven synchronization, not an operator-authored conversion-formula layer. The profile
+keeps the current exact trusted IP and a unique LRU of at most 20 prior IPs, each with that
+observation's optional configured ASN score and explicit exact-IP blacklist result. It also keeps
+separate system-wide and same-site distinct-profile counts for the current exact IP over 1, 7,
+and 30 days. IP history is risk evidence only and never selects, merges, automatically flags, or
+blacklists a profile.
+
+Apply fingerprint/session synchronization at most once per accepted gate session in one MongoDB
+transaction that validates full scope, conditionally marks the synchronization, updates the linked
+`fingerprintData` and `userIntelligence` rows, and commits before score or callback use. Server
+observation time plus a gate-session-ID tie-breaker prevents stale sessions from overwriting newer
+direct fields; concurrent IP changes cannot lose an accepted update, and failure leaves no partial
+state.
+
+The detailed `riskEvents` behavior/risk reducer remains separately deferred until its field
+mappings and aggregation semantics are approved. External IP-vendor profile fields likewise wait
+for selection of a real vendor and approval of bounded fields; raw vendor payloads remain in the
+vendor cache. Missing fields from either future updater do not block scoring. The separate
+operator scoring layer enables approved present profile fields, applies validated restricted math
+and nonnegative weights, then applies a validated final-total expression to produce the current
+`0..100` risk score. Unconfigured scoring is typed unavailable. Only the current aggregate and
+score are stored; score history and scoring-model versions are not.
 
 `gateSessions` plus linked immutable `riskEvents` form one logical session dataset while remaining
 physically split to avoid unbounded MongoDB documents. Both expire after 90 days.
-`userIntelligence` remains an 18-month aggregate profile. Newer numeric observations dilute older
-ones through the running average; there is no separate time-decay curve.
+`fingerprintData` and `userIntelligence` remain 548-day/18-month current records.
 
 ### OTP integration
 
@@ -735,9 +762,8 @@ session/CSRF/project-ownership boundary instead.
   project authorization on every management route and safe rendering on every hosted response.
 - Keep ad-revenue qualification server-authoritative and resistant to self-clicks, automated
   click inflation, replay, and customer/visitor collusion.
-- Retain gate-session headers and linked behavior/risk-event inputs for 90 days; retain aggregated
-  `userIntelligence` profiles for 548 days. Numeric profile evidence uses cumulative running
-  averages, not a separate time-decay curve.
+- Retain gate-session headers and linked behavior/risk-event inputs for 90 days; retain current
+  `fingerprintData` and aggregated `userIntelligence` records for 548 days.
 - Perform privacy/legal review before cross-site reputation launch.
 - See [`THREAT_MODEL.md`](THREAT_MODEL.md#botblocker-threat-model) for the full BotBlocker
   threat model, including the state-publication/customer-control boundary, API-key

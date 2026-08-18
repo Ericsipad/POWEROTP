@@ -25,9 +25,11 @@ approve. Phase 17 must correct them rather than build on them:
    profiles and is used only as a risk/correlation input.
 4. **No separate confidence model exists.** The current profile score is calculated from
    operator-selected profile fields. Missing fields are excluded from the calculation.
-5. **No mathematical time-decay curve exists.** Numeric profile fields use cumulative running
-   averages, so newer observations dilute older observations. Direct fields update directly.
-   Elapsed time alone does not change an average.
+5. **Gate-session synchronization is fixed and schema-driven.** Selected fingerprint fields use
+   latest-successful replacement, IP evidence uses current-value and bounded unique-LRU rules,
+   and exact-IP reuse uses rolling distinct-profile counts. This is not an operator-authored
+   conversion-formula layer. The separate `riskEvents` behavior reducer remains deferred until
+   its fields and aggregation semantics are explicitly designed.
 6. **No score-model/input version is stored.** Scoring configuration is live operator
    configuration. Browser fingerprint contracts and hash recipes remain versioned because those
    are client/sensor compatibility boundaries.
@@ -42,7 +44,8 @@ approve. Phase 17 must correct them rather than build on them:
    notifications rather than creating another callback system.
 10. **Session input retention is 90 days.** `gateSessions` and linked `riskEvents` form one
     logical session dataset but remain physically split to avoid unbounded MongoDB documents.
-    Both use 90-day TTLs. The aggregated `userIntelligence` profile remains 18 months (548 days).
+    Both use 90-day TTLs. The shared `fingerprintData` record and aggregated
+    `userIntelligence` profile remain 18 months (548 days).
 
 ## Identity and exact matching
 
@@ -64,9 +67,12 @@ security analysis.
 
 ## Browser fingerprint collection
 
-Use a pinned FingerprintJS v5 release as a component collector. POWEROTP owns the wire/storage
-contract and maps the library output into closed, bounded, versioned schemas. POWEROTP does not
-trust or persist FingerprintJS's client-generated visitor ID as identity authority.
+Use exactly `@fingerprintjs/fingerprintjs` v5.2.0, pinned rather than ranged, as a component
+collector. Initialize it with `monitoring: false` and run its expensive probes once per newly
+created gate session. POWEROTP owns the wire/storage contract and maps the library output into
+closed, bounded, versioned schemas. POWEROTP discards the library `visitorId` and confidence
+result, and maps collector failures to bounded typed availability rather than retaining arbitrary
+error objects.
 
 Collect available values from:
 
@@ -103,48 +109,53 @@ The server performs canonicalization and HMAC derivation using
 `BOTBLOCKER_INTELLIGENCE_HASH_SECRET`. Browser-supplied hashes and visitor IDs are never
 authoritative.
 
-## Session data and profile aggregation
+## Session data and profile synchronization
 
 `gateSessions` remains the small session header. Immutable accepted behavior reports and risk
 signals remain linked `riskEvents` documents. Both are one logical session dataset and expire
 after 90 days. This preserves indexed idempotency/order checks and avoids MongoDB's 16 MB document
 limit.
 
-`userIntelligence` remains the 18-month aggregated profile and gains:
+The approved gate-session synchronization design is now durable in
+[`POWEROTP_BOTBLOCKER_PHASE17A_SESSION_INPUT_REDUCER_PLAN.md`](POWEROTP_BOTBLOCKER_PHASE17A_SESSION_INPUT_REDUCER_PLAN.md).
+Despite that historical filename, it does not design the separate `riskEvents` reducer.
 
-- the versioned latest broad fingerprint vector and current stable fingerprint HMAC;
-- current direct fields, such as the latest observed display/browser properties;
-- numeric running averages with the observation count needed for deterministic updates;
-- exact IP observations;
-- distinct system-wide exact-IP profile counts for the latest 1, 7, and 30 days;
-- distinct same-site exact-IP profile counts for the latest 1, 7, and 30 days;
-- the current `0..100` risk score and score availability status.
+The complete bounded FingerprintJS vector lives in the shared platform-level `fingerprintData`
+collection, with one current record per `userIntelligence` row and 548-day retention. A newer
+accepted gate session replaces that current vector; the system does not create fingerprint rows
+at five- or 30-second report cadence and retains no historical hash aliases. Only these
+latest-successful values are copied to the hot `userIntelligence` row under the same field names:
+`osCpu`, `screenResolution.width`, `screenResolution.height`, `platform`,
+`touchSupport.maxTouchPoints`, `touchSupport.touchEvent`, `touchSupport.touchStart`, `vendor`,
+`architecture`, and `applePay`. An unavailable newer component leaves the last successful
+profile value unchanged.
 
-For a numeric observation:
+`userIntelligence` also gains the current exact trusted IP with that observation's optional
+configured ASN score and explicit exact-IP blacklist result, plus a unique LRU of at most 20
+prior IP entries carrying those same values. The current IP is excluded from prior-IP aggregates.
+Maintain separate distinct-profile counts for that exact current IP across all websites and on
+the same website over 1, 7, and 30 days. IP history is risk evidence only; it never identifies,
+merges, automatically flags, or blacklists a profile.
 
-`newAverage = ((oldAverage * oldCount) + newValue) / (oldCount + 1)`
+Apply this synchronization at most once per accepted gate session in one MongoDB transaction.
+The transaction validates complete scope, conditionally marks synchronization applied, updates
+the linked `fingerprintData` and `userIntelligence` rows, refreshes retention, and commits before
+scoring or callback behavior uses the result. Server observation time orders competing sessions,
+with `gateSessionId` as the deterministic equal-time tie-breaker. Exact replay is a no-op, stale
+sessions cannot overwrite newer direct values, concurrent IP changes cannot lose an accepted
+update, and database failure leaves no partial synchronization.
 
-No prior profile scores or calculated score contributions are retained. The existing immutable
-session inputs remain available for the 90-day session-history period, but profile scoring uses
-the current aggregate row.
+The detailed `riskEvents` behavior/risk mapping remains deferred to a dedicated design and
+implementation session. It must explicitly map routes/pages, click categories and normalized
+positions, mouse and scroll aggregates, honeypots, page timing/dimensions, pointer heatmaps,
+navigation targets, automation indicators, and risk-event kinds. Missing fields from that future
+updater do not block scoring; the evaluator uses present fields and omits unavailable inputs.
 
-## Deferred design: session input to user-intelligence updates
-
-Before implementing profile aggregation, run one dedicated fresh design session that inventories
-the exact current and new `behavior_report`/`risk_signal` inputs. That session must define:
-
-- the approved source fields and target `userIntelligence` fields;
-- whether each target is a running average, incrementing count, direct replacement, or unique
-  exact-value observation;
-- the operator admin configuration required to convert accepted session input into each profile
-  update;
-- whether and how one conversion may combine multiple values from the same accepted report;
-- finite-value, range, overflow, division-by-zero, and missing-input behavior;
-- atomic sequence/idempotency semantics proving stale/replayed reports cannot update a profile
-  twice.
-
-Do not invent this formula mapping in implementation. Save its approved design as a Phase 17
-subplan before writing the reducer.
+External IP-reputation fields are also deferred. FingerprintJS supplies none. The current
+gate-session synchronizer uses trusted middleware IP, local network/ASN resolution, and the
+explicit exact-IP blacklist observation, but does not copy vendor-cache payloads into
+`userIntelligence`. A later session must select the real vendor, approve bounded profile fields,
+keep raw vendor payloads in the vendor cache, and register only approved fields for scoring.
 
 ## Profile scoring configuration
 
@@ -229,23 +240,27 @@ profile scores on verify servers. This plan defines the source data but does not
 
 ## Execution breakdown
 
-Phase 17 exceeds one fresh-session unit and must be split before implementation:
+The approved Phase 17A design is complete, but implementation has not started. Execute the
+remaining work in dependency-ordered fresh sessions:
 
-1. **17A — Session-input reducer design.** Inventory actual report/risk shapes; approve and save
-   the session-input-to-profile admin formula/aggregation subplan.
-2. **17B — Fingerprint contracts and sensor.** Add pinned FingerprintJS component collection,
-   POWEROTP-owned bounded contracts, stable canonical HMAC derivation, and exact matching changes.
-3. **17C — Retention and profile aggregation.** Apply 90-day session-input TTLs, expand
-   `userIntelligence`, add exact global/site IP reuse counts, and implement the approved reducer.
-4. **17D — Scoring configuration and admin UI.** Add the safe expression configuration,
-   per-field enable/weight controls, final formula, validation, and typed-unavailable readiness.
-5. **17E — Runtime scoring.** Recalculate on every accepted update and return the initial current
-   score after blacklist precedence within the existing timeout behavior.
-6. **17F — Project callback updates.** Extend the existing per-project signed callback queue and
-   adapter receiver/pull flow for idempotent session-data-ready events.
-7. **17G — Closing verification and documentation.** Run focused verification per touched
-   workspace, update the as-built log only for work actually shipped, and correct this execution
-   list's statuses.
+1. **Fingerprint contracts and collector.** Add the exact pinned FingerprintJS dependency,
+   monitoring-disabled once-per-new-session collection, bounded versioned POWEROTP contracts,
+   typed component availability, and prohibited-data tests.
+2. **`fingerprintData` persistence and stable HMAC.** Add the shared one-record-per-profile
+   collection, canonical stable-subset HMAC derivation, authoritative/exact matching updates,
+   replacement/no-alias semantics, retention, and concurrency tests.
+3. **Gate-session profile synchronization and IP evidence.** Add explicit blacklist observation,
+   selected latest-successful fingerprint fields, current IP, the 20-entry unique prior-IP LRU,
+   global/same-site rolling counts, and transactional at-most-once application.
+4. **Scoring configuration/runtime.** Add the approved field registry, restricted validated math,
+   nonnegative weights, final formula, present-field evaluation, current-score replacement, and
+   typed-unavailable behavior without invented defaults.
+5. **Project callback/pull.** Extend the existing signed project callback and scoped-token pull
+   boundary after committed profile/score updates.
+6. **Deferred `riskEvents` reducer.** Run its dedicated field-by-field design session before
+   implementing behavior/risk profile mappings.
+7. **Deferred external IP profile/scoring integration.** Select and confirm a real vendor first,
+   approve its bounded fields, then append approved profile inputs and scoring registration.
 
 Never begin a later subphase in the same fresh session. Never commit, push, deploy, populate
 operator formulas, or activate customer traffic without explicit instruction.

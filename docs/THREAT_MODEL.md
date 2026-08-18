@@ -127,7 +127,8 @@ in [`POWEROTP_BOTBLOCKER_AS_BUILT.md`](POWEROTP_BOTBLOCKER_AS_BUILT.md) says so.
 
 - Site clearance tokens, signed policy releases, and BotBlocker Ed25519 signing/verification
   keys.
-- Sanitized browser/behavior telemetry, derived risk signals, and scoring model inputs.
+- Sanitized browser/behavior telemetry, the shared `fingerprintData` records, derived risk
+  signals, and scoring model inputs.
 - Cross-project fraud/security intelligence and each customer's own project-scoped visitor
   data.
 - Supabase Enterprise account/Passport identity records, MongoDB `identityBindings`, per-client
@@ -501,11 +502,19 @@ its 548-day TTL from accepted activity.
 The fingerprint lookup value is an HMAC-SHA-256 hash derived only on the server under the
 independent `BOTBLOCKER_INTELLIGENCE_HASH_SECRET`; browser-supplied fingerprint hashes are never
 a durable identity authority. Fingerprint material is a separate broad, bounded, versioned
-browser/device vector collected through a pinned FingerprintJS v5 component collector and mapped
-into POWEROTP-owned contracts. The exact lookup HMAC includes only the approved comparatively
-stable subset; changing browser/OS versions, timezone, language order, window geometry, privacy
-preferences, behavior evidence, and IP are excluded from that HMAC but may remain bounded profile
-evidence.
+browser/device vector collected once per new gate session through exactly pinned
+`@fingerprintjs/fingerprintjs` v5.2.0 with monitoring disabled and mapped into POWEROTP-owned
+contracts. The library visitor ID and confidence result are discarded. Component failures are
+reduced to bounded typed availability; arbitrary raw collector errors are not retained.
+
+The full current vector is stored in the shared `fingerprintData` collection, one 548-day record
+per `userIntelligence` profile. It is replaced by a newer accepted gate session and is not copied
+wholesale onto the hot profile row, emitted every five/30 seconds, or retained as historical hash
+aliases. Only the approved selected latest-successful fields are synchronized to
+`userIntelligence`; a missing newer component cannot erase a prior successful selected value. The
+exact lookup HMAC includes only the approved comparatively stable subset. Changing browser/OS
+versions, timezone, language order, window/frame geometry, privacy preferences, storage state,
+behavior evidence, and IP are excluded from that HMAC but may remain bounded evidence.
 
 The trusted request IP is retained raw (not hashed): it is not treated as identity/PII because it
 is never linked to a Supabase account record, and the platform's own design explicitly needs the
@@ -516,10 +525,33 @@ identity. When authoritative proof identifies a profile and the stable HMAC chan
 row's current HMAC. There is no fuzzy, closest-match, partial-hash, subnet-identity, or IP-only
 identity path.
 
-Each profile keeps separate exact-IP reuse counts across all projects and within the same site for
-the latest 1, 7, and 30 days. Those counts are risk inputs, not identity authority. CGNAT-private
-addresses are not observable at POWEROTP, and IPv4/IPv6 family is a lookup/storage distinction,
-not risk by itself.
+Each profile keeps the current exact trusted IP and a unique LRU of at most 20 prior IPs. Each
+entry carries only that observation's optional configured ASN score and explicit dedicated
+exact-IP blacklist result; decision status is never used to infer blacklist membership. A same-IP
+observation refreshes current values without appending history. An IP change moves the outgoing
+current entry to newest history, removes duplicate occurrences, and trims the least-recent entry.
+No per-IP timestamps, observation counts, reuse counts, historical ASN averages, or blacklist
+ratios are persisted.
+
+Profiles also keep separate distinct-profile reuse counts for the current exact IP across all
+websites and within the same website for the latest 1, 7, and 30 days. Scoring may transiently
+derive prior-IP count, prior ASN average, configured blacklist calculations, and those six reuse
+counts. An empty history has a real count of zero, while averages/ratios are unavailable rather
+than divided by zero. IP history and counts are risk inputs, not identity authority; they do not
+automatically flag or blacklist an IP. CGNAT-private addresses are not observable at POWEROTP,
+and IPv4/IPv6 family is a lookup/storage distinction, not risk by itself.
+
+Fingerprint/session synchronization is applied at most once per accepted gate session in one
+MongoDB transaction scoped to customer/project/site/session. The transaction conditionally marks
+application, updates only the linked `fingerprintData` and `userIntelligence` rows, refreshes
+retention, and commits before scoring or callback use. Server observation time and a deterministic
+gate-session-ID tie-breaker prevent stale overwrite; exact replay is a no-op, concurrent IP
+changes cannot lose an accepted update, and database failure leaves no partial synchronization.
+
+Detailed `riskEvents` behavior mapping remains a separately approved future reducer. External
+IP-vendor profile/scoring fields also remain deferred until a real vendor and bounded field set are
+approved; raw vendor payloads remain in the vendor cache. Missing fields from either source are
+omitted from scoring and never block the evaluator or callback path.
 
 ### Public MCP generator
 

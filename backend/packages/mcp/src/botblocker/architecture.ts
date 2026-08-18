@@ -76,9 +76,9 @@ export function getBotBlockerDataBoundary() {
       webhookSigningSecret:
         "Independent 256-bit callback secret per project, shown once in the atomic project creation " +
         "response and stored encrypted at rest. It verifies POWEROTP's signed project callback " +
-        "events, including challenge-status and planned BotBlocker session-data-ready notifications. " +
-        "A callback notification is not visitor authority; the adapter pulls current session data " +
-        "with that visitor's scoped token.",
+        "events, including challenge-status events. BotBlocker session-data-ready notifications are " +
+        "currently unavailable. A callback notification is not visitor authority; the adapter pulls " +
+        "current session data with that visitor's scoped token.",
       returningVisitorInstantAllowCookie:
         "A visitor who already received an `allow` gets a signed, long-lived cookie; on a later " +
         "visit the adapter verifies that cookie's signature entirely on its own server and " +
@@ -93,15 +93,16 @@ export function getBotBlockerDataBoundary() {
     },
     fingerprintBoundary: {
       collected:
-        "The approved Phase 17 design separates broad, bounded, versioned browser/device " +
-        "fingerprint components from behavior reports. The Mongo master retains those components; " +
-        "page content, form values, raw keystrokes, clicked text, and pointer trails remain prohibited.",
+        "Broad, bounded, versioned browser/device fingerprint components are separate from behavior " +
+        "reports. When collection is available, the Mongo master retains those components; page " +
+        "content, form values, raw keystrokes, clicked text, and pointer trails remain prohibited.",
       exactLookup:
         "POWEROTP derives one server-side keyed HMAC from the approved stable component subset. " +
         "Authoritative binding wins first; otherwise only an exact HMAC may match. IP alone never " +
         "merges profiles, and no browser/library visitor ID or fuzzy match is authoritative.",
       implementationStatus:
-        "This corrected fingerprint boundary is Phase 17 design, not currently shipped behavior.",
+        "Expanded fingerprint component collection and stable-subset exact lookup are currently " +
+        "unavailable in the public integration.",
     },
     prohibitedInOutput: [
       "customer credentials or account state",

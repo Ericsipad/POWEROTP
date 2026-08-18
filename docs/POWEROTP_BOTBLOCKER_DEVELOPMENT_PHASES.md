@@ -354,34 +354,47 @@ admin audit, lookup, and signed snapshots. Allowlist maps to `allow`; blacklist 
 
 **Design status:** approved and saved in
 [`POWEROTP_BOTBLOCKER_PHASE17_PROPRIETARY_SCORING_PLAN.md`](POWEROTP_BOTBLOCKER_PHASE17_PROPRIETARY_SCORING_PLAN.md);
-implementation has not started.
+the approved gate-session synchronization subplan is saved in
+[`POWEROTP_BOTBLOCKER_PHASE17A_SESSION_INPUT_REDUCER_PLAN.md`](POWEROTP_BOTBLOCKER_PHASE17A_SESSION_INPUT_REDUCER_PLAN.md).
+Despite its historical filename, that subplan does not design the separate `riskEvents` reducer.
+Implementation has not started.
 
 Correct the incomplete fingerprint boundary first: collect and retain a broad, bounded,
-versioned browser/device vector using pinned FingerprintJS v5 components mapped into
-POWEROTP-owned contracts. Derive one exact server-side HMAC from the approved stable subset.
-Profile matching uses an authoritative binding first, otherwise that exact HMAC; IP alone never
-merges profiles. When authoritative proof sees a changed stable hash, replace the row's current
-hash.
+versioned browser/device vector using exactly pinned `@fingerprintjs/fingerprintjs` v5.2.0 with
+monitoring disabled and expensive probes run once per new gate session. FingerprintJS is only a
+component collector: discard its visitor ID and confidence result, map failures to bounded typed
+availability, and derive one exact server-side HMAC from the approved stable subset. Profile
+matching uses an authoritative binding first, otherwise that exact HMAC; IP alone never merges
+profiles. When authoritative proof sees a changed stable hash, replace the current hash without
+retaining aliases.
 
-Before implementing aggregation, run the dedicated Phase 17A design session that inventories the
-actual accepted behavior/risk-event shapes and defines the operator-admin formulas and aggregation
-semantics that convert each accepted session input into a `userIntelligence` update. Do not invent
-that mapping. Keep `gateSessions` and linked `riskEvents` physically split but treat them as one
-logical 90-day session dataset; keep aggregated `userIntelligence` profiles for 548 days.
+Store one current complete bounded component vector per profile in the shared `fingerprintData`
+collection, retained for 548 days. Do not place the full vector on the hot `userIntelligence` row
+or create fingerprint rows at five-/30-second behavior-report cadence. The fixed gate-session
+synchronizer copies only the approved latest-successful fingerprint fields, maintains current IP
+and at most 20 unique prior IP entries with observation-time ASN/blacklist values, and refreshes
+separate global and same-site exact-IP distinct-profile counts for 1, 7, and 30 days. Apply it at
+most once per accepted gate session in one transaction before scoring/callback use. Keep
+`gateSessions` and linked `riskEvents` as one logical 90-day session dataset.
 
-Maintain cumulative running averages and direct profile fields, plus separate system-wide and
-same-site exact-IP profile counts for 1, 7, and 30 days. A second operator-admin configuration
-selects scoreable profile fields, validated restricted math, weights, and a validated final-total
-formula. Recalculate and overwrite the profile's one current `0..100` score on every accepted
-update. Missing inputs are excluded; unconfigured scoring is typed unavailable. Store no prior
-scores and no scoring-model/input version. Formula changes apply on the next accepted update.
+The `riskEvents` behavior/risk reducer remains a later dedicated design and implementation
+session; do not invent its mappings. External vendor profile/scoring fields also remain deferred
+until a real vendor is selected and its bounded fields are approved. Neither omission blocks
+scoring: a separate operator configuration selects present scoreable profile fields, validated
+restricted math, nonnegative weights, and a validated final-total formula. Recalculate and
+overwrite the profile's one current `0..100` score after an accepted profile update. Missing
+inputs are excluded; unconfigured scoring is typed unavailable. Store no prior scores or
+score-model/input version. Formula changes apply on the next accepted profile update.
 
 Initial RapidAuth preserves blacklist-first precedence, then awaits the current profile score
 within the existing 50–2,000 ms timeout. Later accepted updates enqueue a signed project-specific
 data-ready callback; middleware verifies it and pulls authoritative session data with the scoped
 visitor token. Local headless detection remains advisory only. CGNAT is not a direct observable
 signal, and IPv4/IPv6 remain lookup/storage families rather than score inputs. Split execution into
-the plan's fresh 17A–17G subphases.
+fresh sessions for: fingerprint contracts/collector; `fingerprintData` persistence and stable
+HMAC; gate-session profile synchronization and IP history/counts; scoring configuration/runtime;
+project callback/pull; the later `riskEvents` reducer; and later external IP profile/scoring
+integration.
 
 ### Phase 18 — Customer risk/OTP policy
 
