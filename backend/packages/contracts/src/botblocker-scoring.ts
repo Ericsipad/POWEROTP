@@ -86,6 +86,7 @@ export const profileScoreableFields = [
   { field: "vendor", inputType: "string" },
   { field: "architecture", inputType: "number" },
   { field: "applePay", inputType: "number" },
+  { field: "risk_events_sum", inputType: "number" },
   { field: "currentIp.asnScore", inputType: "number" },
   { field: "recentIpHistory.count", inputType: "number" },
   { field: "recentIpHistory.asnAverage", inputType: "number" },

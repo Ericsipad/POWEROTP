@@ -294,6 +294,13 @@ export const UserIntelligenceRecordSchema = ScopedRecordSchema.extend({
   currentIp: IpEvidenceSchema.optional(),
   recentIpHistory: z.array(IpEvidenceSchema).max(20),
   currentIpReuse: IpReuseSummarySchema.optional(),
+  risk_events_sum: z.number().finite().min(0).max(100).optional(),
+  riskEventScoredRowCount: z
+    .number()
+    .int()
+    .nonnegative()
+    .max(Number.MAX_SAFE_INTEGER)
+    .optional(),
   currentScore: ProfileScoreStatusSchema.optional(),
   latestEvidence: BrowserEvidenceSchema.optional(),
   gateSessionCount: z.number().int().nonnegative(),
@@ -306,6 +313,17 @@ export const UserIntelligenceRecordSchema = ScopedRecordSchema.extend({
 })
   .extend(RetainedRecordSchema.shape)
   .strict()
+  .superRefine((record, context) => {
+    const hasAverage = record.risk_events_sum !== undefined;
+    const hasCount = record.riskEventScoredRowCount !== undefined;
+    if (hasAverage !== hasCount || (hasCount && record.riskEventScoredRowCount === 0)) {
+      context.addIssue({
+        code: "custom",
+        message: "Risk-event average and positive scored-row count must be stored together",
+        path: ["riskEventScoredRowCount"],
+      });
+    }
+  })
   .refine(
     (record) =>
       Date.parse(record.retentionExpiresAt) > Date.parse(record.lastObservedAt),

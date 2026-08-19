@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import type { Db } from "mongodb";
+import type { ClientSession, Db } from "mongodb";
 
 import {
   BOTBLOCKER_MATCH_LOOKBACK_SECONDS,
@@ -105,6 +105,49 @@ function dataDb(): Db {
       };
     },
   } as unknown as Db;
+}
+
+function evaluateUpdateExpression(
+  expression: unknown,
+  row: Record<string, unknown>,
+): unknown {
+  if (typeof expression === "string" && expression.startsWith("$")) {
+    return row[expression.slice(1)];
+  }
+  if (
+    typeof expression !== "object" ||
+    expression === null ||
+    Array.isArray(expression)
+  ) {
+    return expression;
+  }
+  const value = expression as Record<string, unknown>;
+  if ("$ifNull" in value) {
+    const [candidate, fallback] = value.$ifNull as unknown[];
+    return evaluateUpdateExpression(candidate, row) ??
+      evaluateUpdateExpression(fallback, row);
+  }
+  for (const operator of ["$add", "$multiply"] as const) {
+    if (operator in value) {
+      const values = (value[operator] as unknown[]).map((item) =>
+        Number(evaluateUpdateExpression(item, row))
+      );
+      return operator === "$add"
+        ? values.reduce((sum, item) => sum + item, 0)
+        : values.reduce((product, item) => product * item, 1);
+    }
+  }
+  if ("$divide" in value) {
+    const [left, right] = value.$divide as unknown[];
+    return Number(evaluateUpdateExpression(left, row)) /
+      Number(evaluateUpdateExpression(right, row));
+  }
+  if ("$subtract" in value) {
+    const [left, right] = value.$subtract as unknown[];
+    return Number(evaluateUpdateExpression(left, row)) -
+      Number(evaluateUpdateExpression(right, row));
+  }
+  return expression;
 }
 
 function matches(
@@ -304,6 +347,59 @@ describe("BotBlocker intelligence persistence", () => {
       observedAt,
     );
     assert.equal(advanced?.lastAppliedSequence, 3);
+  });
+
+  it("atomically accumulates concurrent available row scores without a lost update", async () => {
+    const profile: Record<string, unknown> = {
+      _id: "bui_owner_123456",
+      ...ownerScope,
+    };
+    const db = {
+      collection(name: string) {
+        return name === "userIntelligence"
+          ? {
+            updateOne: async (
+              filter: Record<string, unknown>,
+              update: Record<string, unknown>[],
+            ) => {
+              if (!matches(profile, filter)) return { matchedCount: 0 };
+              const set = update[0]?.$set as Record<string, unknown>;
+              const snapshot = { ...profile };
+              for (const [key, expression] of Object.entries(set)) {
+                profile[key] = evaluateUpdateExpression(expression, snapshot);
+              }
+              return { matchedCount: 1 };
+            },
+          }
+          : {};
+      },
+    } as unknown as Db;
+    const persistence = new BotBlockerIntelligencePersistence(db);
+    const session = {} as ClientSession;
+
+    await Promise.all([
+      persistence.incorporateRiskEventScore(
+        ownerScope,
+        "bui_owner_123456",
+        { status: "available", score: 10 },
+        session,
+      ),
+      persistence.incorporateRiskEventScore(
+        ownerScope,
+        "bui_owner_123456",
+        { status: "available", score: 30 },
+        session,
+      ),
+      persistence.incorporateRiskEventScore(
+        ownerScope,
+        "bui_owner_123456",
+        { status: "available", score: 80 },
+        session,
+      ),
+    ]);
+
+    assert.equal(profile.risk_events_sum, 40);
+    assert.equal(profile.riskEventScoredRowCount, 3);
   });
 
   it("counts distinct system-wide and same-site profiles for an exact IP over 1/7/30 days", async () => {

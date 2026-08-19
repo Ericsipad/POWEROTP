@@ -296,6 +296,12 @@ export class BotBlockerSessionPersistence {
             { session },
           );
         }
+        await this.#reads.incorporateRiskEventScore(
+          input.scope,
+          userId,
+          riskEventScore,
+          session,
+        );
         profileUpdated = true;
       });
     });

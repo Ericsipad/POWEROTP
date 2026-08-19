@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import type { CanonicalReportRequest } from "@powerotp/contracts";
+import type {
+  CanonicalReportRequest,
+  RiskEventScoreStatus,
+} from "@powerotp/contracts";
 import type { Db, MongoClient } from "mongodb";
 
 import { BotBlockerIngestionPersistence } from "./botblocker-ingestion-persistence.js";
@@ -100,11 +103,16 @@ function fixture(scorePersisted = true) {
     totalPageDurationMs: 0,
     totalActiveDurationMs: 0,
   };
+  const profileAverage: {
+    risk_events_sum?: number;
+    riskEventScoredRowCount?: number;
+  } = {};
   const scoringCalls: string[] = [];
   const callbackCalls: string[] = [];
   const riskScoringCalls: number[] = [];
-  let riskScore = 25;
+  let riskScore: RiskEventScoreStatus = { status: "available", score: 25 };
   let failRiskScoring = false;
+  let failAverageUpdate = false;
   const db = {
     collection(name: string) {
       if (name === "gateSessions") {
@@ -138,11 +146,22 @@ function fixture(scorePersisted = true) {
         }),
         updateOne: async (
           _filter: Record<string, unknown>,
-          update: { $inc?: Partial<typeof aggregate> },
+          update: { $inc?: Partial<typeof aggregate> } | Record<string, unknown>[],
         ) => {
+          if (Array.isArray(update)) {
+            if (failAverageUpdate) throw new Error("injected average update failure");
+            if (riskScore.status !== "available") return { matchedCount: 1 };
+            const count = profileAverage.riskEventScoredRowCount ?? 0;
+            profileAverage.risk_events_sum = (
+              (profileAverage.risk_events_sum ?? 0) * count + riskScore.score
+            ) / (count + 1);
+            profileAverage.riskEventScoredRowCount = count + 1;
+            return { matchedCount: 1 };
+          }
           for (const key of Object.keys(aggregate) as (keyof typeof aggregate)[]) {
             aggregate[key] += update.$inc?.[key] ?? 0;
           }
+          return { matchedCount: 1 };
         },
       };
     },
@@ -154,13 +173,22 @@ function fixture(scorePersisted = true) {
       }) => Promise<void>,
     ) => work({
       withTransaction: async (transaction) => {
-        const snapshot = structuredClone({ gateSessions, riskEvents, aggregate });
+        const snapshot = structuredClone({
+          gateSessions,
+          riskEvents,
+          aggregate,
+          profileAverage,
+        });
         try {
           await transaction();
         } catch (error) {
           gateSessions.splice(0, gateSessions.length, ...snapshot.gateSessions);
           riskEvents.splice(0, riskEvents.length, ...snapshot.riskEvents);
           Object.assign(aggregate, snapshot.aggregate);
+          for (const key of Object.keys(profileAverage)) {
+            delete profileAverage[key as keyof typeof profileAverage];
+          }
+          Object.assign(profileAverage, snapshot.profileAverage);
           throw error;
         }
       },
@@ -180,20 +208,27 @@ function fixture(scorePersisted = true) {
       async (candidate) => {
         riskScoringCalls.push(candidate.reportSequence);
         if (failRiskScoring) throw new Error("injected risk scoring failure");
-        return { status: "available", score: riskScore };
+        return riskScore;
       },
     ),
     gateSessions,
     riskEvents,
     aggregate,
+    profileAverage,
     scoringCalls,
     callbackCalls,
     riskScoringCalls,
     setRiskScore(value: number) {
-      riskScore = value;
+      riskScore = { status: "available", score: value };
+    },
+    setRiskUnavailable(reason: "scoring_unconfigured" | "no_usable_fields") {
+      riskScore = { status: "unavailable", reason };
     },
     failRiskScoring() {
       failRiskScoring = true;
+    },
+    failAverageUpdate() {
+      failAverageUpdate = true;
     },
   };
 }
@@ -215,6 +250,10 @@ describe("BotBlockerIngestionPersistence", () => {
     assert.deepEqual(state.scoringCalls, ["bui_owner_123456789"]);
     assert.deepEqual(state.callbackCalls, ["bgs_session_123456789"]);
     assert.deepEqual(state.riskScoringCalls, [0]);
+    assert.deepEqual(state.profileAverage, {
+      risk_events_sum: 25,
+      riskEventScoredRowCount: 1,
+    });
     assert.deepEqual(state.aggregate, {
       behaviorReportCount: 1,
       pageViewCount: 1,
@@ -284,6 +323,22 @@ describe("BotBlockerIngestionPersistence", () => {
       ],
     );
     assert.deepEqual(state.riskScoringCalls, [0, 1]);
+    assert.deepEqual(state.profileAverage, {
+      risk_events_sum: 52.5,
+      riskEventScoredRowCount: 2,
+    });
+  });
+
+  it("excludes unavailable row scores from the profile average and count", async () => {
+    const state = fixture();
+    await state.persistence.ingestReport(scope, report(0), {}, pageUrl, now);
+    state.setRiskUnavailable("no_usable_fields");
+    await state.persistence.ingestReport(scope, report(1), {}, pageUrl, now);
+
+    assert.deepEqual(state.profileAverage, {
+      risk_events_sum: 25,
+      riskEventScoredRowCount: 1,
+    });
   });
 
   it("rolls back sequence advancement when row scoring fails", async () => {
@@ -295,6 +350,20 @@ describe("BotBlockerIngestionPersistence", () => {
     );
     assert.equal(state.gateSessions[0]!.lastAppliedSequence, -1);
     assert.equal(state.riskEvents.length, 0);
+    assert.deepEqual(state.scoringCalls, []);
+    assert.deepEqual(state.callbackCalls, []);
+  });
+
+  it("rolls back the row, sequence, and average when average persistence fails", async () => {
+    const state = fixture();
+    state.failAverageUpdate();
+    await assert.rejects(
+      state.persistence.ingestReport(scope, report(0), {}, pageUrl, now),
+      /injected average update failure/,
+    );
+    assert.equal(state.gateSessions[0]!.lastAppliedSequence, -1);
+    assert.equal(state.riskEvents.length, 0);
+    assert.deepEqual(state.profileAverage, {});
     assert.deepEqual(state.scoringCalls, []);
     assert.deepEqual(state.callbackCalls, []);
   });

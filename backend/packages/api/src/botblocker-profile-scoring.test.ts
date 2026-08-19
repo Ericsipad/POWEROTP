@@ -72,7 +72,11 @@ function stored(
 }
 
 const numericField = (
-  field: "applePay" | "currentIp.asnScore" | "recentIpHistory.count",
+  field:
+    | "applePay"
+    | "risk_events_sum"
+    | "currentIp.asnScore"
+    | "recentIpHistory.count",
   expression: unknown = { op: "input", name: "value" },
   options: { enabled?: boolean; weight?: number } = {},
 ) => ({
@@ -102,6 +106,24 @@ describe("calculateProfileScore", () => {
       ])),
     );
     assert.deepEqual(result, { status: "available", score: 65 });
+  });
+
+  it("uses risk_events_sum only when the operator configures that field", () => {
+    const row = profile({ risk_events_sum: 75, riskEventScoredRowCount: 3 });
+    assert.deepEqual(
+      calculateProfileScore(
+        row,
+        stored(configuration([numericField("risk_events_sum")])),
+      ),
+      { status: "available", score: 75 },
+    );
+    assert.deepEqual(
+      calculateProfileScore(
+        row,
+        stored(configuration([numericField("recentIpHistory.count")])),
+      ),
+      { status: "available", score: 0 },
+    );
   });
 
   it("uses only fixed sub-bindings for composite direct fields", () => {

@@ -130,6 +130,8 @@ function resolveScoreInput(
       return usableNumber(profile.architecture);
     case "applePay":
       return usableNumber(profile.applePay);
+    case "risk_events_sum":
+      return usableNumber(profile.risk_events_sum);
     case "currentIp.asnScore":
       return usableNumber(profile.currentIp?.asnScore);
     case "recentIpHistory.count":

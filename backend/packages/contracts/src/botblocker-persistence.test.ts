@@ -210,6 +210,8 @@ describe("Phase 6 BotBlocker persistence contracts", () => {
           distinctProfiles30d: 2,
         },
       },
+      risk_events_sum: 37.5,
+      riskEventScoredRowCount: 4,
       currentScore: { status: "available", score: 42.5 },
       latestEvidence: evidence,
       gateSessionCount: 2,
@@ -246,6 +248,41 @@ describe("Phase 6 BotBlocker persistence contracts", () => {
         }).success,
         false,
         field,
+      );
+    }
+  });
+
+  it("requires the finite event average and positive backend count together", () => {
+    const base = {
+      ...scope,
+      userIntelligenceId: "bui_visitor_123456",
+      recentIpHistory: [],
+      gateSessionCount: 1,
+      behaviorReportCount: 1,
+      firstObservedAt: now,
+      lastObservedAt: now,
+      createdAt: now,
+      updatedAt: now,
+      retentionExpiresAt: later,
+    };
+    assert.equal(
+      UserIntelligenceRecordSchema.safeParse({
+        ...base,
+        risk_events_sum: 50,
+        riskEventScoredRowCount: 2,
+      }).success,
+      true,
+    );
+    for (const invalid of [
+      { risk_events_sum: 50 },
+      { riskEventScoredRowCount: 2 },
+      { risk_events_sum: 50, riskEventScoredRowCount: 0 },
+      { risk_events_sum: Number.NaN, riskEventScoredRowCount: 1 },
+      { risk_events_sum: 101, riskEventScoredRowCount: 1 },
+    ]) {
+      assert.equal(
+        UserIntelligenceRecordSchema.safeParse({ ...base, ...invalid }).success,
+        false,
       );
     }
   });

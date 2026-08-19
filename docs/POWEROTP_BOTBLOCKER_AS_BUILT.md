@@ -3886,3 +3886,42 @@ event-average/profile-scoring integration, Phase 18 customer sensitivity/OTP pol
 IP-vendor integration, site-return cookie, minute-29 token refresh, Passport, OTP orchestration,
 billing, edge publication, or global verify Worker. No `.env` file, deployment, or customer
 traffic was changed. No commit or push was performed.
+
+## 2026-08-19 — BotBlocker Phase 17A item 7 slice 3: profile event average integration
+
+**Status: profile-average and overall-scoring integration complete.** Added
+`userIntelligence.risk_events_sum` as the arithmetic average of available immutable
+`risk_event_score` values, despite the approved historical `_sum` suffix. Added the backend-only
+`riskEventScoredRowCount` denominator; the persistence contract requires the finite `0..100`
+average and a positive safe-integer count to be present together. The count is not an operator
+scoreable field.
+
+**Atomic persistence and idempotency.** Initial profile creation, initial reports bound to an
+existing profile, and later accepted reports incorporate an available row score inside the same
+MongoDB transaction as immutable row insertion and session creation/sequence advancement.
+MongoDB's atomic update pipeline derives the next average from the profile's current average and
+count, preventing concurrent reports linked to one profile from losing an accepted score. Typed
+unavailable row scores leave both fields unchanged. A failed average write rolls back the row,
+sequence/session state, and profile changes together. Exact initial or later replay returns the
+existing row without applying the score again. Risk-event configuration changes affect only
+future immutable row scores and therefore neither backfill nor reset the accumulated profile
+average.
+
+**Overall profile scoring and callback order.** Added `risk_events_sum` as one numeric field in
+the existing closed user-intelligence scoring registry and resolver. No profile formula, weight,
+coefficient, threshold, range, default, migration, or seed was added. The field contributes to
+`currentScore` only when an operator explicitly configures and enables it. Existing post-commit
+profile recalculation, `updatedAt` compare-and-set replacement, and data-ready callback enqueue
+only after successful score replacement remain unchanged.
+
+**Files and verification.** Updated the BotBlocker persistence/scoring contracts and tests,
+intelligence/session/report persistence, profile scoring and focused tests, and the Phase 17A
+status documents. Node `v22.18.0` was used. Full contracts and API workspace build, lint/typecheck,
+and tests passed; the backend production build, typecheck, and focused suite passed; final root
+`npm run verify` passed across all workspaces.
+
+**Explicitly not shipped.** No additional risk-event field or registry restructuring, Phase 18
+customer sensitivity/OTP policy, external IP-vendor integration, site-return cookie, minute-29
+token refresh, Passport, OTP orchestration, billing, edge publication, or global verify Worker
+was added. No `.env`, MCP, Gate, browser-reachable contract/code, deployment, or customer traffic
+was changed. No commit or push was performed.

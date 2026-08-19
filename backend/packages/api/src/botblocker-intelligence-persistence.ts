@@ -158,6 +158,11 @@ export interface UserIntelligenceDocument extends BotBlockerScope,
   /** Rolling distinct-profile reuse counts for `currentIp.ip`, refreshed
    * alongside it. Absent whenever `currentIp` itself is absent. */
   currentIpReuse?: IpReuseSummary;
+  /** Arithmetic average of available immutable risk-event row scores.
+   * The approved persisted name is historical: this is not a sum. */
+  risk_events_sum?: number;
+  /** Backend-only denominator for atomic risk-event average updates. */
+  riskEventScoredRowCount?: number;
   /** One replaceable current score/status. No history or scoring-model
    * version is retained on the profile. */
   currentScore?: ProfileScoreStatus;
@@ -424,6 +429,41 @@ export class BotBlockerIntelligencePersistence {
       { $set: { currentScore } },
     );
     return result.matchedCount === 1;
+  }
+
+  async incorporateRiskEventScore(
+    scope: BotBlockerScope,
+    userIntelligenceId: string,
+    riskEventScore: RiskEventScoreStatus,
+    session: ClientSession,
+  ): Promise<void> {
+    if (riskEventScore.status !== "available") return;
+    const priorCount = { $ifNull: ["$riskEventScoredRowCount", 0] };
+    const priorAverage = { $ifNull: ["$risk_events_sum", 0] };
+    const nextCount = { $add: [priorCount, 1] };
+    const result = await this.#userIntelligence.updateOne(
+      { _id: userIntelligenceId, ...scope },
+      [{
+        $set: {
+          risk_events_sum: {
+            $add: [
+              priorAverage,
+              {
+                $divide: [
+                  { $subtract: [riskEventScore.score, priorAverage] },
+                  nextCount,
+                ],
+              },
+            ],
+          },
+          riskEventScoredRowCount: nextCount,
+        },
+      }],
+      { session },
+    );
+    if (result.matchedCount !== 1) {
+      throw new Error("user_intelligence_not_found");
+    }
   }
 
   listUserIntelligence(

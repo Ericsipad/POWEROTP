@@ -139,7 +139,11 @@ describe("profile scoring status and unconfigured response", () => {
       registry: profileScoreableFields,
     });
     assert.equal(response.status, "unconfigured");
-    assert.equal(response.registry.length, 17);
+    assert.equal(response.registry.length, 18);
+    assert.deepEqual(
+      response.registry.find((entry) => entry.field === "risk_events_sum"),
+      { field: "risk_events_sum", inputType: "number" },
+    );
     assert.equal("configuration" in response, false);
     assert.equal(
       JSON.stringify(response).includes("threshold"),

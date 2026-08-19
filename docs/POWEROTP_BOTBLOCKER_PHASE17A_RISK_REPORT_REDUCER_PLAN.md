@@ -1,7 +1,8 @@
 # BotBlocker Phase 17A — Unified risk report and reducer design
 
-**Status: implementation in progress; canonical contract/transport and risk-event
-configuration/row-scoring slices complete (2026-08-19).**
+**Status: implementation complete (2026-08-19).** Canonical contract/transport,
+risk-event configuration/row scoring, and profile-average/overall-scoring integration are
+complete.
 This document is the field-by-field authority for Phase 17A implementation-split item 7.
 It supersedes the earlier assumption that initial requests, behavior reports, and risk-signal
 batches should remain separate scoring inputs.
@@ -228,9 +229,10 @@ Execute in separate fresh implementation sessions:
 2. **Status: complete (2026-08-19). Risk-event configuration and row scoring.** Added the closed
    V1 registry, operator configuration route/admin row, restricted evaluation, immutable
    insert-time row score, and field-level/transaction/replay tests. No configuration is seeded.
-3. **Profile average and overall scoring integration.** Add `risk_events_sum`, atomic
-   average/count update, the user-intelligence admin registry row, post-commit score/callback
-   integration, concurrency/rollback tests, and update the as-built record.
+3. **Status: complete (2026-08-19). Profile average and overall scoring integration.** Added
+   `risk_events_sum`, the backend-only scored-row count, atomic average updates, the
+   user-intelligence admin registry row, preserved post-commit score/callback integration, and
+   concurrency/rollback coverage.
 
 Every touched workspace must run build, full lint/typecheck, and tests once. Because contract and
 transport consolidation crosses workspaces, run the affected contracts, API, backend, gate-core,

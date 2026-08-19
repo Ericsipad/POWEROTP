@@ -9,6 +9,7 @@ import type { ClientSession, Db, MongoClient } from "mongodb";
 import {
   botBlockerRetentionExpiresAt,
   botBlockerSessionInputRetentionExpiresAt,
+  BotBlockerIntelligencePersistence,
   createRiskEventId,
   type BotBlockerScope,
   type CanonicalReportServerEvidence,
@@ -31,6 +32,7 @@ export class BotBlockerIngestionPersistence {
   readonly #gateSessions;
   readonly #userIntelligence;
   readonly #riskEvents;
+  readonly #intelligence: BotBlockerIntelligencePersistence;
   readonly #sessions: BotBlockerSessionPersistence;
 
   constructor(
@@ -54,6 +56,7 @@ export class BotBlockerIngestionPersistence {
     this.#userIntelligence =
       db.collection<UserIntelligenceDocument>("userIntelligence");
     this.#riskEvents = db.collection<DurableRiskEventDocument>("riskEvents");
+    this.#intelligence = new BotBlockerIntelligencePersistence(db);
     this.#sessions = new BotBlockerSessionPersistence(
       db,
       client,
@@ -195,6 +198,12 @@ export class BotBlockerIngestionPersistence {
               : {}),
           },
           { session },
+        );
+        await this.#intelligence.incorporateRiskEventScore(
+          scope,
+          userIntelligenceId,
+          riskEventScore,
+          session,
         );
         outcome = "accepted";
       });

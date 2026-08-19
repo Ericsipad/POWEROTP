@@ -6,6 +6,7 @@ import type {
   BrowserEvidence,
   CanonicalReportRequest,
   FingerprintVector,
+  RiskEventScoreStatus,
 } from "@powerotp/contracts";
 import type { Db, MongoClient } from "mongodb";
 
@@ -135,6 +136,7 @@ function fixture(options: {
   failIntelligenceWrite?: boolean;
   failScoring?: boolean;
   failRiskEventScoring?: boolean;
+  riskEventScore?: RiskEventScoreStatus;
 } = {}) {
   const gateSessions: GateSessionDocument[] = [];
   const riskEvents: DurableRiskEventDocument[] = [];
@@ -199,13 +201,25 @@ function fixture(options: {
           $set?: Record<string, unknown>;
           $unset?: Record<string, unknown>;
           $inc?: Record<string, number>;
-        },
+        } | Record<string, unknown>[],
       ) => {
         if (name === "userIntelligence" && options.failIntelligenceWrite) {
           throw new Error("injected intelligence write failure");
         }
         const row = rows.find((candidate) => matchesFilter(candidate, filter));
         if (!row) return { matchedCount: 0 };
+        if (Array.isArray(update)) {
+          const riskEventScore = options.riskEventScore;
+          if (riskEventScore?.status === "available") {
+            const record = row as Record<string, unknown>;
+            const count = Number(record.riskEventScoredRowCount ?? 0);
+            record.risk_events_sum = (
+              Number(record.risk_events_sum ?? 0) * count + riskEventScore.score
+            ) / (count + 1);
+            record.riskEventScoredRowCount = count + 1;
+          }
+          return { matchedCount: 1 };
+        }
         Object.assign(row, update.$set);
         for (const key of Object.keys(update.$unset ?? {})) {
           delete (row as Record<string, unknown>)[key];
@@ -268,7 +282,8 @@ function fixture(options: {
         if (options.failRiskEventScoring) {
           throw new Error("injected risk-event scoring failure");
         }
-        return { status: "unavailable", reason: "scoring_unconfigured" };
+        return options.riskEventScore ??
+          { status: "unavailable", reason: "scoring_unconfigured" };
       },
     ),
     gateSessions,
@@ -512,6 +527,47 @@ describe("BotBlockerSessionPersistence fingerprint selection", () => {
         error instanceof BotBlockerSessionPersistenceError &&
         error.code === "scope_mismatch",
     );
+  });
+
+  it("starts a new profile average from the available initial row score exactly once", async () => {
+    const state = fixture({
+      riskEventScore: { status: "available", score: 40 },
+    });
+    await state.persistence.openGateSession(openInput());
+    await state.persistence.openGateSession(openInput());
+
+    assert.equal(state.intelligence[0]!.risk_events_sum, 40);
+    assert.equal(state.intelligence[0]!.riskEventScoredRowCount, 1);
+    assert.equal(state.riskEvents.length, 1);
+  });
+
+  it("incorporates an available initial row into an existing profile average", async () => {
+    const bound: UserIntelligenceDocument = {
+      ...profile("bui_bound_123456789"),
+      risk_events_sum: 20,
+      riskEventScoredRowCount: 2,
+    };
+    const state = fixture({
+      intelligence: [bound],
+      fingerprints: [storedFingerprint(bound._id)],
+      riskEventScore: { status: "available", score: 80 },
+    });
+    await state.persistence.openGateSession(openInput({
+      authoritativeUserIntelligenceId: bound._id,
+    }));
+
+    assert.equal(state.intelligence[0]!.risk_events_sum, 40);
+    assert.equal(state.intelligence[0]!.riskEventScoredRowCount, 3);
+  });
+
+  it("leaves a new profile average absent for an unavailable initial row score", async () => {
+    const state = fixture({
+      riskEventScore: { status: "unavailable", reason: "no_usable_fields" },
+    });
+    await state.persistence.openGateSession(openInput());
+
+    assert.equal("risk_events_sum" in state.intelligence[0]!, false);
+    assert.equal("riskEventScoredRowCount" in state.intelligence[0]!, false);
   });
 
   it("rolls back profile and fingerprint writes when session insertion fails", async () => {
