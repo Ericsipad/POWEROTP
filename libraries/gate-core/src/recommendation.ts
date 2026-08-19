@@ -3,7 +3,7 @@ import {
   type BotBlockerDecisionOutcome,
   type GateRecommendationSnapshot,
   type ReportSequence,
-} from "@powerotp/contracts";
+} from "@powerotp/contracts/browser";
 
 import type { GateState } from "./states.js";
 

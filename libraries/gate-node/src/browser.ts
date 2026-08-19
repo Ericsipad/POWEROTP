@@ -5,7 +5,7 @@ import {
   type BehaviorReport,
   type GateRecommendationSnapshot,
   type InitialBrowserProofEvidence,
-} from "@powerotp/contracts";
+} from "@powerotp/contracts/browser";
 import {
   createAuthoritativePoller,
   createChallengeMessageHandler,

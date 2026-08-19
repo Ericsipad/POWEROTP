@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { fingerprintComponentNames } from "@powerotp/contracts";
+import { fingerprintComponentNames } from "@powerotp/contracts/browser";
 import { createFingerprintCollector } from "./fingerprint-collector.js";
 
 type RawTestComponent =

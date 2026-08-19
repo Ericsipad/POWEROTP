@@ -3,7 +3,7 @@ import {
   isStaleSequence,
   type DecisionRevisionEnvelope,
   type ReportSequence,
-} from "@powerotp/contracts";
+} from "@powerotp/contracts/browser";
 
 export type DecisionRejectionReason =
   | "unverified"

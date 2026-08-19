@@ -67,6 +67,32 @@ test("Next production client bundles contain no server credential", async () => 
   assert.ok(!bundle.includes("visitorToken"));
 });
 
+test("Next production client bundles contain no backend-only persistence or admin schema", async () => {
+  // Regression test for the `@powerotp/contracts` barrel-export leak: before
+  // the browser-safe `@powerotp/contracts/browser` subpath existed, the
+  // whole root barrel — including backend-only MongoDB persistence document
+  // schemas — ended up textually present in this exact bundle regardless of
+  // what gate-core/gate-node's browser code actually used, because bundlers
+  // do not reliably tree-shake `export *` re-export chains. See the dated
+  // 2026-08-18 entries in `docs/POWEROTP_BOTBLOCKER_AS_BUILT.md`.
+  const staticRoot = new URL("../fixture/.next/static/", import.meta.url);
+  const files = await javascriptFiles(staticRoot);
+  assert.ok(files.length > 0, "build the Next fixture before running bundle checks");
+  const bundle = (await Promise.all(files.map((file) => readFile(file, "utf8")))).join("\n");
+  for (
+    const backendOnlyName of [
+      "GateSessionRecordSchema",
+      "UserIntelligenceRecordSchema",
+      "FingerprintDataRecordSchema",
+      "PolicyReleaseRecordSchema",
+      "OperatorIpBlacklistMutationSchema",
+      "CustomerRegistrationSchema",
+    ]
+  ) {
+    assert.ok(!bundle.includes(backendOnlyName), backendOnlyName);
+  }
+});
+
 test("root gate persists through App Router-style history navigation and sequences reports", async () => {
   const window = new HappyWindow({ url: `${audience}/account?secret=discarded` });
   const restoreGlobals = installBrowserGlobals(window);

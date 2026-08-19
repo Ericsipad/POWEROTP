@@ -1,3 +1,8 @@
+/**
+ * Backend-only. This file defines the `policyReleases` MongoDB persistence
+ * document schema and must never be reachable from
+ * `@powerotp/contracts/browser` — see that file's doc comment.
+ */
 import { z } from "zod";
 
 import { SignedBotBlockerPolicyReleaseSchema } from "./botblocker-policy.js";

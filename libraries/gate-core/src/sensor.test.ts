@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import {
   BOTBLOCKER_PROTOCOL_VERSION,
   type BehaviorReport,
-} from "@powerotp/contracts";
+} from "@powerotp/contracts/browser";
 import { Window as HappyWindow } from "happy-dom";
 import { createGateController } from "./controller.js";
 import { createContinuousBrowserSensor } from "./sensor.js";

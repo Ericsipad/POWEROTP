@@ -8,7 +8,7 @@ import {
   fingerprintComponentNames,
   type DecisionRevisionEnvelope,
   type FingerprintVector,
-} from "@powerotp/contracts";
+} from "@powerotp/contracts/browser";
 import { Window as HappyWindow } from "happy-dom";
 
 import { createGateBrowserCoordinator } from "./browser.js";

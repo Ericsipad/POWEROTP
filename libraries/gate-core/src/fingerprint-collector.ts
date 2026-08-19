@@ -7,7 +7,7 @@ import {
   fingerprintComponentNames,
   type FingerprintUnavailableStatus,
   type FingerprintVector,
-} from "@powerotp/contracts";
+} from "@powerotp/contracts/browser";
 
 type RawComponent = { value: unknown; duration?: unknown } | {
   error: unknown;

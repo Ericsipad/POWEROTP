@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { BOTBLOCKER_PROTOCOL_VERSION } from "@powerotp/contracts";
+import { BOTBLOCKER_PROTOCOL_VERSION } from "@powerotp/contracts/browser";
 import { createGateController, type GateEffect } from "./controller.js";
 
 const NOW = 1_786_000_000_000;

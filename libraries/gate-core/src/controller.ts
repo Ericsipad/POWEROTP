@@ -4,7 +4,7 @@ import {
   type DecisionRevisionEnvelope,
   type GateRecommendationSnapshot,
   type ReportSequence,
-} from "@powerotp/contracts";
+} from "@powerotp/contracts/browser";
 import {
   validateVerifiedDecision,
   type DecisionRejectionReason,

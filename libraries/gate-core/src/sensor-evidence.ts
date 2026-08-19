@@ -7,7 +7,7 @@ import {
   type BrowserAutomationIndicator,
   type BrowserEvidence,
   type ClickObservation,
-} from "@powerotp/contracts";
+} from "@powerotp/contracts/browser";
 
 const MAX_ROUTE_LENGTH = 2_048;
 const MAX_CLICKS = 200;

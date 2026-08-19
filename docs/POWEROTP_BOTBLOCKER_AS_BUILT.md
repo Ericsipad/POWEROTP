@@ -3538,3 +3538,72 @@ behavior-event reducer, external-vendor profile integration, site-return cookie,
 minute-29 refresh, middleware bearer replacement, billing, edge publication, or global verify
 Worker. No environment file, migration, seed, deployment, or customer traffic was changed. No
 commit or push was performed.
+
+## 2026-08-18 — BotBlocker: split `@powerotp/contracts` browser-safe export (resolves the 819c7e4 open issue)
+
+**Status: resolved, cross-cutting contracts/bundling fix, independent of Phase 17 runtime work.**
+The open issue flagged in the 819c7e4 session — `@powerotp/contracts`'s single barrel export letting
+backend-only Mongo persistence document schemas and admin/control-plane contracts leak textually
+into customer-facing browser bundles regardless of what those bundles actually reference (bundlers
+do not reliably tree-shake `export *` re-export chains) — is fixed by physically splitting the
+module graph rather than relying on tree-shaking.
+
+**New `@powerotp/contracts/browser` subpath.** Added `backend/packages/contracts/src/index.browser.ts`,
+a second barrel re-exporting only the closed set of files with zero backend-only structure:
+`botblocker.ts` (wire protocol, browser evidence, behavior report, decision envelope),
+`botblocker-browser.ts` (browser proof evidence, advisory snapshot), `botblocker-clearance.ts`
+(site-clearance wire shapes), `botblocker-proofs.ts` (Passport/PaidTokenPass/risk-event proof
+shapes), `botblocker-signing.ts` (Ed25519 signature wire shapes and canonicalization — never
+private key material), and `fingerprint.ts`/`fingerprint-components.ts` (FingerprintJS vector
+contracts). This exact set was derived by enumerating every symbol gate-core and
+`gate-node/browser.ts` actually import from `@powerotp/contracts` and tracing each to its defining
+file — confirmed by grep, not assumed. `package.json` gained a matching `"./browser"` export
+condition (`types`/`import`), mirroring the existing `@powerotp/gate-node`'s own `"./browser"`
+subpath pattern already in this monorepo. The root `.` export (`index.ts`) is completely unchanged;
+every existing backend/server-side consumer keeps working exactly as before.
+
+**Consumers switched to the browser-safe subpath.** All eleven `@powerotp/contracts`-importing files
+in `libraries/gate-core/src` (`controller.ts`, `decision.ts`, `fingerprint-collector.ts`,
+`recommendation.ts`, `sensor.ts`, `sensor-analytics.ts`, `sensor-evidence.ts`, and their four
+`.test.ts` files) plus `libraries/gate-node/src/browser.ts` and its `browser.test.ts` now import
+from `@powerotp/contracts/browser`. Every other `@powerotp/contracts` consumer — gate-node's
+server-side `server.ts`/`runtime.ts`/`advisory.ts`/`bridge.ts`/`cookies.ts`/`http.ts`/`types.ts`,
+gate-express, gate-next's server-side adapter, `sdk-js`, and every backend package — keeps importing
+the root export unchanged, because none of that code is ever bundled for a browser.
+
+**Backend-only files marked.** Added an explicit "backend-only, never reachable from
+`@powerotp/contracts/browser`" doc-comment banner to `botblocker-persistence.ts` (Mongo document
+schemas) and `botblocker-policy-persistence.ts` (`policyReleases` document schema) so a future editor
+sees the boundary before adding a field.
+
+**Verified with a real bundle, not just a name-surface check.** Rebuilt the `gate-next` fixture's
+actual Next.js production client bundle and grepped every compiled `.js` chunk under
+`fixture/.next/static/` for `GateSessionRecordSchema`, `UserIntelligenceRecordSchema`,
+`FingerprintDataRecordSchema`, `PolicyReleaseRecordSchema`, and `OperatorIpBlacklistMutationSchema` —
+zero matches, confirmed before writing any test. Added a permanent regression test asserting exactly
+that to `libraries/gate-next/src/react.test.tsx` ("Next production client bundles contain no
+backend-only persistence or admin schema"), alongside the pre-existing credential-leak test. Also
+added `backend/packages/contracts/src/index.browser.test.ts`, a faster unit-level guard asserting a
+list of backend-only-file-unique names (`GateSessionRecordSchema`,
+`UserIntelligenceRecordSchema`, `FingerprintDataRecordSchema`, `DurableRiskEventRecordSchema`,
+`BotBlockerChallengeRecordSchema`, `PolicyReleaseRecordSchema`, `OperatorIpBlacklistMutationSchema`,
+`OperatorAsnClassificationMutationSchema`, `CustomerVisitorSchema`,
+`BotBlockerSiteConfigurationSchema`, `CustomerRegistrationSchema`, `UpdateProjectSchema`) are present
+on the root export but absent from `./browser`'s export surface, plus a second test that the
+browser-reachable widget contracts it needs are still present there.
+
+**Focused verification.** Rebuilt and tested every directly affected workspace once each:
+`@powerotp/contracts` build passed, suite passed **187/187** across 47 suites (was 185/185 before
+this fix's own two new tests); `@powerotp/gate-core` build passed, suite passed **46/46**;
+`@powerotp/gate-node` build passed, suite passed **21/21**; `@powerotp/gate-next` build passed
+(including the real `next build fixture` production compile), suite passed **28/28** (was 27/27
+before this fix's new bundle-content test); `@powerotp/gate-express` build passed, suite passed
+**22/22**. `tsc -p tsconfig.typecheck.json` (`lint`) passed for `@powerotp/contracts`,
+`@powerotp/gate-core`, and `@powerotp/gate-node`. No full-repository `npm run verify` was run — every
+directly touched or dependent workspace was verified individually instead, and the root `index.ts`
+barrel plus every non-browser consumer were left untouched, so no other workspace could regress.
+
+**Explicitly not shipped.** This fix touches only the contracts export boundary and its direct
+browser-reachable consumers. No Phase 17 runtime work (profile scoring, callbacks, reducer), site-
+return cookie, Passport, minute-29 refresh, billing, edge publication, or global verify Worker was
+touched. No environment file, migration, seed, deployment, or customer traffic was changed.

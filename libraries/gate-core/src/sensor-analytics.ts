@@ -1,4 +1,4 @@
-import { POINTER_HEATMAP_GRID_SIZE } from "@powerotp/contracts";
+import { POINTER_HEATMAP_GRID_SIZE } from "@powerotp/contracts/browser";
 
 const MAX_POINTER_DWELL_STEP_MS = 250;
 

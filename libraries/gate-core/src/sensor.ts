@@ -5,7 +5,7 @@ import {
   BOTBLOCKER_PROTOCOL_VERSION,
   type BehaviorReport,
   type PartialBehaviorReportReason,
-} from "@powerotp/contracts";
+} from "@powerotp/contracts/browser";
 import type { GateEffect } from "./controller.js";
 import {
   pageDimensions,

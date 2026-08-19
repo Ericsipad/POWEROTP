@@ -1,3 +1,11 @@
+/**
+ * Backend-only. This file defines MongoDB persistence document schemas
+ * (gate sessions, `userIntelligence` profiles, fingerprint records, risk
+ * events) and must never be reachable from `@powerotp/contracts/browser` —
+ * see that file's doc comment. Nothing here is imported by
+ * `@powerotp/gate-core` or `@powerotp/gate-node/browser`, and it must stay
+ * that way.
+ */
 import { z } from "zod";
 
 import { AsnTypeSchema } from "./botblocker-api-control.js";
