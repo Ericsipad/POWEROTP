@@ -3925,3 +3925,35 @@ customer sensitivity/OTP policy, Phase 32 external IP-vendor add-on, site-return
 token refresh, Passport, OTP orchestration, billing, edge publication, or global verify Worker
 was added. No `.env`, MCP, Gate, browser-reachable contract/code, deployment, or customer traffic
 was changed. No commit or push was performed.
+
+## 2026-08-19 — Pre-Phase-18 accounting foundation
+
+**Status: complete as a roadmap prerequisite; Phase 18 policy remains unstarted.** The existing
+append-only `financialTransactions` ledger and transactionally synchronized `customerBalances`
+projection remain the only customer wallet. New writes use provider-neutral payment identity and
+exact OTP method names. Ordered multi-account ledger batches atomically bind source rows,
+referral commissions, balance updates, idempotency claims, ad settlements, and threshold state.
+
+**Project service accounting.** Added authenticated/idempotent customer-site signup/signin session
+reports with ad-system and filled-slot evidence, indexed true trailing-30-day project counts,
+admin-defined tiered threshold rows, and a durable 31-day project/rule charge cooldown. Added
+independent account and project referral attribution, 30-day first-touch signup cookies,
+non-self/reserved-code controls, source-linked commission rows, and customer project reporting.
+
+**Daily ad settlement.** Admins create ad systems and enter one gross payout pool for each ad
+system and complete UTC day in the latest-ten-days calendar. The daily worker scans all ten days
+for late entries, aggregates immutable filled slots, allocates each pool across projects with
+deterministic integer-micro-USD largest remainder, and settles each system/day/project exactly
+once. Missing slots or invalid systems create explicit failed state and immutable worker audits,
+never partial credits.
+
+**Surfaces and boundaries.** Added CSRF-protected admin accounting configuration, customer
+referral/project-accounting routes, a project-credential/rate-limited event route, dashboard and
+admin panels, route inventory, threat-model controls, and control-matrix evidence. No `.env` was
+read or changed. No policy, formula, threshold, rate, payout, commission, ad system, referral,
+customer traffic, or production credential was seeded. Phase 18 risk/OTP policy, Phase 19
+orchestration, CleanDataPages, Passport, visit billing, and external IP reputation remain
+unimplemented.
+
+**Verification.** Focused contracts, API, backend production, backend route, and frontend
+build/lint/typecheck/test checks passed, followed by a clean final root `npm run verify`.

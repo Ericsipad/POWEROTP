@@ -1,4 +1,4 @@
-import { toCustomerBalanceResponse, toFinancialTransactionResponse } from "@powerotp/api/balance-service.js";
+import { toCustomerBalanceResponse, toFinancialTransactionResponse } from "@powerotp/api/billing-responses.js";
 import { ApiError } from "@powerotp/api/errors.js";
 import { NextResponse } from "next/server";
 

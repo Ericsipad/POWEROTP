@@ -86,7 +86,7 @@ describe("BillingChargeService.chargeCompletedInteraction", () => {
     assert.equal(ledgerRows.length, 1);
     assert.equal(ledgerRows[0]?.amountUsd, 0);
     assert.equal(ledgerRows[0]?.note, "free_quota");
-    assert.equal(ledgerRows[0]?.type, "otp4");
+    assert.equal(ledgerRows[0]?.type, "sms_code");
   });
 
   it("skips charging entirely when nothing was ever really dispatched, even if marked free-quota-covered", async () => {
@@ -130,7 +130,7 @@ describe("BillingChargeService.chargeCompletedInteraction", () => {
     );
 
     assert.equal(ledgerRows.length, 1);
-    assert.equal(ledgerRows[0]?.type, "otp5");
+    assert.equal(ledgerRows[0]?.type, "email_code");
     assert.equal(ledgerRows[0]?.country, undefined);
     assert.equal(ledgerRows[0]?.amountUsd, -0.01);
   });

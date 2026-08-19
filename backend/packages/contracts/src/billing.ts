@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import type { VerificationType } from "./verification.js";
+import { verificationTypes, type VerificationType } from "./verification.js";
 
 /**
  * A customer's balance-tiered pricing tier — see `docs/AS_BUILT.md`'s
@@ -81,13 +81,13 @@ export const UpdatePlanChargeSchema = PlanChargeSchema.omit({ updatedAt: true })
  * One row per ledger-affecting event. `visit` is reserved for the future
  * BotBlocker/gate-adapter product (per-site-visitor gate checks) — no real
  * charging logic exists for it yet; see `docs/AS_BUILT.md`'s "Customer
- * balance billing" section. `otp1`..`otp5` map 1:1 to
- * `call_reachability`/`voice_code`/`voice_challenge`/`sms_code`/`email_code`
- * in that fixed order (see `otpChargeTypeFor` below). New-account free
+ * balance billing" section. OTP rows use their exact verification method
+ * (`call_reachability`/`voice_code`/`voice_challenge`/`sms_code`/`email_code`).
+ * New-account free
  * usage (see `backend/packages/api/src/usage-quota-service.ts`) is a simple per-type
  * rolling counter, not a dollar credit, so it has no dedicated ledger type
  * of its own — a free-quota-covered interaction still writes a normal
- * `otp1`..`otp5` row, just always at `amountUsd: 0` with
+ * OTP row, just always at `amountUsd: 0` with
  * `note: "free_quota"` (see `backend/packages/api/src/billing-charge-service.ts`), so it
  * stays fully visible in the same ledger/reports every real charge appears
  * in.
@@ -97,16 +97,22 @@ export const UpdatePlanChargeSchema = PlanChargeSchema.omit({ updatedAt: true })
  */
 export const financialTransactionTypes = [
   "visit",
-  "otp1",
-  "otp2",
-  "otp3",
-  "otp4",
-  "otp5",
+  ...verificationTypes,
   "daily_charge",
+  "signup_threshold_charge",
+  "signin_threshold_charge",
+  "ad_revenue",
+  "referral_commission",
+  "age_verification",
   "topup",
   "admin_adjustment",
 ] as const;
 export const FinancialTransactionTypeSchema = z.enum(financialTransactionTypes);
+
+export const PaymentProcessorSchema = z
+  .string()
+  .trim()
+  .regex(/^[a-z][a-z0-9_-]{1,31}$/, "Use a lowercase payment processor identifier");
 
 /**
  * The one append-only ledger row shape. `amountUsd` is signed
@@ -115,7 +121,7 @@ export const FinancialTransactionTypeSchema = z.enum(financialTransactionTypes);
  * without recomputation, since every row already carries its own
  * before/after balance. `note` is a short annotation, populated for
  * `admin_adjustment` rows (the admin's stated reason) and for free-quota-
- * covered `otp1`..`otp4` rows (always the literal `"free_quota"`, so a $0
+ * covered OTP rows (always the literal `"free_quota"`, so a $0
  * row from free usage is distinguishable in reports from a real $0 charge
  * caused by a missing rate — see `backend/packages/api/src/usage-quota-service.ts` and
  * `backend/packages/api/src/billing-charge-service.ts`).
@@ -125,7 +131,16 @@ export const FinancialTransactionSchema = z.object({
   userId: z.string().min(1),
   projectId: z.string().min(1).optional(),
   interactionId: z.string().min(1).optional(),
-  stripePaymentId: z.string().min(1).optional(),
+  sessionId: z.string().min(1).optional(),
+  paymentProcessor: PaymentProcessorSchema.optional(),
+  paymentProcessorTransactionId: z.string().min(1).max(200).optional(),
+  sourceTransactionId: z.string().min(1).optional(),
+  adPayoutId: z.string().min(1).optional(),
+  adSettlementId: z.string().min(1).optional(),
+  thresholdRuleId: z.string().min(1).optional(),
+  referralCode: z.string().min(1).max(40).optional(),
+  commissionPercent: z.number().min(0).max(100).optional(),
+  commissionBaseUsd: z.number().nonnegative().optional(),
   type: FinancialTransactionTypeSchema,
   country: CountryCodeSchema.optional(),
   note: z.string().min(1).max(200).optional(),
@@ -178,16 +193,13 @@ export const PlanChargesResponseSchema = z.object({ plans: z.array(PlanChargeSch
  * list, unlike the per-country call/SMS charts above. */
 export const EmailRateResponseSchema = z.object({ rate: EmailRateSchema.nullable() });
 
-/** `call_reachability` -> `otp1`, `voice_code` -> `otp2`, `voice_challenge`
- * -> `otp3`, `sms_code` -> `otp4`, `email_code` -> `otp5` — a fixed, stable
- * mapping shared by every billing surface (charging, admin displays), not
- * re-derived ad hoc. */
+/** Exact stable OTP method names shared by every billing surface. */
 export const otpChargeTypeFor: Record<VerificationType, (typeof financialTransactionTypes)[number]> = {
-  call_reachability: "otp1",
-  voice_code: "otp2",
-  voice_challenge: "otp3",
-  sms_code: "otp4",
-  email_code: "otp5",
+  call_reachability: "call_reachability",
+  voice_code: "voice_code",
+  voice_challenge: "voice_challenge",
+  sms_code: "sms_code",
+  email_code: "email_code",
 };
 
 export type BillingTier = z.infer<typeof BillingTierSchema>;

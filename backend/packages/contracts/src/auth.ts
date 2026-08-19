@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { ReferralCodeSchema } from "./accounting.js";
 import {
   BotBlockerProjectSetupSchema,
   ProjectSchema,
@@ -49,7 +50,9 @@ export const CustomerRegistrationSchema = z.object({
  * Website origins are configured later on the project and never gate account
  * creation.
  */
-export const SignupSchema = CustomerRegistrationSchema;
+export const SignupSchema = CustomerRegistrationSchema.extend({
+  referralCode: ReferralCodeSchema.optional(),
+});
 
 export const SignupResponseSchema = z.object({
   status: z.enum(["verification_email_queued", "already_registered"]),

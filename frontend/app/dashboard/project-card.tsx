@@ -4,6 +4,7 @@ import type { Project } from "@/lib/contracts";
 import { useState, type FormEvent } from "react";
 
 import { BotBlockerPanel } from "./botblocker-panel";
+import { ProjectAccountingPanel } from "./project-accounting-panel";
 import { VerificationTabs } from "./verification-tabs";
 
 interface ProjectCardProps {
@@ -159,6 +160,10 @@ export function ProjectCard({
         </button>
       </div>
       <BotBlockerPanel
+        projectId={project.id}
+        authenticatedFetch={authenticatedFetch}
+      />
+      <ProjectAccountingPanel
         projectId={project.id}
         authenticatedFetch={authenticatedFetch}
       />

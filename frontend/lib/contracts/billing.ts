@@ -35,15 +35,29 @@ export interface FinancialTransaction {
   userId: string;
   projectId?: string;
   interactionId?: string;
-  stripePaymentId?: string;
+  sessionId?: string;
+  paymentProcessor?: string;
+  paymentProcessorTransactionId?: string;
+  sourceTransactionId?: string;
+  adPayoutId?: string;
+  adSettlementId?: string;
+  thresholdRuleId?: string;
+  referralCode?: string;
+  commissionPercent?: number;
+  commissionBaseUsd?: number;
   type:
     | "visit"
-    | "otp1"
-    | "otp2"
-    | "otp3"
-    | "otp4"
-    | "otp5"
+    | "call_reachability"
+    | "voice_code"
+    | "voice_challenge"
+    | "sms_code"
+    | "email_code"
     | "daily_charge"
+    | "signup_threshold_charge"
+    | "signin_threshold_charge"
+    | "ad_revenue"
+    | "referral_commission"
+    | "age_verification"
     | "topup"
     | "admin_adjustment";
   country?: string;

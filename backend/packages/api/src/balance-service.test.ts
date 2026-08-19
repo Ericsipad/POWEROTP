@@ -100,7 +100,7 @@ describe("BalanceService.applyLedgerEntry", () => {
 
     const entry = await service.applyLedgerEntry({
       userId: "usr_1",
-      type: "otp2",
+      type: "voice_code",
       amountUsd: (tier) => (tier === "tier3" ? -0.01 : -0.05),
     });
     assert.equal(entry?.tierAtTransaction, "tier3");
@@ -117,7 +117,7 @@ describe("BalanceService.applyLedgerEntry", () => {
     });
     const service = new BalanceService(client, db);
 
-    const entry = await service.applyLedgerEntry({ userId: "usr_1", type: "otp1", amountUsd: -2 });
+    const entry = await service.applyLedgerEntry({ userId: "usr_1", type: "call_reachability", amountUsd: -2 });
     assert.equal(entry?.closingBalanceUsd, -1.5);
   });
 
@@ -127,11 +127,71 @@ describe("BalanceService.applyLedgerEntry", () => {
 
     const entry = await service.applyLedgerEntry({
       userId: PLATFORM_ADMIN_USER_ID,
-      type: "otp1",
+      type: "call_reachability",
       amountUsd: -5,
     });
     assert.equal(entry, undefined);
     assert.equal(ledgerRows.length, 0);
+  });
+});
+
+describe("BalanceService.applyLedgerEntries", () => {
+  it("writes related owner and referral rows in order with source linkage", async () => {
+    const balanceByUser = new Map<string, CustomerBalanceDocument>([
+      ["usr_owner", { _id: "usr_owner", balanceUsd: 60, tier: "tier2", updatedAt: new Date() }],
+      ["usr_referrer", { _id: "usr_referrer", balanceUsd: 0, tier: "tier1", updatedAt: new Date() }],
+    ]);
+    const ledgerRows: FinancialTransactionDocument[] = [];
+    const db = {
+      collection: (name: string) => {
+        if (name === "customerBalances") {
+          return {
+            findOne: async (filter: { _id: string }) => balanceByUser.get(filter._id) ?? null,
+            updateOne: async (
+              filter: { _id: string },
+              update: { $set: Omit<CustomerBalanceDocument, "_id"> },
+            ) => balanceByUser.set(filter._id, { _id: filter._id, ...update.$set }),
+          };
+        }
+        return {
+          insertOne: async (document: FinancialTransactionDocument) => {
+            ledgerRows.push(document);
+          },
+        };
+      },
+    } as unknown as Db;
+    const client = {
+      startSession: () => ({
+        withTransaction: async (work: () => Promise<void>) => work(),
+        endSession: async () => {},
+      }),
+    } as unknown as MongoClient;
+    const service = new BalanceService(client, db);
+
+    const rows = await service.applyLedgerEntries([
+      {
+        userId: "usr_owner",
+        projectId: "prj_1",
+        type: "signup_threshold_charge",
+        amountUsd: (tier) => (tier === "tier2" ? -2 : -3),
+      },
+      {
+        userId: "usr_referrer",
+        projectId: "prj_1",
+        type: "referral_commission",
+        amountUsd: (_tier, prior) => Math.abs(prior[0]?.amountUsd ?? 0) * 0.1,
+        sourceEntryIndex: 0,
+        commissionPercent: 10,
+      },
+    ]);
+
+    assert.equal(rows.length, 2);
+    assert.equal(rows[0]?.tierAtTransaction, "tier2");
+    assert.equal(rows[1]?.amountUsd, 0.2);
+    assert.equal(rows[1]?.sourceTransactionId, rows[0]?._id);
+    assert.equal(rows[1]?.commissionBaseUsd, 2);
+    assert.equal(balanceByUser.get("usr_owner")?.balanceUsd, 58);
+    assert.equal(balanceByUser.get("usr_referrer")?.balanceUsd, 0.2);
   });
 });
 

@@ -1,4 +1,4 @@
-import { toCustomerBalanceResponse } from "@powerotp/api/balance-service.js";
+import { toCustomerBalanceResponse } from "@powerotp/api/billing-responses.js";
 import { parseBody } from "@powerotp/api/errors.js";
 import { AdjustBalanceSchema } from "@powerotp/contracts";
 import { NextResponse } from "next/server";

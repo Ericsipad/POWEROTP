@@ -2337,3 +2337,46 @@ password** (a new random value in `/etc/asterisk/ari.conf`'s `[powerotp-agent]` 
 and the matching `ARI_PASS` in `/etc/powerotp/ari.env`, then `asterisk -rx "core reload"`
 and restart `powerotp-agent`) next time this droplet is touched. This does not affect
 `NODE_SECRET` or any VoIP.ms credential — only this one local-only value.
+
+## Pre-Phase-18 accounting foundation (implemented 2026-08-19)
+
+This roadmap prerequisite extends the existing customer balance system; it does not create a
+second wallet or project ledger. `financialTransactions` remains append-only and
+`customerBalances` remains its transactionally updated current-balance projection.
+
+- New ledger writes use `paymentProcessor` plus `paymentProcessorTransactionId`, allowing
+  independently namespaced IDs from Stripe and future processors. Historical `stripePaymentId`
+  rows remain readable as Stripe history. OTP ledger types now expose the exact verification
+  method (`call_reachability`, `voice_code`, `voice_challenge`, `sms_code`, or `email_code`)
+  instead of opaque `otp1`–`otp5` labels.
+- `BalanceService#applyLedgerEntries` writes ordered multi-account batches in one MongoDB
+  transaction. Source and referral rows, balance projections, durable idempotency claims, and
+  settlement/cooldown state commit or roll back together. Every commission row links to and
+  snapshots the amount/percentage of its immutable source row.
+- `projectAuthSessions` stores closed, immutable customer-site signup/signin reports with project,
+  session, timestamp, ad system, allotted slots, filled slots, and idempotency key. Reports require
+  the project API credential, rate limit, bounded timestamp, and `filled <= allotted`; browser code
+  cannot author financial values.
+- Admin-created `billingThresholdRules` carry an event type, positive threshold, three
+  balance-tier charge amounts, and active state. The daily worker counts the true preceding 30
+  days and uses `projectThresholdChargeStates.lastChargedAt` to prevent the same project/rule from
+  charging again until a full 31 days has elapsed.
+- Admin-created `adSystems` identify ad sources. The latest-ten-days UTC calendar accepts one
+  operator-entered gross payout pool per ad system and complete day. The daily worker can settle a
+  late entry for any day still in that window, aggregates immutable filled slots, allocates the
+  pool proportionally in integer micro-USD using deterministic largest remainder, and guarantees
+  all project credits sum exactly to the entered pool. `adDailyPayouts` and
+  `adDailySettlements` make every system/day/project settlement immutable and retry-safe.
+- Customer-created referral codes support `powerotp.com/{code}` first-touch attribution through a
+  30-day SameSite cookie consumed by the next successful signup. Account attribution is immutable.
+  Each project may independently select a non-self referral code; replacements close historical
+  attribution and affect only future rows. Admin commission percentages independently cover
+  signup charges, signin charges, ad deposits, and actual daily recurring charges.
+- Customer project cards show trailing-30-day signup/signin counts, project referral assignment,
+  and project-filtered ledger rows. The admin accounting panel manages ad systems, the ten-day
+  payout calendar, threshold rows, and referral commission percentages. No rates, thresholds,
+  payout amounts, ad systems, referral codes, or commissions are seeded.
+
+Security and audit boundaries are documented in `THREAT_MODEL.md`; every new backend route is
+listed in `API_ROUTE_INVENTORY.md`. Focused contracts, API, backend, and frontend checks passed,
+followed by a clean final root `npm run verify`.

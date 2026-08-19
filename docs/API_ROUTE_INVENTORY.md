@@ -17,12 +17,18 @@ Usage classes describe the route's callers, not its implementation status:
 | `app/health/route.ts` | `/health` | `GET` | None | public | App Platform and uptime probes | `https://api.powerotp.com` |
 | `app/mcp/route.ts` | `/mcp` | `GET, POST, DELETE` | None; anonymous read-only MCP | public | MCP-compatible AI clients | `https://api.powerotp.com` |
 | `app/ready/route.ts` | `/ready` | `GET` | None | public | App Platform and operators | `https://api.powerotp.com` |
+| `app/v1/admin/billing/accounting/route.ts` | `/v1/admin/billing/accounting` | `GET` | Admin session | admin | Admin accounting configuration panel | `https://api.powerotp.com` |
+| `app/v1/admin/billing/ad-payouts/route.ts` | `/v1/admin/billing/ad-payouts` | `PUT` | Admin session + CSRF | admin | Admin 10-day ad payout calendar | `https://api.powerotp.com` |
+| `app/v1/admin/billing/ad-systems/route.ts` | `/v1/admin/billing/ad-systems` | `PUT` | Admin session + CSRF | admin | Admin accounting configuration panel | `https://api.powerotp.com` |
 | `app/v1/admin/billing/call-rates/route.ts` | `/v1/admin/billing/call-rates` | `GET, PUT` | Admin session; CSRF on PUT | admin | Admin billing rates panel | `https://api.powerotp.com` |
 | `app/v1/admin/billing/credit/route.ts` | `/v1/admin/billing/credit` | `POST` | Admin session + CSRF | admin | Admin billing ledger panel | `https://api.powerotp.com` |
 | `app/v1/admin/billing/email-rate/route.ts` | `/v1/admin/billing/email-rate` | `GET, PUT` | Admin session; CSRF on PUT | admin | Admin billing rates panel | `https://api.powerotp.com` |
 | `app/v1/admin/billing/ledger/route.ts` | `/v1/admin/billing/ledger` | `GET` | Admin session | admin | Admin billing ledger panel | `https://api.powerotp.com` |
 | `app/v1/admin/billing/plan-charges/route.ts` | `/v1/admin/billing/plan-charges` | `GET, PUT` | Admin session; CSRF on PUT | admin | Admin billing rates panel | `https://api.powerotp.com` |
+| `app/v1/admin/billing/referral-commissions/route.ts` | `/v1/admin/billing/referral-commissions` | `PUT` | Admin session + CSRF | admin | Admin accounting configuration panel | `https://api.powerotp.com` |
 | `app/v1/admin/billing/sms-rates/route.ts` | `/v1/admin/billing/sms-rates` | `GET, PUT` | Admin session; CSRF on PUT | admin | Admin billing rates panel | `https://api.powerotp.com` |
+| `app/v1/admin/billing/thresholds/[ruleId]/route.ts` | `/v1/admin/billing/thresholds/{ruleId}` | `PATCH` | Admin session + CSRF | admin | Admin accounting configuration panel | `https://api.powerotp.com` |
+| `app/v1/admin/billing/thresholds/route.ts` | `/v1/admin/billing/thresholds` | `POST` | Admin session + CSRF | admin | Admin accounting configuration panel | `https://api.powerotp.com` |
 | `app/v1/admin/callback-deliveries/route.ts` | `/v1/admin/callback-deliveries` | `GET` | Admin session | admin | Admin callback deliveries panel | `https://api.powerotp.com` |
 | `app/v1/admin/challenges/[id]/route.ts` | `/v1/admin/challenges/{id}` | `DELETE` | Admin session + CSRF | admin | Admin challenge manager | `https://api.powerotp.com` |
 | `app/v1/admin/challenges/route.ts` | `/v1/admin/challenges` | `GET, POST` | Admin session; CSRF on POST | admin | Admin challenge manager | `https://api.powerotp.com` |
@@ -75,16 +81,21 @@ Usage classes describe the route's callers, not its implementation status:
 | `app/v1/nodes/jobs/next/route.ts` | `/v1/nodes/jobs/next` | `GET` | NODE_SECRET bearer token | node | Telephony agent | `https://api.powerotp.com` |
 | `app/v1/nodes/media-manifest/route.ts` | `/v1/nodes/media-manifest` | `GET` | NODE_SECRET bearer token | node | Telephony agent media sync | `https://api.powerotp.com` |
 | `app/v1/nodes/trunk-status/route.ts` | `/v1/nodes/trunk-status` | `POST` | NODE_SECRET bearer token | node | Telephony agent | `https://api.powerotp.com` |
+| `app/v1/projects/[projectId]/accounting/route.ts` | `/v1/projects/{projectId}/accounting` | `GET` | Customer session + project ownership | browser | Dashboard project accounting panel | `https://api.powerotp.com` |
+| `app/v1/projects/[projectId]/auth-sessions/route.ts` | `/v1/projects/{projectId}/auth-sessions` | `POST` | Project API key + Idempotency-Key + rate limit | server-to-server | Customer sign-in-as-a-service backends | `https://api.powerotp.com` |
 | `app/v1/projects/[projectId]/botblocker/rotate-site-credential/route.ts` | `/v1/projects/{projectId}/botblocker/rotate-site-credential` | `POST` | Customer session + CSRF + Idempotency-Key | browser | MCP setup instructions; no frontend consumer yet | `https://api.powerotp.com` |
 | `app/v1/projects/[projectId]/botblocker/visitors/route.ts` | `/v1/projects/{projectId}/botblocker/visitors` | `GET` | Customer session | browser | Documentation; no frontend consumer yet | `https://api.powerotp.com` |
 | `app/v1/projects/[projectId]/botblocker/route.ts` | `/v1/projects/{projectId}/botblocker` | `GET, PATCH` | Customer session; CSRF on PATCH | browser | Dashboard BotBlocker panel | `https://api.powerotp.com` |
 | `app/v1/projects/[projectId]/callback/route.ts` | `/v1/projects/{projectId}/callback` | `POST` | Customer session + CSRF | browser | Dashboard project settings | `https://api.powerotp.com` |
 | `app/v1/projects/[projectId]/interactions/route.ts` | `/v1/projects/{projectId}/interactions` | `GET` | Customer session | browser | Dashboard verification history | `https://api.powerotp.com` |
 | `app/v1/projects/[projectId]/modal-sessions/route.ts` | `/v1/projects/{projectId}/modal-sessions` | `POST` | Project API key | server-to-server | SDK, MCP examples, widget loader, customer backends | `https://api.powerotp.com` |
+| `app/v1/projects/[projectId]/referral/route.ts` | `/v1/projects/{projectId}/referral` | `PUT` | Customer session + CSRF + project ownership | browser | Dashboard project accounting panel | `https://api.powerotp.com` |
 | `app/v1/projects/[projectId]/rotate-api-key/route.ts` | `/v1/projects/{projectId}/rotate-api-key` | `POST` | Customer session + CSRF | browser | Dashboard project settings | `https://api.powerotp.com` |
 | `app/v1/projects/[projectId]/route.ts` | `/v1/projects/{projectId}` | `PATCH` | Customer session + CSRF | browser | Dashboard project settings | `https://api.powerotp.com` |
 | `app/v1/projects/[projectId]/verifications/route.ts` | `/v1/projects/{projectId}/verifications` | `POST` | Project API key + Idempotency-Key | server-to-server | SDK, MCP examples, and customer backends | `https://api.powerotp.com` |
 | `app/v1/projects/[projectId]/visitors/route.ts` | `/v1/projects/{projectId}/visitors` | `GET` | Customer session | browser | Dashboard visitors panel | `https://api.powerotp.com` |
 | `app/v1/projects/route.ts` | `/v1/projects` | `GET, POST` | Customer session; CSRF on POST | browser | Dashboard | `https://api.powerotp.com` |
+| `app/v1/referrals/[code]/route.ts` | `/v1/referrals/{code}` | `GET` | Public syntax/active-code lookup + rate limit | public | Referral landing route | `https://api.powerotp.com` |
+| `app/v1/referrals/route.ts` | `/v1/referrals` | `GET, POST` | Customer session; CSRF on POST | browser | Dashboard referral panel | `https://api.powerotp.com` |
 | `app/v1/verifications/[interactionId]/response/route.ts` | `/v1/verifications/{interactionId}/response` | `POST` | Interaction token or project API key | browser/server-to-server | Hosted widget, SDK, and customer backends | `https://api.powerotp.com` |
 | `app/v1/verifications/[interactionId]/route.ts` | `/v1/verifications/{interactionId}` | `GET` | Status interaction token or project API key | browser/server-to-server | Hosted widget, SDK, and customer backends | `https://api.powerotp.com` |

@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 
 import { apiFetch } from "@/lib/api-client";
 
+import { AccountingPanel } from "./accounting-panel";
 import { BillingLedgerPanel } from "./billing-ledger-panel";
 import { BillingRatesPanel } from "./billing-rates-panel";
 import { CallbackDeliveriesPanel } from "./callback-deliveries-panel";
@@ -187,6 +188,7 @@ export default function AdminPage() {
         <WidgetInteractionsPanel />
         {session && <ChallengesPanel csrfToken={session.csrfToken} />}
         {session && <BillingRatesPanel csrfToken={session.csrfToken} />}
+        {session && <AccountingPanel csrfToken={session.csrfToken} />}
         {session && <BillingLedgerPanel csrfToken={session.csrfToken} />}
       </section>
     </main>

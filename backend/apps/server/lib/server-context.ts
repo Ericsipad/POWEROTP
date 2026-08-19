@@ -1,4 +1,5 @@
 import { createAlertQueue, createAlertWorker, scheduleAlertChecks } from "@powerotp/api/alert-worker.js";
+import { AccountingConfigService } from "@powerotp/api/accounting-config-service.js";
 import { AuthService } from "@powerotp/api/auth-service.js";
 import { BalanceService } from "@powerotp/api/balance-service.js";
 import { BillingChargeService } from "@powerotp/api/billing-charge-service.js";
@@ -41,7 +42,9 @@ import { NodeService } from "@powerotp/api/node-service.js";
 import { ensureIndexes } from "@powerotp/api/persistence.js";
 import { createProviderReconcileWorker } from "@powerotp/api/provider-reconcile-worker.js";
 import { ProjectService } from "@powerotp/api/project-service.js";
+import { ProjectAuthSessionService } from "@powerotp/api/project-auth-session-service.js";
 import { RateChartService } from "@powerotp/api/rate-chart-service.js";
+import { ReferralService } from "@powerotp/api/referral-service.js";
 import { StripeTopupService } from "@powerotp/api/stripe-service.js";
 import { productionTransportRegistry } from "@powerotp/api/transport.js";
 import { UsageQuotaService } from "@powerotp/api/usage-quota-service.js";
@@ -83,6 +86,9 @@ export interface ServerContext {
   balances: BalanceService;
   rateCharts: RateChartService;
   stripeTopups: StripeTopupService;
+  accountingConfig: AccountingConfigService;
+  projectAuthSessions: ProjectAuthSessionService;
+  referrals: ReferralService;
 }
 
 /**
@@ -109,6 +115,9 @@ async function buildServerContext(): Promise<ServerContext> {
   const rateCharts = new RateChartService(dataStores.db);
   const billingCharges = new BillingChargeService(dataStores.db, balances, rateCharts);
   const stripeTopups = new StripeTopupService(dataStores.db, config, balances);
+  const accountingConfig = new AccountingConfigService(dataStores.db);
+  const projectAuthSessions = new ProjectAuthSessionService(dataStores.db);
+  const referrals = new ReferralService(dataStores.client, dataStores.db);
   const usageQuotas = new UsageQuotaService(dataStores.db);
 
   const emailService = createBrevoEmailService(config);
@@ -286,6 +295,9 @@ async function buildServerContext(): Promise<ServerContext> {
     balances,
     rateCharts,
     stripeTopups,
+    accountingConfig,
+    projectAuthSessions,
+    referrals,
   };
 }
 

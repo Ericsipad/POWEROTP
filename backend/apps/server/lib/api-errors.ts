@@ -1,4 +1,5 @@
 import { ApiError } from "@powerotp/api/errors.js";
+import { AccountingConfigError } from "@powerotp/api/accounting-config-service.js";
 import { AuthError } from "@powerotp/api/auth-service.js";
 import { BillingError } from "@powerotp/api/balance-service.js";
 import { BotBlockerSiteCredentialError } from "@powerotp/api/botblocker-errors.js";
@@ -7,6 +8,8 @@ import { ModalSessionError } from "@powerotp/api/modal-session-service.js";
 import { NodeError } from "@powerotp/api/node-service.js";
 import { MediaValidationError } from "@powerotp/api/media-service.js";
 import { ProjectError } from "@powerotp/api/project-service.js";
+import { ProjectAuthSessionError } from "@powerotp/api/project-auth-session-service.js";
+import { ReferralError } from "@powerotp/api/referral-service.js";
 import { VerificationError } from "@powerotp/api/verification-service.js";
 import { InteractionTokenError } from "@powerotp/api/interaction-tokens.js";
 import { NextResponse } from "next/server";
@@ -28,6 +31,9 @@ export function toErrorResponse(error: unknown, correlationId: string): NextResp
     error instanceof ModalSessionError ||
     error instanceof BillingError ||
     error instanceof BotBlockerSiteCredentialError
+    || error instanceof AccountingConfigError
+    || error instanceof ProjectAuthSessionError
+    || error instanceof ReferralError
   ) {
     return NextResponse.json(
       { error: error.code },

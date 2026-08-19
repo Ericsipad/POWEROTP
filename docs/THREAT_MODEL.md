@@ -451,6 +451,30 @@ across every customer at once, without needing to know any customer's credential
   Consolidation removes duplicate report logic but does not weaken endpoint, audience, freshness,
   nonce, idempotency, rate-limit, or scope validation.
 
+### Customer accounting, referrals, and ad-payout integrity
+
+- `financialTransactions` remains the sole append-only monetary ledger and `customerBalances`
+  remains only its transactionally updated current-balance projection. Project reporting and ad
+  settlement collections never maintain a competing balance.
+- Payment references bind both a normalized processor identifier and that processor's transaction
+  ID. A bare provider transaction ID is never treated as globally unique, and historical
+  Stripe-only references are read as Stripe without remaining the write contract.
+- Customer-site signup/signin events are accepted only from the authenticated project server,
+  with a project-scoped idempotency key, rate limit, bounded timestamp, closed event schema, and
+  `filled <= allotted` validation. Browser reports cannot author session counts, slot totals,
+  charge amounts, referral recipients, or payout values.
+- An admin-authenticated, CSRF-protected operator enters one gross payout pool per ad system and
+  complete UTC day. Settlement uses immutable server-received filled-slot rows and integer
+  micro-USD largest-remainder allocation, so project credits sum exactly to the entered pool.
+  Unique day/system/project claims and one MongoDB transaction prevent partial or duplicate
+  credits; late entry is limited to the latest ten complete days.
+- Threshold charges use indexed immutable events, configured positive thresholds, the owning
+  account's tier inside the ledger transaction, and durable per-project/rule cooldown state.
+  Referral commissions are linked to their source row and commit atomically with it.
+- Referral codes reject reserved names and self-referral. Account attribution is first-touch and
+  immutable; project referral replacement requires the owning customer session and CSRF, closes
+  the prior attribution without rewriting history, and affects only future rows.
+
 ### CleanDataPage access, content, and revenue integrity
 
 - A CleanDataPage URL identifies a project/page but authorizes nothing. Every request requires

@@ -1,4 +1,4 @@
-import type { BillingTier, FinancialTransactionType } from "@powerotp/contracts";
+import type { BillingTier, FinancialTransactionType, VerificationType } from "@powerotp/contracts";
 import type { Db } from "mongodb";
 
 /** Admin-entered per-country, per-tier call rate (USD/minute) — `_id` is the
@@ -66,12 +66,23 @@ export interface FinancialTransactionDocument {
   userId: string;
   projectId?: string;
   interactionId?: string;
+  sessionId?: string;
+  paymentProcessor?: string;
+  paymentProcessorTransactionId?: string;
+  /** Historical Stripe rows written before generic processor identity shipped. */
   stripePaymentId?: string;
-  type: FinancialTransactionType;
+  sourceTransactionId?: string;
+  adPayoutId?: string;
+  adSettlementId?: string;
+  thresholdRuleId?: string;
+  referralCode?: string;
+  commissionPercent?: number;
+  commissionBaseUsd?: number;
+  idempotencyKey?: string;
+  type: FinancialTransactionType | "otp1" | "otp2" | "otp3" | "otp4" | "otp5";
   country?: string;
   /** A short annotation — the admin's stated reason for `admin_adjustment`
-   * rows, or the literal `"free_quota"` for a free-quota-covered `otp1`..
-   * `otp4` row (see `backend/packages/api/src/billing-charge-service.ts`). */
+   * rows, or the literal `"free_quota"` for a free-quota-covered OTP row. */
   note?: string;
   openingBalanceUsd: number;
   tierAtTransaction: BillingTier;
@@ -79,6 +90,19 @@ export interface FinancialTransactionDocument {
   closingBalanceUsd: number;
   createdAt: Date;
 }
+
+export interface BillingIdempotencyClaimDocument {
+  _id: string;
+  createdAt: Date;
+}
+
+export const legacyOtpTypeMap: Record<`otp${1 | 2 | 3 | 4 | 5}`, VerificationType> = {
+  otp1: "call_reachability",
+  otp2: "voice_code",
+  otp3: "voice_challenge",
+  otp4: "sms_code",
+  otp5: "email_code",
+};
 
 /** Keyed by Stripe's own event id — makes webhook delivery idempotent,
  * since Stripe retries on any non-2xx response and this must never
@@ -99,6 +123,9 @@ export async function ensureBillingIndexes(db: Db) {
     db
       .collection<FinancialTransactionDocument>("financialTransactions")
       .createIndex({ projectId: 1, createdAt: -1 }),
+    db
+      .collection<FinancialTransactionDocument>("financialTransactions")
+      .createIndex({ idempotencyKey: 1 }, { unique: true, sparse: true }),
     db
       .collection<ProcessedStripeEventDocument>("processedStripeEvents")
       .createIndex({ processedAt: 1 }, { expireAfterSeconds: PROCESSED_STRIPE_EVENT_TTL_SECONDS }),

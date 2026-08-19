@@ -413,7 +413,19 @@ and pulls authoritative session data with the scoped visitor token. Local headle
 remains advisory only. CGNAT is not a direct observable signal, and IPv4/IPv6 remain lookup/storage
 families rather than score inputs. Step 7 was completed in fresh sessions for canonical
 contract/transport, event-row configuration/scoring, and `risk_events_sum` profile integration.
-Phase 17 is complete; Phase 18 follows next.
+Phase 17 is complete. The accounting prerequisite below was inserted before Phase 18 by explicit
+product decision; Phase 18 follows it without changing Phase 18's policy scope.
+
+### Pre-Phase-18 prerequisite — Accounting foundation
+
+**Implementation status: complete (2026-08-19).** Extend the existing customer balance and
+append-only financial ledger with provider-neutral payment references, exact OTP method types,
+project signup/signin event metering, configurable rolling-30-day threshold charges, project and
+account referral attribution, referral commissions, and admin-entered ad-system daily payout
+pools. A daily worker scans the latest ten complete UTC days, allocates each entered pool across
+projects by filled slots, and settles every project/day exactly once. This prerequisite is a
+roadmap insertion; it does not implement Phase 18 policy, CleanDataPages, visitor billing, or OTP
+orchestration.
 
 ### Phase 18 — Customer risk/OTP policy
 

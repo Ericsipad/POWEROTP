@@ -1,4 +1,4 @@
-import { toFinancialTransactionResponse } from "@powerotp/api/balance-service.js";
+import { toFinancialTransactionResponse } from "@powerotp/api/billing-responses.js";
 import { NextResponse } from "next/server";
 
 import { apiRoute } from "@/lib/api-route";

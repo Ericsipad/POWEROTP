@@ -16,7 +16,7 @@ import { getServerContext } from "@/lib/server-context";
  * back for later.
  */
 export const POST = apiRoute(async (request) => {
-  const { auth, config, dataStores, projects } = await getServerContext();
+  const { auth, config, dataStores, projects, referrals } = await getServerContext();
   requireAllowedOrigin(request, config.PUBLIC_APP_URL);
   await enforceRateLimit(dataStores.rateLimitStore, `rl:signup:${clientIp(request) ?? "unknown"}`, 5, 60);
 
@@ -30,6 +30,10 @@ export const POST = apiRoute(async (request) => {
     // Anti-enumeration: never reveal an existing project/API key here.
     const body: SignupResponse = { status: "already_registered" };
     return NextResponse.json(body, { status: 202 });
+  }
+
+  if (input.referralCode) {
+    await referrals.attributeAccount(userId, input.referralCode);
   }
 
   const existingProjects = await projects.list(userId);

@@ -13,6 +13,7 @@ import { apiFetch } from "@/lib/api-client";
 
 import { TopBanner } from "../top-banner";
 import { BillingPanel } from "./billing-panel";
+import { ReferralPanel } from "./referral-panel";
 import { ProjectCard } from "./project-card";
 
 const methods: Array<{ id: VerificationType; label: string }> = [
@@ -189,6 +190,7 @@ export default function DashboardPage() {
       <section className="dashboardGrid shell">
         {error && <div className="formError">{error}</div>}
         {session && <BillingPanel authenticatedFetch={authenticatedFetch} />}
+        {session && <ReferralPanel authenticatedFetch={authenticatedFetch} />}
         {!projects.length && !error && (
           <div className="emptyState">Create your first POWEROTP project.</div>
         )}

@@ -10,6 +10,15 @@ interface SignupModalProps {
 }
 
 type Step = "form" | "submitting" | "success" | "already_registered";
+const REFERRAL_COOKIE = "powerotp_referral";
+
+function referralCodeFromCookie(): string | undefined {
+  return document.cookie
+    .split(";")
+    .map((part) => part.trim())
+    .find((part) => part.startsWith(`${REFERRAL_COOKIE}=`))
+    ?.slice(REFERRAL_COOKIE.length + 1);
+}
 
 /**
  * The "rapid signup" modal: email + password (entered twice), a live
@@ -39,7 +48,7 @@ export function SignupModal({ onClose }: SignupModalProps) {
       const response = await apiFetch("/v1/auth/signup", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email, password, referralCode: referralCodeFromCookie() }),
       });
       const data = (await response.json().catch(() => undefined)) as
         | (SignupResponse & { error?: string })
@@ -57,6 +66,9 @@ export function SignupModal({ onClose }: SignupModalProps) {
       }
       setResult(data);
       setStep(data.status === "already_registered" ? "already_registered" : "success");
+      if (data.status !== "already_registered") {
+        document.cookie = `${REFERRAL_COOKIE}=; Path=/; Max-Age=0; SameSite=Lax`;
+      }
     } catch {
       setError("Could not reach the signup API.");
       setStep("form");

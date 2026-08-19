@@ -98,7 +98,8 @@ export class StripeTopupService {
       userId,
       type: "topup",
       amountUsd,
-      stripePaymentId:
+      paymentProcessor: "stripe",
+      paymentProcessorTransactionId:
         typeof session.payment_intent === "string" ? session.payment_intent : session.id,
     });
   }
