@@ -126,30 +126,40 @@ export const PaymentProcessorSchema = z
  * caused by a missing rate — see `backend/packages/api/src/usage-quota-service.ts` and
  * `backend/packages/api/src/billing-charge-service.ts`).
  */
-export const FinancialTransactionSchema = z.object({
-  id: z.string().min(16),
-  userId: z.string().min(1),
-  projectId: z.string().min(1).optional(),
-  interactionId: z.string().min(1).optional(),
-  sessionId: z.string().min(1).optional(),
-  paymentProcessor: PaymentProcessorSchema.optional(),
-  paymentProcessorTransactionId: z.string().min(1).max(200).optional(),
-  sourceTransactionId: z.string().min(1).optional(),
-  adPayoutId: z.string().min(1).optional(),
-  adSettlementId: z.string().min(1).optional(),
-  thresholdRuleId: z.string().min(1).optional(),
-  referralCode: z.string().min(1).max(40).optional(),
-  commissionPercent: z.number().min(0).max(100).optional(),
-  commissionBaseUsd: z.number().nonnegative().optional(),
-  type: FinancialTransactionTypeSchema,
-  country: CountryCodeSchema.optional(),
-  note: z.string().min(1).max(200).optional(),
-  openingBalanceUsd: z.number(),
-  tierAtTransaction: BillingTierSchema,
-  amountUsd: z.number(),
-  closingBalanceUsd: z.number(),
-  createdAt: z.string().datetime(),
-});
+export const FinancialTransactionSchema = z
+  .object({
+    id: z.string().min(16),
+    userId: z.string().min(1),
+    projectId: z.string().min(1).optional(),
+    interactionId: z.string().min(1).optional(),
+    sessionId: z.string().min(1).optional(),
+    paymentProcessor: PaymentProcessorSchema.optional(),
+    paymentProcessorTransactionId: z.string().min(1).max(200).optional(),
+    sourceTransactionId: z.string().min(1).optional(),
+    adPayoutId: z.string().min(1).optional(),
+    adSettlementId: z.string().min(1).optional(),
+    thresholdRuleId: z.string().min(1).optional(),
+    referralCode: z.string().min(1).max(40).optional(),
+    commissionPercent: z.number().min(0).max(100).optional(),
+    commissionBaseUsd: z.number().nonnegative().optional(),
+    type: FinancialTransactionTypeSchema,
+    country: CountryCodeSchema.optional(),
+    note: z.string().min(1).max(200).optional(),
+    openingBalanceUsd: z.number(),
+    tierAtTransaction: BillingTierSchema,
+    amountUsd: z.number(),
+    closingBalanceUsd: z.number(),
+    createdAt: z.string().datetime(),
+  })
+  .refine(
+    (value) =>
+      (value.paymentProcessor === undefined) ===
+      (value.paymentProcessorTransactionId === undefined),
+    {
+      message: "Payment processor and transaction ID must be supplied together",
+      path: ["paymentProcessorTransactionId"],
+    },
+  );
 
 /**
  * Admin manual balance credit/debit (`POST /v1/admin/billing/credit`) — the

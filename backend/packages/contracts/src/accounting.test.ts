@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 
 import {
   AdDailyPayoutInputSchema,
+  AccountingAdminConfigSchema,
   BillingThresholdRuleInputSchema,
   FinancialTransactionSchema,
   ProjectAuthSessionReportSchema,
@@ -26,6 +27,45 @@ describe("accounting contracts", () => {
     assert.equal(parsed.type, "voice_challenge");
     assert.equal(parsed.paymentProcessor, "processor_two");
     assert.equal(FinancialTransactionSchema.safeParse({ ...parsed, type: "otp3" }).success, false);
+    assert.equal(
+      FinancialTransactionSchema.safeParse({
+        ...parsed,
+        paymentProcessorTransactionId: undefined,
+      }).success,
+      false,
+    );
+    assert.equal(
+      FinancialTransactionSchema.safeParse({
+        ...parsed,
+        paymentProcessor: undefined,
+      }).success,
+      false,
+    );
+  });
+
+  it("requires the complete ten-day admin payout calendar contract", () => {
+    const serviceDates = Array.from({ length: 10 }, (_, index) =>
+      `2026-08-${String(18 - index).padStart(2, "0")}`
+    );
+    assert.equal(
+      AccountingAdminConfigSchema.safeParse({
+        adSystems: [],
+        thresholds: [],
+        commissions: null,
+        payouts: [],
+        serviceDates,
+      }).success,
+      true,
+    );
+    assert.equal(
+      AccountingAdminConfigSchema.safeParse({
+        adSystems: [],
+        thresholds: [],
+        commissions: null,
+        payouts: [],
+      }).success,
+      false,
+    );
   });
 
   it("rejects malformed or overfilled project session reports", () => {

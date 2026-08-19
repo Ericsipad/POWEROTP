@@ -116,16 +116,27 @@ export interface ProcessedStripeEventDocument {
 const PROCESSED_STRIPE_EVENT_TTL_SECONDS = 90 * 24 * 60 * 60;
 
 export async function ensureBillingIndexes(db: Db) {
+  const ledger = db.collection<FinancialTransactionDocument>("financialTransactions");
   await Promise.all([
-    db
-      .collection<FinancialTransactionDocument>("financialTransactions")
-      .createIndex({ userId: 1, createdAt: -1 }),
-    db
-      .collection<FinancialTransactionDocument>("financialTransactions")
-      .createIndex({ projectId: 1, createdAt: -1 }),
-    db
-      .collection<FinancialTransactionDocument>("financialTransactions")
-      .createIndex({ idempotencyKey: 1 }, { unique: true, sparse: true }),
+    ledger.createIndex({ userId: 1, createdAt: -1 }),
+    ledger.createIndex({ projectId: 1, createdAt: -1 }),
+  ]);
+  const legacyIdempotencyIndex = (await ledger.listIndexes().toArray())
+    .find((index) => index.name === "idempotencyKey_1" && index.unique);
+  if (legacyIdempotencyIndex) {
+    await ledger.dropIndex("idempotencyKey_1");
+  }
+  await Promise.all([
+    ledger.createIndex(
+      { paymentProcessor: 1, paymentProcessorTransactionId: 1 },
+      {
+        unique: true,
+        partialFilterExpression: {
+          paymentProcessor: { $type: "string" },
+          paymentProcessorTransactionId: { $type: "string" },
+        },
+      },
+    ),
     db
       .collection<ProcessedStripeEventDocument>("processedStripeEvents")
       .createIndex({ processedAt: 1 }, { expireAfterSeconds: PROCESSED_STRIPE_EVENT_TTL_SECONDS }),

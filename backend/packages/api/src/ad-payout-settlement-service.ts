@@ -11,7 +11,11 @@ import type {
   ReferralCommissionSettingsDocument,
 } from "./accounting-persistence.js";
 import type { BalanceService, LedgerEntryInput } from "./balance-service.js";
-import type { AuditDocument, ProjectDocument } from "./persistence.js";
+import {
+  PLATFORM_ADMIN_USER_ID,
+  type AuditDocument,
+  type ProjectDocument,
+} from "./persistence.js";
 import { createSortableId } from "./security.js";
 
 const DAY_MS = 86_400_000;
@@ -85,16 +89,25 @@ export class AdPayoutSettlementService {
         { $group: { _id: "$projectId", filledSlots: { $sum: "$adSlotsFilled" } } },
       ])
       .toArray();
-    const totalFilledSlots = grouped.reduce((sum, row) => sum + row.filledSlots, 0);
-    if (totalFilledSlots === 0) throw new Error("no_filled_slots");
-    const allocations = allocatePayoutMicros(
-      payout.grossPayoutMicros,
-      grouped.map((row) => ({ projectId: row._id, filledSlots: row.filledSlots })),
-    );
     const projects = await this.#projects
-      .find({ _id: { $in: allocations.map((row) => row.projectId) } })
+      .find({ _id: { $in: grouped.map((row) => row._id) } })
       .toArray();
     const projectById = new Map(projects.map((project) => [project._id, project]));
+    if (grouped.some((row) => !projectById.has(row._id))) throw new Error("project_not_found");
+    const billableShares = grouped
+      .filter((row) => projectById.get(row._id)?.customerId !== PLATFORM_ADMIN_USER_ID)
+      .map((row) => ({ projectId: row._id, filledSlots: row.filledSlots }));
+    if (billableShares.some((row) => !Number.isSafeInteger(row.filledSlots) || row.filledSlots < 0)) {
+      throw new Error("filled_slots_too_large");
+    }
+    const totalFilledSlotsBigInt = billableShares
+      .reduce((sum, row) => sum + BigInt(row.filledSlots), 0n);
+    if (totalFilledSlotsBigInt === 0n) throw new Error("no_filled_slots");
+    if (totalFilledSlotsBigInt > BigInt(Number.MAX_SAFE_INTEGER)) {
+      throw new Error("filled_slots_too_large");
+    }
+    const totalFilledSlots = Number(totalFilledSlotsBigInt);
+    const allocations = allocatePayoutMicros(payout.grossPayoutMicros, billableShares);
     const referrals = await this.#projectReferrals
       .find({ projectId: { $in: allocations.map((row) => row.projectId) }, endedAt: { $exists: false } })
       .toArray();

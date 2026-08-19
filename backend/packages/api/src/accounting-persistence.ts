@@ -1,5 +1,5 @@
 import type { BillingTier, ProjectAuthEventType } from "@powerotp/contracts";
-import type { Db } from "mongodb";
+import type { Collection, Db, Document } from "mongodb";
 
 export interface ProjectAuthSessionDocument {
   _id: string;
@@ -110,7 +110,33 @@ export interface ReferralCommissionSettingsDocument {
   updatedBy: string;
 }
 
+async function dropNonUniqueIndex<T extends Document>(
+  collection: Collection<T>,
+  indexName: string,
+): Promise<void> {
+  try {
+    const index = (await collection.listIndexes().toArray())
+      .find((candidate) => candidate.name === indexName);
+    if (index && !index.unique) await collection.dropIndex(indexName);
+  } catch (error) {
+    if (
+      typeof error !== "object" ||
+      error === null ||
+      !("code" in error) ||
+      error.code !== 26
+    ) {
+      throw error;
+    }
+  }
+}
+
 export async function ensureAccountingIndexes(db: Db): Promise<void> {
+  const thresholds = db.collection<BillingThresholdRuleDocument>("billingThresholdRules");
+  const referralCodes = db.collection<ReferralCodeDocument>("referralCodes");
+  await Promise.all([
+    dropNonUniqueIndex(thresholds, "eventType_1_thresholdCount_1"),
+    dropNonUniqueIndex(referralCodes, "ownerUserId_1"),
+  ]);
   await Promise.all([
     db
       .collection<ProjectAuthSessionDocument>("projectAuthSessions")
@@ -127,13 +153,14 @@ export async function ensureAccountingIndexes(db: Db): Promise<void> {
     db
       .collection<AdDailySettlementDocument>("adDailySettlements")
       .createIndex({ projectId: 1, adSystemId: 1, serviceDate: 1 }, { unique: true }),
-    db
-      .collection<BillingThresholdRuleDocument>("billingThresholdRules")
-      .createIndex({ eventType: 1, thresholdCount: 1 }),
+    thresholds.createIndex({ eventType: 1, thresholdCount: 1 }, { unique: true }),
     db
       .collection<ProjectThresholdChargeStateDocument>("projectThresholdChargeStates")
       .createIndex({ projectId: 1, thresholdRuleId: 1 }, { unique: true }),
-    db.collection<ReferralCodeDocument>("referralCodes").createIndex({ ownerUserId: 1 }),
+    referralCodes.createIndex(
+      { ownerUserId: 1 },
+      { unique: true, partialFilterExpression: { active: true } },
+    ),
     db
       .collection<ProjectReferralAttributionDocument>("projectReferralAttributions")
       .createIndex(

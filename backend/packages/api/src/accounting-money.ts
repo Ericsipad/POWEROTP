@@ -34,11 +34,19 @@ export function allocatePayoutMicros(
   totalMicros: number,
   shares: readonly FilledSlotShare[],
 ): PayoutAllocation[] {
+  if (!Number.isSafeInteger(totalMicros) || totalMicros < 0) {
+    throw new Error("invalid_payout_micros");
+  }
+  if (shares.some((share) => !Number.isSafeInteger(share.filledSlots) || share.filledSlots < 0)) {
+    throw new Error("invalid_filled_slots");
+  }
   const eligible = shares.filter((share) => share.filledSlots > 0);
-  const totalSlots = eligible.reduce((sum, share) => sum + share.filledSlots, 0);
-  if (totalSlots === 0) return [];
+  const denominator = eligible.reduce(
+    (sum, share) => sum + BigInt(share.filledSlots),
+    0n,
+  );
+  if (denominator === 0n) return [];
 
-  const denominator = BigInt(totalSlots);
   const rows = eligible.map((share) => {
     const numerator = BigInt(totalMicros) * BigInt(share.filledSlots);
     return {
@@ -50,7 +58,7 @@ export function allocatePayoutMicros(
   let unallocated = totalMicros - rows.reduce((sum, row) => sum + row.allocatedMicros, 0);
   rows.sort((left, right) => {
     if (left.remainder !== right.remainder) return left.remainder > right.remainder ? -1 : 1;
-    return left.projectId.localeCompare(right.projectId);
+    return left.projectId < right.projectId ? -1 : left.projectId > right.projectId ? 1 : 0;
   });
   for (let index = 0; index < unallocated; index += 1) {
     const row = rows[index];
@@ -58,5 +66,7 @@ export function allocatePayoutMicros(
   }
   return rows
     .map(({ remainder: _remainder, ...row }) => row)
-    .sort((left, right) => left.projectId.localeCompare(right.projectId));
+    .sort((left, right) =>
+      left.projectId < right.projectId ? -1 : left.projectId > right.projectId ? 1 : 0
+    );
 }

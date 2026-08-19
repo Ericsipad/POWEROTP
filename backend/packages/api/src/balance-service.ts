@@ -2,6 +2,7 @@ import type {
   BillingTier,
   FinancialTransactionType,
 } from "@powerotp/contracts";
+import { PaymentProcessorSchema } from "@powerotp/contracts";
 import type { ClientSession, Db, MongoClient } from "mongodb";
 
 import type {
@@ -49,7 +50,7 @@ export interface LedgerEntryInput {
     | number
     | ((
         tier: BillingTier,
-        priorEntries: readonly FinancialTransactionDocument[],
+        priorEntries: readonly (FinancialTransactionDocument | undefined)[],
       ) => number | Promise<number>);
   projectId?: string;
   interactionId?: string;
@@ -74,6 +75,21 @@ export interface LedgerEntryInput {
 
 function isDuplicateKey(error: unknown): boolean {
   return typeof error === "object" && error !== null && "code" in error && error.code === 11000;
+}
+
+function duplicateKeyId(error: unknown): string | undefined {
+  if (
+    typeof error !== "object" ||
+    error === null ||
+    !("keyValue" in error) ||
+    typeof error.keyValue !== "object" ||
+    error.keyValue === null ||
+    !("_id" in error.keyValue) ||
+    typeof error.keyValue._id !== "string"
+  ) {
+    return undefined;
+  }
+  return error.keyValue._id;
 }
 
 /**
@@ -149,22 +165,39 @@ export class BalanceService {
     inputs: readonly LedgerEntryInput[],
     idempotencyKey?: string,
     onApplied?: (
-      entries: readonly FinancialTransactionDocument[],
+      entries: readonly (FinancialTransactionDocument | undefined)[],
       session: ClientSession,
     ) => Promise<void>,
   ): Promise<FinancialTransactionDocument[]> {
-    const billableInputs = inputs.filter((input) => input.userId !== PLATFORM_ADMIN_USER_ID);
-    if (billableInputs.length === 0) return [];
+    if (inputs.every((input) => input.userId === PLATFORM_ADMIN_USER_ID)) return [];
+    for (const input of inputs) {
+      const hasProcessor = input.paymentProcessor !== undefined;
+      const hasTransactionId = input.paymentProcessorTransactionId !== undefined;
+      if (
+        hasProcessor !== hasTransactionId ||
+        (hasProcessor && !PaymentProcessorSchema.safeParse(input.paymentProcessor).success) ||
+        (hasTransactionId &&
+          (input.paymentProcessorTransactionId!.length < 1 ||
+            input.paymentProcessorTransactionId!.length > 200))
+      ) {
+        throw new Error("invalid_payment_processor_reference");
+      }
+    }
     const session = this.client.startSession() as ClientSession;
     try {
-      const entries: FinancialTransactionDocument[] = [];
-      try {
-        await session.withTransaction(async () => {
+      let committedEntries: FinancialTransactionDocument[] = [];
+      let retriedBalanceInitialization = false;
+      while (true) {
+        try {
+          await session.withTransaction(async () => {
+          const entries: Array<FinancialTransactionDocument | undefined> =
+            new Array(inputs.length);
           if (idempotencyKey) {
             await this.#claims.insertOne({ _id: idempotencyKey, createdAt: new Date() }, { session });
           }
           const balances = new Map<string, number>();
-          for (const input of billableInputs) {
+          for (const [inputIndex, input] of inputs.entries()) {
+            if (input.userId === PLATFORM_ADMIN_USER_ID) continue;
             let openingBalanceUsd = balances.get(input.userId);
             if (openingBalanceUsd === undefined) {
               const current = await this.#balances.findOne({ _id: input.userId }, { session });
@@ -228,15 +261,36 @@ export class BalanceService {
               { session, upsert: true },
             );
             balances.set(input.userId, closingBalanceUsd);
-            entries.push(entry);
+            entries[inputIndex] = entry;
           }
           if (onApplied) await onApplied(entries, session);
-        });
-      } catch (error) {
-        if (idempotencyKey && isDuplicateKey(error)) return [];
-        throw error;
+          committedEntries = entries.filter(
+            (entry): entry is FinancialTransactionDocument => entry !== undefined,
+          );
+          });
+          break;
+        } catch (error) {
+          const duplicateId = duplicateKeyId(error);
+          if (
+            !retriedBalanceInitialization &&
+            duplicateId &&
+            inputs.some((input) => input.userId === duplicateId) &&
+            await this.#balances.findOne({ _id: duplicateId })
+          ) {
+            retriedBalanceInitialization = true;
+            continue;
+          }
+          if (
+            idempotencyKey &&
+            isDuplicateKey(error) &&
+            await this.#claims.findOne({ _id: idempotencyKey })
+          ) {
+            return [];
+          }
+          throw error;
+        }
       }
-      return entries;
+      return committedEntries;
     } finally {
       await session.endSession();
     }

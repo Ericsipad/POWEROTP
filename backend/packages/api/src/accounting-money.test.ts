@@ -45,4 +45,25 @@ describe("accounting money", () => {
       [],
     );
   });
+
+  it("uses integer slot totals even when their number sum would be unsafe", () => {
+    assert.deepEqual(
+      allocatePayoutMicros(1_000_000, [
+        { projectId: "project_a", filledSlots: Number.MAX_SAFE_INTEGER },
+        { projectId: "project_b", filledSlots: Number.MAX_SAFE_INTEGER },
+      ]),
+      [
+        {
+          projectId: "project_a",
+          filledSlots: Number.MAX_SAFE_INTEGER,
+          allocatedMicros: 500_000,
+        },
+        {
+          projectId: "project_b",
+          filledSlots: Number.MAX_SAFE_INTEGER,
+          allocatedMicros: 500_000,
+        },
+      ],
+    );
+  });
 });

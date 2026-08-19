@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import type { Db } from "mongodb";
+import type { Db, MongoClient } from "mongodb";
 
 import {
   AccountingConfigError,
@@ -38,7 +38,13 @@ describe("ad payout entry calendar", () => {
         return {};
       },
     } as unknown as Db;
-    const service = new AccountingConfigService(db);
+    const client = {
+      startSession: () => ({
+        withTransaction: (work: () => Promise<unknown>) => work(),
+        endSession: async () => {},
+      }),
+    } as unknown as MongoClient;
+    const service = new AccountingConfigService(client, db);
     await assert.rejects(
       () => service.savePayout("usr_admin", {
         adSystemId: "ads_one",

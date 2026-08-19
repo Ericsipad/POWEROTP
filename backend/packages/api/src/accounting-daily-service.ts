@@ -9,12 +9,18 @@ import type {
   ReferralCommissionSettingsDocument,
 } from "./accounting-persistence.js";
 import type { BalanceService, LedgerEntryInput } from "./balance-service.js";
-import type { AuditDocument, ProjectDocument } from "./persistence.js";
+import {
+  PLATFORM_ADMIN_USER_ID,
+  type AuditDocument,
+  type ProjectDocument,
+} from "./persistence.js";
 import type { RateChartService } from "./rate-chart-service.js";
 import { createSortableId } from "./security.js";
 
 const DAY_MS = 86_400_000;
 const THRESHOLD_COOLDOWN_MS = 31 * DAY_MS;
+
+class ThresholdNoLongerEligibleError extends Error {}
 
 export { serviceDayBounds } from "./ad-payout-settlement-service.js";
 
@@ -93,6 +99,7 @@ export class AccountingDailyService {
     ]);
     const since = new Date(now.getTime() - 30 * DAY_MS);
     for (const project of projects) {
+      if (project.customerId === PLATFORM_ADMIN_USER_ID) continue;
       const referral = await this.#projectReferrals.findOne({
         projectId: project._id,
         endedAt: { $exists: false },
@@ -128,14 +135,30 @@ export class AccountingDailyService {
             entries,
             `threshold:${project._id}:${rule._id}:${now.toISOString().slice(0, 10)}`,
             async (ledgerRows, session) => {
+              const currentState = await this.#thresholdStates.findOne(
+                { projectId: project._id, thresholdRuleId: rule._id },
+                { session },
+              );
+              if (
+                !isThresholdEligible(
+                  count,
+                  rule.thresholdCount,
+                  currentState?.lastChargedAt,
+                  now,
+                )
+              ) {
+                throw new ThresholdNoLongerEligibleError();
+              }
+              const sourceRow = ledgerRows[0];
+              if (!sourceRow) throw new Error("threshold_source_row_missing");
               await this.#thresholdStates.updateOne(
                 { projectId: project._id, thresholdRuleId: rule._id },
                 {
                   $set: {
                     lastChargedAt: now,
                     observedCount: count,
-                    tierAtCharge: ledgerRows[0]!.tierAtTransaction,
-                    ledgerTransactionId: ledgerRows[0]!._id,
+                    tierAtCharge: sourceRow.tierAtTransaction,
+                    ledgerTransactionId: sourceRow._id,
                   },
                   $setOnInsert: { _id: createSortableId("tcs"), projectId: project._id, thresholdRuleId: rule._id },
                 },
@@ -144,6 +167,7 @@ export class AccountingDailyService {
             },
           );
         } catch (error) {
+          if (error instanceof ThresholdNoLongerEligibleError) continue;
           await this.#recordFailure("threshold charge failed", project._id, error);
         }
       }
@@ -157,6 +181,7 @@ export class AccountingDailyService {
     ]);
     const serviceDate = now.toISOString().slice(0, 10);
     for (const project of projects) {
+      if (project.customerId === PLATFORM_ADMIN_USER_ID) continue;
       const referral = await this.#projectReferrals.findOne({
         projectId: project._id,
         endedAt: { $exists: false },

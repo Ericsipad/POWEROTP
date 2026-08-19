@@ -4,6 +4,7 @@ import { PASSWORD_REQUIREMENTS, type SignupResponse } from "@/lib/contracts";
 import { useState, type FormEvent } from "react";
 
 import { apiFetch } from "@/lib/api-client";
+import { referralCodeFromCookie } from "@/lib/referral-cookie";
 
 interface SignupModalProps {
   onClose(): void;
@@ -11,14 +12,6 @@ interface SignupModalProps {
 
 type Step = "form" | "submitting" | "success" | "already_registered";
 const REFERRAL_COOKIE = "powerotp_referral";
-
-function referralCodeFromCookie(): string | undefined {
-  return document.cookie
-    .split(";")
-    .map((part) => part.trim())
-    .find((part) => part.startsWith(`${REFERRAL_COOKIE}=`))
-    ?.slice(REFERRAL_COOKIE.length + 1);
-}
 
 /**
  * The "rapid signup" modal: email + password (entered twice), a live
@@ -48,7 +41,7 @@ export function SignupModal({ onClose }: SignupModalProps) {
       const response = await apiFetch("/v1/auth/signup", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ email, password, referralCode: referralCodeFromCookie() }),
+        body: JSON.stringify({ email, password, referralCode: referralCodeFromCookie(document.cookie) }),
       });
       const data = (await response.json().catch(() => undefined)) as
         | (SignupResponse & { error?: string })

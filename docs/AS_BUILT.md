@@ -2380,3 +2380,38 @@ second wallet or project ledger. `financialTransactions` remains append-only and
 Security and audit boundaries are documented in `THREAT_MODEL.md`; every new backend route is
 listed in `API_ROUTE_INVENTORY.md`. Focused contracts, API, backend, and frontend checks passed,
 followed by a clean final root `npm run verify`.
+
+### Pre-Phase-18 accounting safety review corrections (2026-08-19)
+
+A fresh defect-first review found and corrected transaction and concurrency failures in the
+foundation above:
+
+- The ledger no longer places a unique index on the batch `idempotencyKey`; that index prevented
+  every source-plus-commission batch from inserting its second row. Permanent idempotency remains
+  in `billingIdempotencyClaims`, while processor transaction identity is uniquely namespaced by
+  `(paymentProcessor, paymentProcessorTransactionId)`.
+- Every `withTransaction` callback attempt now owns a fresh aligned row array. A MongoDB callback
+  retry cannot return rolled-back transaction IDs or use a prior attempt as a commission source.
+  Expected idempotency replay is recognized only when the durable claim exists; unrelated
+  duplicate-key failures propagate. A concurrent first write to a missing balance projection is
+  retried after the winning projection becomes visible.
+- Threshold cooldown state is re-read inside the ledger transaction, exact duplicate
+  event/threshold rules are uniquely rejected, and active referral-code ownership is uniquely
+  enforced. Platform-admin/demo rows cannot shift source indexes or create referral commissions.
+- Accounting configuration and its audit event now commit in one MongoDB transaction. Payout
+  edits race safely with settlement and cannot replace a concurrently settled row. Referral-code
+  creation and its audit are likewise atomic, and non-duplicate account-attribution persistence
+  failures now fail signup instead of silently consuming first-touch attribution.
+- New auth-session reports require an active known ad system, while exact replays remain valid
+  after later deactivation. Payout allocation uses integer `BigInt` slot totals, rejects unsafe
+  persisted totals, excludes platform-admin/demo projects, and retains deterministic binary
+  project-ID tie-breaking.
+- Payment processor fields are required as a pair in both the write path and public contract.
+  Malformed browser referral cookies are ignored so they cannot block ordinary signup, and the
+  admin accounting response contract now includes its required ten service dates.
+
+Focused contracts, API, backend production/route, and frontend checks passed. The first API test
+run exposed an incorrect source index in one newly added regression test; that test was corrected
+and the complete API check then passed. The first focused route invocation used the backend
+workspace rather than the server workspace and found no test file; the same focused route suite
+then passed from its correct workspace. One final root `npm run verify` passed.

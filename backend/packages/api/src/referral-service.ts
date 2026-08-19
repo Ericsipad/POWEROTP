@@ -31,6 +31,10 @@ export class ReferralError extends Error {
   }
 }
 
+function isDuplicateKey(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "code" in error && error.code === 11000;
+}
+
 export class ReferralService {
   readonly #codes;
   readonly #accounts;
@@ -60,13 +64,25 @@ export class ReferralService {
       active: true,
       createdAt: new Date(),
     };
+    const session = this.client.startSession() as ClientSession;
     try {
-      await this.#codes.insertOne(document);
-    } catch {
-      throw new ReferralError("referral_code_unavailable", 409);
+      try {
+        await session.withTransaction(async () => {
+          await this.#codes.insertOne(document, { session });
+          await this.#audit(userId, "referral.code.created", "referral_code", code, session);
+        });
+      } catch (error) {
+        if (!isDuplicateKey(error)) throw error;
+        const owned = await this.#codes.findOne({ ownerUserId: userId, active: true });
+        throw new ReferralError(
+          owned ? "referral_code_already_exists" : "referral_code_unavailable",
+          409,
+        );
+      }
+      return document;
+    } finally {
+      await session.endSession();
     }
-    await this.#audit(userId, "referral.code.created", "referral_code", code);
-    return document;
   }
 
   async getOwnedCode(userId: string): Promise<ReferralCodeDocument | null> {
@@ -88,7 +104,8 @@ export class ReferralService {
         attributedAt: new Date(),
       });
       return true;
-    } catch {
+    } catch (error) {
+      if (!isDuplicateKey(error)) throw error;
       return (await this.#accounts.findOne({ _id: userId }))?.referralCode === code;
     }
   }
@@ -148,14 +165,23 @@ export class ReferralService {
     }
   }
 
-  async #audit(actorId: string, action: string, targetType: string, targetId: string) {
-    await this.#audits.insertOne({
-      _id: createSortableId("aud"),
-      actorId,
-      action,
-      targetType,
-      targetId,
-      occurredAt: new Date(),
-    });
+  async #audit(
+    actorId: string,
+    action: string,
+    targetType: string,
+    targetId: string,
+    session?: ClientSession,
+  ) {
+    await this.#audits.insertOne(
+      {
+        _id: createSortableId("aud"),
+        actorId,
+        action,
+        targetType,
+        targetId,
+        occurredAt: new Date(),
+      },
+      session ? { session } : undefined,
+    );
   }
 }

@@ -3957,3 +3957,35 @@ unimplemented.
 
 **Verification.** Focused contracts, API, backend production, backend route, and frontend
 build/lint/typecheck/test checks passed, followed by a clean final root `npm run verify`.
+
+## 2026-08-19 — Pre-Phase-18 accounting safety review corrections
+
+**Status: implementation corrected; Phase 18 remains unstarted.** A fresh defect-first review
+confirmed that the ledger's unique batch-key index rejected every multi-row source/commission
+write, MongoDB callback retries retained rolled-back row IDs in memory, and duplicate-key handling
+could convert unrelated persistence failures into apparent idempotent success. The ledger now
+uses permanent claim documents as the sole batch-idempotency authority, rebuilds aligned rows on
+every callback attempt, recognizes replay only from a committed claim, retries the missing-balance
+initialization race, and uniquely namespaces processor transaction IDs.
+
+**Concurrency and integrity corrections.** Threshold cooldown is revalidated inside the monetary
+transaction; duplicate threshold identities and concurrent active referral codes are rejected by
+unique indexes; platform-admin/demo exclusions preserve source indexing and cannot earn
+commission. Accounting configuration, payout entry, referral-code creation, and their audit rows
+are atomic. A payout edit cannot overwrite a concurrently settled payout, and non-duplicate
+account-attribution failures no longer silently discard first touch. New project auth reports
+require an active known ad system. Allocation uses integer slot totals, rejects unsafe totals,
+excludes demo projects, and keeps deterministic project-ID ordering.
+
+**Boundary corrections.** Generic processor fields are paired by both contract and persistence
+write validation. The admin response contract includes all ten calendar dates. A malformed
+browser referral cookie is ignored instead of making normal signup fail validation. No Phase 18
+policy, OTP orchestration, later BotBlocker phase, seed data, credential, or environment change
+was introduced.
+
+**Verification.** Contracts build/lint/typecheck/test, API build/lint/typecheck/test, backend
+production build/lint/typecheck plus the focused route inventory, and frontend production
+build/lint/typecheck/test passed. The initial API test run found an incorrect index in a newly
+added regression test; after correcting that test, the complete API check passed. The initial
+focused route command was run from the parent backend workspace and found no file; the same suite
+passed from the server workspace. One final root `npm run verify` passed.

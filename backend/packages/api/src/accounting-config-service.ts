@@ -4,7 +4,7 @@ import type {
   ReferralCommissionSettingsInput,
   UpsertAdSystem,
 } from "@powerotp/contracts";
-import type { Db } from "mongodb";
+import type { ClientSession, Db, MongoClient } from "mongodb";
 
 import { usdDecimalToMicros } from "./accounting-money.js";
 import type {
@@ -25,6 +25,10 @@ export class AccountingConfigError extends Error {
   }
 }
 
+function isDuplicateKey(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "code" in error && error.code === 11000;
+}
+
 function completeServiceDates(now = new Date()): string[] {
   const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
   return Array.from({ length: 10 }, (_, index) =>
@@ -39,7 +43,10 @@ export class AccountingConfigService {
   readonly #commissions;
   readonly #audits;
 
-  constructor(db: Db) {
+  constructor(
+    private readonly client: Pick<MongoClient, "startSession">,
+    db: Db,
+  ) {
     this.#adSystems = db.collection<AdSystemDocument>("adSystems");
     this.#payouts = db.collection<AdDailyPayoutDocument>("adDailyPayouts");
     this.#thresholds = db.collection<BillingThresholdRuleDocument>("billingThresholdRules");
@@ -59,50 +66,62 @@ export class AccountingConfigService {
   }
 
   async upsertAdSystem(actorId: string, input: UpsertAdSystem): Promise<AdSystemDocument> {
-    const now = new Date();
-    await this.#adSystems.updateOne(
-      { _id: input.id },
-      {
-        $set: { displayName: input.displayName, active: input.active, updatedAt: now },
-        $setOnInsert: { createdAt: now },
-      },
-      { upsert: true },
-    );
-    await this.#audit(actorId, "accounting.ad_system.saved", "ad_system", input.id);
-    return (await this.#adSystems.findOne({ _id: input.id }))!;
+    return this.#transaction(async (session) => {
+      const now = new Date();
+      await this.#adSystems.updateOne(
+        { _id: input.id },
+        {
+          $set: { displayName: input.displayName, active: input.active, updatedAt: now },
+          $setOnInsert: { createdAt: now },
+        },
+        { upsert: true, session },
+      );
+      await this.#audit(actorId, "accounting.ad_system.saved", "ad_system", input.id, session);
+      const document = await this.#adSystems.findOne({ _id: input.id }, { session });
+      if (!document) throw new Error("ad_system_write_failed");
+      return document;
+    });
   }
 
   async savePayout(actorId: string, input: AdDailyPayoutInput): Promise<AdDailyPayoutDocument> {
     if (!completeServiceDates().includes(input.serviceDate)) {
       throw new AccountingConfigError("payout_date_outside_entry_window", 400);
     }
-    const system = await this.#adSystems.findOne({ _id: input.adSystemId });
-    if (!system) throw new AccountingConfigError("ad_system_not_found", 404);
-    const existing = await this.#payouts.findOne({
-      adSystemId: input.adSystemId,
-      serviceDate: input.serviceDate,
+    return this.#transaction(async (session) => {
+      const system = await this.#adSystems.findOne({ _id: input.adSystemId }, { session });
+      if (!system) throw new AccountingConfigError("ad_system_not_found", 404);
+      const existing = await this.#payouts.findOne(
+        { adSystemId: input.adSystemId, serviceDate: input.serviceDate },
+        { session },
+      );
+      if (existing?.status === "settled") {
+        throw new AccountingConfigError("payout_already_settled", 409);
+      }
+      const now = new Date();
+      const document: AdDailyPayoutDocument = {
+        _id: existing?._id ?? createSortableId("adp"),
+        adSystemId: input.adSystemId,
+        serviceDate: input.serviceDate,
+        grossPayoutMicros: usdDecimalToMicros(input.grossPayoutUsd),
+        enteredBy: actorId,
+        enteredAt: existing?.enteredAt ?? now,
+        updatedAt: now,
+        status: "entered",
+      };
+      await this.#payouts.replaceOne(
+        { adSystemId: input.adSystemId, serviceDate: input.serviceDate },
+        document,
+        { upsert: true, session },
+      );
+      await this.#audit(
+        actorId,
+        "accounting.ad_payout.saved",
+        "ad_daily_payout",
+        document._id,
+        session,
+      );
+      return document;
     });
-    if (existing?.status === "settled") {
-      throw new AccountingConfigError("payout_already_settled", 409);
-    }
-    const now = new Date();
-    const document: AdDailyPayoutDocument = {
-      _id: existing?._id ?? createSortableId("adp"),
-      adSystemId: input.adSystemId,
-      serviceDate: input.serviceDate,
-      grossPayoutMicros: usdDecimalToMicros(input.grossPayoutUsd),
-      enteredBy: actorId,
-      enteredAt: existing?.enteredAt ?? now,
-      updatedAt: now,
-      status: "entered",
-    };
-    await this.#payouts.replaceOne(
-      { adSystemId: input.adSystemId, serviceDate: input.serviceDate },
-      document,
-      { upsert: true },
-    );
-    await this.#audit(actorId, "accounting.ad_payout.saved", "ad_daily_payout", document._id);
-    return document;
   }
 
   async createThreshold(
@@ -116,9 +135,24 @@ export class AccountingConfigService {
       createdAt: now,
       updatedAt: now,
     };
-    await this.#thresholds.insertOne(document);
-    await this.#audit(actorId, "accounting.threshold.created", "billing_threshold", document._id);
-    return document;
+    try {
+      return await this.#transaction(async (session) => {
+        await this.#thresholds.insertOne(document, { session });
+        await this.#audit(
+          actorId,
+          "accounting.threshold.created",
+          "billing_threshold",
+          document._id,
+          session,
+        );
+        return document;
+      });
+    } catch (error) {
+      if (isDuplicateKey(error)) {
+        throw new AccountingConfigError("threshold_already_exists", 409);
+      }
+      throw error;
+    }
   }
 
   async updateThreshold(
@@ -126,14 +160,22 @@ export class AccountingConfigService {
     ruleId: string,
     input: Omit<BillingThresholdRuleInput, "eventType" | "thresholdCount">,
   ): Promise<BillingThresholdRuleDocument> {
-    const updated = await this.#thresholds.findOneAndUpdate(
-      { _id: ruleId },
-      { $set: { ...input, updatedAt: new Date() } },
-      { returnDocument: "after" },
-    );
-    if (!updated) throw new AccountingConfigError("threshold_not_found", 404);
-    await this.#audit(actorId, "accounting.threshold.updated", "billing_threshold", ruleId);
-    return updated;
+    return this.#transaction(async (session) => {
+      const updated = await this.#thresholds.findOneAndUpdate(
+        { _id: ruleId },
+        { $set: { ...input, updatedAt: new Date() } },
+        { returnDocument: "after", session },
+      );
+      if (!updated) throw new AccountingConfigError("threshold_not_found", 404);
+      await this.#audit(
+        actorId,
+        "accounting.threshold.updated",
+        "billing_threshold",
+        ruleId,
+        session,
+      );
+      return updated;
+    });
   }
 
   async setCommissions(
@@ -146,20 +188,46 @@ export class AccountingConfigService {
       updatedAt: new Date(),
       updatedBy: actorId,
     };
-    await this.#commissions.replaceOne({ _id: "global" }, document, { upsert: true });
-    await this.#audit(actorId, "accounting.commissions.updated", "referral_commissions", "global");
-    return document;
+    return this.#transaction(async (session) => {
+      await this.#commissions.replaceOne({ _id: "global" }, document, { upsert: true, session });
+      await this.#audit(
+        actorId,
+        "accounting.commissions.updated",
+        "referral_commissions",
+        "global",
+        session,
+      );
+      return document;
+    });
   }
 
-  async #audit(actorId: string, action: string, targetType: string, targetId: string) {
-    await this.#audits.insertOne({
-      _id: createSortableId("aud"),
-      actorId,
-      action,
-      targetType,
-      targetId,
-      occurredAt: new Date(),
-    });
+  async #transaction<T>(work: (session: ClientSession) => Promise<T>): Promise<T> {
+    const session = this.client.startSession() as ClientSession;
+    try {
+      return await session.withTransaction(() => work(session));
+    } finally {
+      await session.endSession();
+    }
+  }
+
+  async #audit(
+    actorId: string,
+    action: string,
+    targetType: string,
+    targetId: string,
+    session: ClientSession,
+  ) {
+    await this.#audits.insertOne(
+      {
+        _id: createSortableId("aud"),
+        actorId,
+        action,
+        targetType,
+        targetId,
+        occurredAt: new Date(),
+      },
+      { session },
+    );
   }
 }
 

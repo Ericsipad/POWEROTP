@@ -9,7 +9,7 @@ import type {
 } from "./accounting-persistence.js";
 import { ReferralError, ReferralService } from "./referral-service.js";
 
-function createService() {
+function createService(accountInsertError?: Error) {
   const codes: ReferralCodeDocument[] = [];
   const accounts: AccountReferralAttributionDocument[] = [];
   const audits: unknown[] = [];
@@ -34,7 +34,10 @@ function createService() {
           findOne: async (filter: { _id: string }) =>
             accounts.find((row) => row._id === filter._id) ?? null,
           insertOne: async (row: AccountReferralAttributionDocument) => {
-            if (accounts.some((existing) => existing._id === row._id)) throw new Error("duplicate");
+            if (accountInsertError) throw accountInsertError;
+            if (accounts.some((existing) => existing._id === row._id)) {
+              throw Object.assign(new Error("duplicate"), { code: 11000 });
+            }
             accounts.push(row);
           },
         };
@@ -43,7 +46,12 @@ function createService() {
       return { findOne: async () => null };
     },
   } as unknown as Db;
-  const client = { startSession: () => ({}) } as unknown as MongoClient;
+  const client = {
+    startSession: () => ({
+      withTransaction: (work: () => Promise<unknown>) => work(),
+      endSession: async () => {},
+    }),
+  } as unknown as MongoClient;
   return { service: new ReferralService(client, db), accounts };
 }
 
@@ -66,5 +74,15 @@ describe("ReferralService", () => {
     assert.equal(await service.attributeAccount("usr_referrer", "my-code"), false);
     assert.equal(accounts.length, 1);
     assert.equal(accounts[0]?.referrerUserId, "usr_referrer");
+  });
+
+  it("does not silently consume attribution when persistence fails", async () => {
+    const failure = new Error("database unavailable");
+    const { service } = createService(failure);
+    await service.createCode("usr_referrer", "my-code");
+    await assert.rejects(
+      () => service.attributeAccount("usr_new", "my-code"),
+      /database unavailable/,
+    );
   });
 });

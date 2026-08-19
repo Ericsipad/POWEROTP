@@ -1,7 +1,10 @@
 import type { ProjectAuthSessionReport } from "@powerotp/contracts";
 import type { Db } from "mongodb";
 
-import type { ProjectAuthSessionDocument } from "./accounting-persistence.js";
+import type {
+  AdSystemDocument,
+  ProjectAuthSessionDocument,
+} from "./accounting-persistence.js";
 
 const EVENT_LOOKBACK_MS = 31 * 24 * 60 * 60 * 1_000;
 
@@ -16,9 +19,11 @@ export class ProjectAuthSessionError extends Error {
 
 export class ProjectAuthSessionService {
   readonly #sessions;
+  readonly #adSystems;
 
   constructor(db: Db) {
     this.#sessions = db.collection<ProjectAuthSessionDocument>("projectAuthSessions");
+    this.#adSystems = db.collection<AdSystemDocument>("adSystems");
   }
 
   async report(
@@ -47,6 +52,8 @@ export class ProjectAuthSessionService {
       if (!matches) throw new ProjectAuthSessionError("idempotency_conflict", 409);
       return { document: existing, replayed: true };
     }
+    const adSystem = await this.#adSystems.findOne({ _id: input.adSystemId, active: true });
+    if (!adSystem) throw new ProjectAuthSessionError("ad_system_unavailable", 400);
     const document: ProjectAuthSessionDocument = {
       _id: input.sessionId,
       projectId,

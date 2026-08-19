@@ -117,6 +117,7 @@ export const AccountingAdminConfigSchema = z
     thresholds: z.array(BillingThresholdRuleSchema),
     commissions: ReferralCommissionSettingsSchema.nullable(),
     payouts: z.array(AdDailyPayoutSchema),
+    serviceDates: z.array(ServiceDateSchema).length(10),
   })
   .strict();
 
