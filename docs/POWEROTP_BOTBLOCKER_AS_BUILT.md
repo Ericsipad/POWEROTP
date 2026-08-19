@@ -3921,7 +3921,7 @@ and tests passed; the backend production build, typecheck, and focused suite pas
 `npm run verify` passed across all workspaces.
 
 **Explicitly not shipped.** No additional risk-event field or registry restructuring, Phase 18
-customer sensitivity/OTP policy, external IP-vendor integration, site-return cookie, minute-29
+customer sensitivity/OTP policy, Phase 32 external IP-vendor add-on, site-return cookie, minute-29
 token refresh, Passport, OTP orchestration, billing, edge publication, or global verify Worker
 was added. No `.env`, MCP, Gate, browser-reachable contract/code, deployment, or customer traffic
 was changed. No commit or push was performed.

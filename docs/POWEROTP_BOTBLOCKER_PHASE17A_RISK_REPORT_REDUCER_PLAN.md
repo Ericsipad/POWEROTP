@@ -243,7 +243,7 @@ explicit authorization.
 ## Explicit exclusions
 
 - No Phase 18 customer sensitivity or OTP policy.
-- No external IP-vendor profile fields.
+- No external IP-vendor profile fields; the optional real-vendor add-on is deferred to Phase 32.
 - No site-return cookie, Passport implementation, or visitor-token refresh.
 - No OTP orchestration, billing, edge publication, or global verify Worker.
 - No hardcoded scoring configuration, fake data, migration, seed, deployment, or traffic

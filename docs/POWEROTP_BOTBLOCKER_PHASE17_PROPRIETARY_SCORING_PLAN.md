@@ -1,7 +1,6 @@
 # BotBlocker Phase 17 — Proprietary scoring design plan
 
-**Status: implementation in progress; unified report transport, risk-event row scoring, and
-profile-average integration complete (2026-08-19).** This document is the durable, repo-tracked result of
+**Status: implementation complete (2026-08-19).** This document is the durable, repo-tracked result of
 the Phase 17 design conversation. It does not claim that fingerprint collection, profile
 aggregation, scoring, callback delivery, or rapid-server synchronization has shipped.
 
@@ -276,8 +275,8 @@ unavailability or unresolved lookup falls back to the home API and authoritative
 
 ## Execution breakdown
 
-The approved Phase 17A design is complete and implementation has started. Execute the remaining
-work in dependency-ordered fresh sessions:
+The approved Phase 17A design and implementation are complete. The work was executed in
+dependency-ordered fresh sessions:
 
 1. **Status: complete (2026-08-17). Fingerprint contracts and collector.** Added the exact pinned
    FingerprintJS dependency, monitoring-disabled once-per-new-session collection, bounded
@@ -303,8 +302,9 @@ work in dependency-ordered fresh sessions:
 7. **Status: complete (2026-08-19). Unified report and `riskEvents` scoring.** The canonical
    contract/transport, event configuration/row-scoring, and atomic `risk_events_sum` plus
    overall-profile-scoring integration slices are complete.
-8. **Deferred external IP profile/scoring integration.** Select and confirm a real vendor first,
-   approve its bounded fields, then append approved profile inputs and scoring registration.
+
+External IP-reputation vendor integration is not a Phase 17 step. It is deferred to the final
+optional development add-on in Phase 32 and does not block Phase 18.
 
 Never begin a later subphase in the same fresh session. Never commit, push, deploy, populate
 operator formulas, or activate customer traffic without explicit instruction.

@@ -365,9 +365,9 @@ admin audit, lookup, and signed snapshots. Allowlist maps to `allow`; blacklist 
 
 ### Phase 17 — Proprietary scoring
 
-**Implementation status:** in progress. Phase 17 execution steps 1–7 are complete. The unified
-risk-report/reducer design for step 7 was approved and fully implemented on 2026-08-19; only the
-later external-vendor profile integration remains.
+**Implementation status: complete (2026-08-19).** Phase 17 execution steps 1–7 are complete.
+External IP-reputation vendor integration is not a Phase 17 step and does not block Phase 18; it
+is deferred to the final optional development add-on in Phase 32.
 The approved design is saved in
 [`POWEROTP_BOTBLOCKER_PHASE17_PROPRIETARY_SCORING_PLAN.md`](POWEROTP_BOTBLOCKER_PHASE17_PROPRIETARY_SCORING_PLAN.md);
 the approved gate-session synchronization subplan is saved in
@@ -403,8 +403,8 @@ time by a separate unseeded operator field registry. Available row scores atomic
 `userIntelligence.risk_events_sum`, the arithmetic average exposed as one configurable numeric
 input to the existing overall profile scorer. Raw report detail stays on the event row. Missing
 inputs are excluded; configuration changes do not backfill prior row scores or reset the average.
-External vendor profile/scoring fields remain deferred until a real vendor and bounded fields are
-approved.
+External vendor profile/scoring fields are outside Phase 17 and remain deferred to Phase 32,
+after a real vendor and bounded fields are approved.
 
 The first canonical report preserves blacklist-first precedence, then awaits the current profile
 score within the existing 50–2,000 ms timeout. Later accepted reports enqueue a signed
@@ -413,7 +413,7 @@ and pulls authoritative session data with the scoped visitor token. Local headle
 remains advisory only. CGNAT is not a direct observable signal, and IPv4/IPv6 remain lookup/storage
 families rather than score inputs. Step 7 was completed in fresh sessions for canonical
 contract/transport, event-row configuration/scoring, and `risk_events_sum` profile integration.
-Step 8 later owns external IP profile/scoring integration.
+Phase 17 is complete; Phase 18 follows next.
 
 ### Phase 18 — Customer risk/OTP policy
 
@@ -557,5 +557,20 @@ false positives/appeal, privacy/legal/DPIA, accessibility, key compromise, backu
 disaster recovery, incident runbooks, abuse/spend/concurrency/kill switches, SOC 2/
 ISO 27001 evidence, canary cohorts, emergency bypass, rollback, and launch sign-off.
 
-**Final exit:** every launch criterion has evidence, an owner, and rollback; unresolved
+**Launch exit:** every launch criterion has evidence, an owner, and rollback; unresolved
 controls remain explicitly not ready.
+
+### Phase 32 — Optional external IP-reputation vendor add-on
+
+Only after the core development and launch phases, select and approve a real external
+IP-reputation vendor. Inventory its exact response contract, retain raw vendor payloads only in
+the existing dedicated IP lookup cache, and approve a closed bounded subset before copying any
+field to `userIntelligence` or registering it for operator profile scoring. Preserve typed
+unavailable behavior when the vendor is absent or fails; never seed formulas, weights,
+coefficients, thresholds, ranges, or defaults. Add malformed-response, timeout, replay,
+rollback, omission, and scoring tests without changing exact-IP identity rules or exposing raw
+vendor payloads to customers, browsers, callbacks, or MCP.
+
+**Final roadmap exit:** the optional vendor add-on is either implemented with an approved real
+vendor and full evidence, or remains explicitly deferred without blocking the launched core
+product.

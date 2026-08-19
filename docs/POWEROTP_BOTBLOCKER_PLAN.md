@@ -513,7 +513,8 @@ row. Available insert-time row scores atomically update the linked profile's ari
 `risk_events_sum`, which is one configurable numeric field in the existing overall profile
 scorer. Detailed route/page/click/pointer/navigation data and the full fingerprint remain on their
 bounded source rows rather than being copied to the hot profile. External IP-vendor profile fields
-still wait for a real vendor and approved bounded fields. Missing inputs never block either
+are deferred to the optional final Phase 32 add-on, after a real vendor and bounded fields are
+approved. Missing inputs never block either
 scorer. No hardcoded formula, weight, threshold, backfill, or profile `currentScore` history exists.
 
 `gateSessions` plus linked immutable `riskEvents` form one logical session dataset while remaining
@@ -818,7 +819,7 @@ session/CSRF/project-ownership boundary instead.
 
 ## Development phases
 
-The full 0–31 phase sequence (including lettered subphases), session-size rule, and required
+The full 0–32 phase sequence (including lettered subphases), session-size rule, and required
 handoff-prompt format live only in
 [`POWEROTP_BOTBLOCKER_DEVELOPMENT_PHASES.md`](POWEROTP_BOTBLOCKER_DEVELOPMENT_PHASES.md#progressive-phases)
 so there is exactly one canonical execution order. This document does not duplicate that list;

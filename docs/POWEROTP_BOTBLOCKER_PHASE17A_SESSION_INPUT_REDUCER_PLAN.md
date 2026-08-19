@@ -324,17 +324,10 @@ No real external vendor client is currently active; `ip-reputation-client.ts#loo
 typed unavailable. The current gate-session snapshot contains only bounded `vendor` and `score`
 when available, while the vendor cache owns its raw response.
 
-External IP data is deliberately **not** synchronized to `userIntelligence` in the first
-gate-session updater. A later dedicated session will:
-
-- inventory the real selected vendor's bounded contract;
-- approve which external IP fields append to `userIntelligence`;
-- keep raw vendor payloads out of the profile row;
-- add approved fields to the operator scoring registry; and
-- preserve missing-field omission when the vendor is unconfigured or unavailable.
-
-That later append does not require redesigning or blocking the scoring engine. Until those fields
-exist, scoring continues with present profile inputs.
+External IP data is deliberately **not** synchronized to `userIntelligence` in Phase 17.
+Vendor selection, bounded field approval, profile synchronization, and scoring registration are
+deferred to the final optional development add-on in Phase 32. That add-on does not block the
+scoring engine or Phase 18; until then, scoring continues with present profile inputs.
 
 ## Unified `riskEvents` profile updater
 
@@ -442,8 +435,9 @@ This design is larger than one implementation session. Execute in fresh sessions
    The canonical contract/transport, event configuration/row-scoring, and atomic
    `risk_events_sum`/overall-profile-scoring integration slices are complete. The superseded parallel
    initial/behavior/risk ingestion paths have been removed.
-8. **Deferred external IP profile/scoring integration.** Select a real vendor first, approve its
-   bounded profile fields, then append and score them.
+
+External IP-reputation vendor integration is not part of this Phase 17 split. Phase 32 owns that
+optional final add-on.
 
 The canonical Phase 17 roadmap must be reconciled to this split before implementation claims are
 made.
