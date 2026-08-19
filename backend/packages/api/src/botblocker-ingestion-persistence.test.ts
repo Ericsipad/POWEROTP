@@ -123,6 +123,7 @@ function fixture() {
     totalPageDurationMs: 0,
     totalActiveDurationMs: 0,
   };
+  const scoringCalls: string[] = [];
   const db = {
     collection(name: string) {
       if (name === "gateSessions") {
@@ -172,10 +173,17 @@ function fixture() {
     ) => work({ withTransaction: async (transaction) => transaction() }),
   } as unknown as MongoClient;
   return {
-    persistence: new BotBlockerIngestionPersistence(db, client),
+    persistence: new BotBlockerIngestionPersistence(
+      db,
+      client,
+      async (_scope, userIntelligenceId) => {
+        scoringCalls.push(userIntelligenceId);
+      },
+    ),
     gateSessions,
     riskEvents,
     aggregate,
+    scoringCalls,
   };
 }
 
@@ -193,6 +201,7 @@ describe("BotBlockerIngestionPersistence", () => {
       "duplicate",
     );
     assert.equal(state.riskEvents.length, 1);
+    assert.deepEqual(state.scoringCalls, ["bui_owner_123456789"]);
     assert.deepEqual(state.aggregate, {
       behaviorReportCount: 1,
       pageViewCount: 1,
@@ -242,6 +251,7 @@ describe("BotBlockerIngestionPersistence", () => {
       "stale",
     );
     assert.equal(state.riskEvents.length, 1);
+    assert.deepEqual(state.scoringCalls, ["bui_owner_123456789"]);
     assert.equal(state.gateSessions[0]!.lastAppliedSequence, 2);
   });
 

@@ -27,6 +27,7 @@ import {
   FingerprintComponentsSchema,
 } from "./fingerprint.js";
 import { FingerprintComponentValueSchemas } from "./fingerprint-components.js";
+import { ProfileScoreStatusSchema } from "./botblocker-scoring.js";
 
 const OpaqueIdSchema = z.string().min(16).max(128);
 const ScopedRecordSchema = z.object({
@@ -292,6 +293,7 @@ export const UserIntelligenceRecordSchema = ScopedRecordSchema.extend({
   currentIp: IpEvidenceSchema.optional(),
   recentIpHistory: z.array(IpEvidenceSchema).max(20),
   currentIpReuse: IpReuseSummarySchema.optional(),
+  currentScore: ProfileScoreStatusSchema.optional(),
   latestEvidence: BrowserEvidenceSchema.optional(),
   gateSessionCount: z.number().int().nonnegative(),
   behaviorReportCount: z.number().int().nonnegative(),

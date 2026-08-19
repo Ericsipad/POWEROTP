@@ -219,6 +219,7 @@ describe("Phase 6 BotBlocker persistence contracts", () => {
           distinctProfiles30d: 2,
         },
       },
+      currentScore: { status: "available", score: 42.5 },
       latestEvidence: evidence,
       gateSessionCount: 2,
       behaviorReportCount: 3,
@@ -244,6 +245,8 @@ describe("Phase 6 BotBlocker persistence contracts", () => {
       "colorDepth",
       "timezone",
       "fingerprintHash",
+      "scoreHistory",
+      "scoreModelVersion",
     ]) {
       assert.equal(
         UserIntelligenceRecordSchema.safeParse({

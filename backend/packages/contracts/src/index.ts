@@ -10,6 +10,7 @@ export * from "./botblocker-policy.js";
 export * from "./botblocker-policy-persistence.js";
 export * from "./botblocker-persistence.js";
 export * from "./botblocker-proofs.js";
+export * from "./botblocker-scoring.js";
 export * from "./botblocker-signing.js";
 export * from "./botblocker-site.js";
 export * from "./challenges.js";

@@ -3650,3 +3650,63 @@ and non-browser consumer imports remained unchanged.
 browser-reachable consumers. No Phase 17 runtime work (profile scoring, callbacks, reducer), site-
 return cookie, Passport, minute-29 refresh, billing, edge publication, or global verify Worker was
 touched. No environment file, migration, seed, deployment, or customer traffic was changed.
+
+## 2026-08-18 — BotBlocker Phase 17A: profile scoring configuration/runtime
+
+**Status: Phase 17A implementation-split item 5 / Phase 17 execution step 5 complete.** Added a
+fixed backend-only scoreable-field registry over present `userIntelligence` evidence. It exposes
+exactly 17 approved field-level inputs: the seven direct fields (`osCpu`, `screenResolution`,
+`platform`, `touchSupport`, `vendor`, `architecture`, and `applePay`) plus current ASN score,
+prior-IP count/ASN average/configurable prior blacklist-boolean aggregation, and the six
+global/site 1/7/30-day exact-IP reuse counts. `screenResolution` and `touchSupport` retain one
+registry row each and expose only their fixed named sub-bindings to expressions. The registry
+exposes no complete fingerprint vector, verify-source internals, behavior-reducer fields,
+external-vendor fields, raw IP identity input, customer policy, or OTP selection.
+
+**Restricted configuration contract.** Operator configuration is one optional current
+`botblockerProfileScoringConfiguration` document and starts genuinely unconfigured. Each supplied
+approved field row has an `enabled` toggle, a nonnegative finite weight, and a bounded typed JSON
+math expression. One separate bounded final expression may reference only `weightedSum`,
+`presentWeightSum`, and `presentFieldCount`. The closed AST permits finite literals, approved
+field-value/boolean-array operations, exact typed comparisons, bounded arithmetic, and no
+JavaScript source, `eval`, `Function`, dynamic property lookup, database/network/filesystem access,
+or unbounded expression depth. Invalid fields, duplicate rows, incompatible operators, negative
+or non-finite weights, unsupported nodes, unsafe numbers, and over-deep expressions are rejected.
+`GET/POST /v1/control/botblocker/profile-scoring` uses the existing platform-admin session, CSRF,
+rate-limit, and idempotency-key boundaries. A configuration write replaces the one current
+configuration and performs no backfill. No formulas, weights, coefficients, thresholds, or
+defaults are seeded.
+
+**Runtime and persistence.** Every accepted initial session/profile synchronization and accepted
+later profile update invokes scoring only after its MongoDB transaction commits; exact replay and
+stale input do not invoke it. The evaluator rereads the committed profile and then-current
+configuration, excludes each missing or unusable field from both weighted sum and present-weight
+sum, and never substitutes zero for missing evidence. Empty prior-IP history has the real count
+`0`; prior ASN averages and blacklist ratios with a zero denominator are unavailable. Every
+intermediate, field result, and final result must be finite and safe; division by zero,
+out-of-range field results, and unusable fields are omitted independently. Unconfigured scoring,
+no enabled usable fields, and invalid/out-of-range final calculations produce distinct typed
+unavailable statuses.
+
+`userIntelligence.currentScore` is the only persisted scoring result: either one finite
+`0..100` score or one typed unavailable status. Recalculation replaces it without score history,
+model/input version, or redundant derived profile fields. The score write compares the committed
+profile's `updatedAt`, so a calculation based on an older snapshot cannot overwrite a concurrently
+newer profile update. A transaction/profile failure never reaches scoring and therefore cannot
+produce a score from partial state. Existing fingerprint ordering, direct-field
+latest-successful behavior, exact identity, IP synchronization, transaction rollback, and
+visitor/site credential boundaries remain unchanged.
+
+**Focused verification.** `@powerotp/contracts` build passed and its full package suite passed
+**192/192** tests across 49 suites. `@powerotp/api` build passed and its full package suite passed
+**347/347** tests across 92 suites. The server-facing `@powerotp/backend` workspace passed
+`tsc --noEmit`. No gate-next production-bundle check was required because the scoring contracts
+remain backend-only and `@powerotp/contracts/browser` was unchanged. No full-repository
+verification was run.
+
+**Explicitly not shipped.** This slice adds no Phase 18 customer sensitivity/OTP policy,
+project callback/pull, behavior-event reducer, external IP-vendor profile integration,
+site-return cookie, Passport, minute-29 token refresh, middleware bearer replacement, OTP
+orchestration, billing, Phase 26 edge publication, or Phase 27 global verify Worker. No `.env`
+file, migration, seed, deployment, or customer traffic was changed. No commit or push was
+performed.

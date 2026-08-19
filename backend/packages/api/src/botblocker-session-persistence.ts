@@ -57,7 +57,14 @@ export class BotBlockerSessionPersistence {
   readonly #fingerprints: FingerprintPersistence;
   readonly #reads: BotBlockerIntelligencePersistence;
 
-  constructor(db: Db, client: MongoClient) {
+  constructor(
+    db: Db,
+    client: MongoClient,
+    private readonly scoreProfile?: (
+      scope: BotBlockerScope,
+      userIntelligenceId: string,
+    ) => Promise<unknown>,
+  ) {
     this.#client = client;
     this.#gateSessions = db.collection<GateSessionDocument>("gateSessions");
     this.#userIntelligence =
@@ -97,6 +104,7 @@ export class BotBlockerSessionPersistence {
     const evidence = input.initialRequest.payload.browser.evidence;
     const initialRequest = initialRequestSnapshot(input);
     let result: GateSessionDocument | undefined;
+    let profileUpdated = false;
 
     await this.#client.withSession(async (session) => {
       await session.withTransaction(async () => {
@@ -269,12 +277,15 @@ export class BotBlockerSessionPersistence {
             { session },
           );
         }
-
+        profileUpdated = true;
       });
     });
 
     if (!result) {
       throw new BotBlockerSessionPersistenceError("session_not_found");
+    }
+    if (profileUpdated) {
+      await this.scoreProfile?.(input.scope, result.userIntelligenceId);
     }
     return result;
   }

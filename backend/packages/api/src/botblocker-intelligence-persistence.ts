@@ -6,6 +6,7 @@ import type {
   BrowserEvidence,
   FingerprintVerifyLookup,
   FingerprintVerifySource,
+  ProfileScoreStatus,
   RapidAuthRequest,
   ReportSequence,
   RiskEvent,
@@ -152,6 +153,9 @@ export interface UserIntelligenceDocument extends BotBlockerScope,
   /** Rolling distinct-profile reuse counts for `currentIp.ip`, refreshed
    * alongside it. Absent whenever `currentIp` itself is absent. */
   currentIpReuse?: IpReuseSummary;
+  /** One replaceable current score/status. No history or scoring-model
+   * version is retained on the profile. */
+  currentScore?: ProfileScoreStatus;
   latestEvidence?: BrowserEvidence;
   gateSessionCount: number;
   behaviorReportCount: number;
@@ -420,6 +424,23 @@ export class BotBlockerIntelligencePersistence {
       _id: userIntelligenceId,
       ...scope,
     });
+  }
+
+  async replaceCurrentScore(
+    scope: BotBlockerScope,
+    userIntelligenceId: string,
+    profileUpdatedAt: Date,
+    currentScore: ProfileScoreStatus,
+  ): Promise<boolean> {
+    const result = await this.#userIntelligence.updateOne(
+      {
+        _id: userIntelligenceId,
+        ...scope,
+        updatedAt: profileUpdatedAt,
+      },
+      { $set: { currentScore } },
+    );
+    return result.matchedCount === 1;
   }
 
   listUserIntelligence(

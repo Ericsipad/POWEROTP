@@ -138,6 +138,10 @@ function fixture(options: {
   const riskEvents: DurableRiskEventDocument[] = [];
   const intelligence = structuredClone(options.intelligence ?? []);
   const fingerprints = structuredClone(options.fingerprints ?? []);
+  const scoringCalls: Array<{
+    userIntelligenceId: string;
+    committedProfileVisible: boolean;
+  }> = [];
   const collection = (name: string) => {
     const rows = name === "gateSessions"
       ? gateSessions
@@ -237,11 +241,25 @@ function fixture(options: {
     }),
   } as unknown as MongoClient;
   return {
-    persistence: new BotBlockerSessionPersistence(db, client),
+    persistence: new BotBlockerSessionPersistence(
+      db,
+      client,
+      async (_scope, userIntelligenceId) => {
+        scoringCalls.push({
+          userIntelligenceId,
+          committedProfileVisible:
+            intelligence.some((row) => row._id === userIntelligenceId) &&
+            gateSessions.some(
+              (row) => row.userIntelligenceId === userIntelligenceId,
+            ),
+        });
+      },
+    ),
     gateSessions,
     intelligence,
     fingerprints,
     riskEvents,
+    scoringCalls,
   };
 }
 
@@ -460,6 +478,10 @@ describe("BotBlockerSessionPersistence fingerprint selection", () => {
     assert.equal(state.gateSessions.length, 1);
     assert.equal(state.riskEvents.length, 1);
     assert.equal(state.intelligence[0]!.gateSessionCount, 1);
+    assert.deepEqual(state.scoringCalls, [{
+      userIntelligenceId: first.userIntelligenceId,
+      committedProfileVisible: true,
+    }]);
 
     await assert.rejects(
       state.persistence.openGateSession(openInput({
@@ -481,6 +503,7 @@ describe("BotBlockerSessionPersistence fingerprint selection", () => {
     assert.deepEqual(state.riskEvents, []);
     assert.deepEqual(state.intelligence, []);
     assert.deepEqual(state.fingerprints, []);
+    assert.deepEqual(state.scoringCalls, []);
   });
 
   it("rolls back the session before any profile or fingerprint write when the initial event fails", async () => {
@@ -493,6 +516,7 @@ describe("BotBlockerSessionPersistence fingerprint selection", () => {
     assert.deepEqual(state.riskEvents, []);
     assert.deepEqual(state.intelligence, []);
     assert.deepEqual(state.fingerprints, []);
+    assert.deepEqual(state.scoringCalls, []);
   });
 
   it("stores the same complete bounded initial request on the session and first event for 90 days", async () => {

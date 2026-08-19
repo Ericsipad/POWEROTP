@@ -17,6 +17,8 @@ import { BotBlockerOperationsService } from "@powerotp/api/botblocker-operations
 import { BotBlockerPolicyControlService } from "@powerotp/api/botblocker-policy-control-service.js";
 import { BotBlockerPolicyPersistence } from "@powerotp/api/botblocker-policy-persistence.js";
 import { BotBlockerPolicyService } from "@powerotp/api/botblocker-policy-service.js";
+import { BotBlockerProfileScoringPersistence } from "@powerotp/api/botblocker-profile-scoring-persistence.js";
+import { BotBlockerProfileScoringService } from "@powerotp/api/botblocker-profile-scoring.js";
 import { BotBlockerRuntimeSecurity } from "@powerotp/api/botblocker-runtime-security.js";
 import { BotBlockerSiteCredentialPersistence } from "@powerotp/api/botblocker-site-credential-persistence.js";
 import { BotBlockerSiteCredentialService } from "@powerotp/api/botblocker-site-credential-service.js";
@@ -65,6 +67,7 @@ export interface ServerContext {
   botBlockerNetworkRanges: BotBlockerNetworkRangePersistence;
   botBlockerAsnClassifications: BotBlockerAsnClassificationPersistence;
   botBlockerAsnTypeScores: BotBlockerAsnTypeScorePersistence;
+  botBlockerProfileScoringConfiguration: BotBlockerProfileScoringPersistence;
   botBlockerNetworkIntelligence: BotBlockerNetworkIntelligenceService;
   botBlockerPolicy: BotBlockerPolicyService;
   botBlockerPolicyControl: BotBlockerPolicyControlService;
@@ -160,8 +163,21 @@ async function buildServerContext(): Promise<ServerContext> {
     dataStores.rateLimitStore,
     config,
   );
+  const botBlockerProfileScoringConfiguration =
+    new BotBlockerProfileScoringPersistence(dataStores.db);
+  const botBlockerIntelligence =
+    new BotBlockerIntelligencePersistence(dataStores.db);
+  const botBlockerProfileScoring = new BotBlockerProfileScoringService(
+    botBlockerProfileScoringConfiguration,
+    botBlockerIntelligence,
+  );
   const botBlockerIngestion = new BotBlockerIngestionService(
-    new BotBlockerIngestionPersistence(dataStores.db, dataStores.client),
+    new BotBlockerIngestionPersistence(
+      dataStores.db,
+      dataStores.client,
+      (scope, userIntelligenceId) =>
+        botBlockerProfileScoring.recalculate(scope, userIntelligenceId),
+    ),
     config,
   );
   const botBlockerIpBlacklist = new BotBlockerIpBlacklistPersistence(dataStores.db);
@@ -192,7 +208,7 @@ async function buildServerContext(): Promise<ServerContext> {
   );
   const botBlockerOperations = new BotBlockerOperationsService(
     dataStores.db,
-    new BotBlockerIntelligencePersistence(dataStores.db),
+    botBlockerIntelligence,
     dataStores.isReady,
     config,
   );
@@ -241,6 +257,7 @@ async function buildServerContext(): Promise<ServerContext> {
     botBlockerNetworkRanges,
     botBlockerAsnClassifications,
     botBlockerAsnTypeScores,
+    botBlockerProfileScoringConfiguration,
     botBlockerNetworkIntelligence,
     botBlockerPolicy,
     botBlockerPolicyControl,

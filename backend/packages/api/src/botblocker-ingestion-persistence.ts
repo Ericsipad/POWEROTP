@@ -34,13 +34,24 @@ export class BotBlockerIngestionPersistence {
   readonly #riskEvents;
   readonly #sessions: BotBlockerSessionPersistence;
 
-  constructor(db: Db, client: MongoClient) {
+  constructor(
+    db: Db,
+    client: MongoClient,
+    private readonly scoreProfile?: (
+      scope: BotBlockerScope,
+      userIntelligenceId: string,
+    ) => Promise<unknown>,
+  ) {
     this.#client = client;
     this.#gateSessions = db.collection<GateSessionDocument>("gateSessions");
     this.#userIntelligence =
       db.collection<UserIntelligenceDocument>("userIntelligence");
     this.#riskEvents = db.collection<DurableRiskEventDocument>("riskEvents");
-    this.#sessions = new BotBlockerSessionPersistence(db, client);
+    this.#sessions = new BotBlockerSessionPersistence(
+      db,
+      client,
+      scoreProfile,
+    );
   }
 
   findGateSession(scope: BotBlockerScope, gateSessionId: string) {
@@ -156,6 +167,15 @@ export class BotBlockerIngestionPersistence {
         outcome = "accepted";
       });
     });
+    if ((outcome as BotBlockerIngestionResult) === "accepted") {
+      const gateSession = await this.#gateSessions.findOne({
+        _id: gateSessionId,
+        ...scope,
+      });
+      if (gateSession) {
+        await this.scoreProfile?.(scope, gateSession.userIntelligenceId);
+      }
+    }
     return outcome;
   }
 
@@ -257,6 +277,15 @@ export class BotBlockerIngestionPersistence {
         outcome = "accepted";
       });
     });
+    if ((outcome as BotBlockerIngestionResult) === "accepted") {
+      const gateSession = await this.#gateSessions.findOne({
+        _id: gateSessionId,
+        ...scope,
+      });
+      if (gateSession) {
+        await this.scoreProfile?.(scope, gateSession.userIntelligenceId);
+      }
+    }
     return outcome;
   }
 
