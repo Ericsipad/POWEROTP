@@ -14,8 +14,8 @@ import {
   PROJECT_CALLBACK_PATH,
 } from "./callbacks.js";
 import { DEFAULT_LIMITS } from "./http.js";
+import { createServices } from "./runtime.js";
 import { createMemoryGateSessionStore } from "./session.js";
-import type { GateNodeServices } from "./types.js";
 
 const now = Date.parse("2026-08-18T12:00:00.000Z");
 const secret = "project-callback-secret-with-32-characters";
@@ -107,10 +107,10 @@ async function fixture(withVisitorToken = true) {
       : {}),
   });
   const authorizations: Array<{ visitorToken: string }> = [];
-  const services = {
+  const services = createServices({
     async pullSessionData(
-      callbackEvent: typeof event,
-      authorization: { visitorToken: string },
+      callbackEvent,
+      authorization,
     ): Promise<BotBlockerSessionDataResponse> {
       authorizations.push(authorization);
       return {
@@ -123,7 +123,7 @@ async function fixture(withVisitorToken = true) {
         updatedAt: new Date(now).toISOString(),
       };
     },
-  } as GateNodeServices;
+  });
   return { store, services, authorizations };
 }
 
