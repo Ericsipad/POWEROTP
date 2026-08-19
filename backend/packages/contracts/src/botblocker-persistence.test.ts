@@ -194,12 +194,20 @@ describe("Phase 6 BotBlocker persistence contracts", () => {
         status: "unavailable",
         reason: "missing_stable_inputs",
       },
-      ipObservations: [{
-        ip,
-        firstObservedAt: now,
-        lastObservedAt: now,
-        observationCount: 2,
-      }],
+      currentIp: { ip, blacklisted: false },
+      recentIpHistory: [{ ip: "198.51.100.9", asnScore: 10, blacklisted: false }],
+      currentIpReuse: {
+        global: {
+          distinctProfiles1d: 1,
+          distinctProfiles7d: 2,
+          distinctProfiles30d: 3,
+        },
+        site: {
+          distinctProfiles1d: 1,
+          distinctProfiles7d: 1,
+          distinctProfiles30d: 2,
+        },
+      },
       latestEvidence: evidence,
       gateSessionCount: 2,
       behaviorReportCount: 3,
@@ -220,11 +228,54 @@ describe("Phase 6 BotBlocker persistence contracts", () => {
     );
   });
 
+  it("bounds recentIpHistory to 20 entries and requires monotonic reuse counts", () => {
+    const base = {
+      ...scope,
+      userIntelligenceId: "bui_visitor_123456",
+      recentIpHistory: [],
+      gateSessionCount: 1,
+      behaviorReportCount: 1,
+      firstObservedAt: now,
+      lastObservedAt: now,
+      createdAt: now,
+      updatedAt: now,
+      retentionExpiresAt: later,
+    };
+    const history = Array.from({ length: 20 }, (_, index) => ({
+      ip: `198.51.100.${index}`,
+      blacklisted: false,
+    }));
+    assert.equal(
+      UserIntelligenceRecordSchema.safeParse({
+        ...base,
+        recentIpHistory: history,
+      }).success,
+      true,
+    );
+    assert.equal(
+      UserIntelligenceRecordSchema.safeParse({
+        ...base,
+        recentIpHistory: [...history, { ip: "198.51.100.99", blacklisted: false }],
+      }).success,
+      false,
+    );
+    assert.equal(
+      UserIntelligenceRecordSchema.safeParse({
+        ...base,
+        currentIpReuse: {
+          global: { distinctProfiles1d: 3, distinctProfiles7d: 2, distinctProfiles30d: 5 },
+          site: { distinctProfiles1d: 0, distinctProfiles7d: 0, distinctProfiles30d: 0 },
+        },
+      }).success,
+      false,
+    );
+  });
+
   it("rejects browser-supplied scores and prohibited telemetry", () => {
     const forgedIntelligence = {
       ...scope,
       userIntelligenceId: "bui_visitor_123456",
-      ipObservations: [],
+      recentIpHistory: [],
       gateSessionCount: 1,
       behaviorReportCount: 1,
       firstObservedAt: now,
@@ -407,7 +458,7 @@ describe("Phase 6 BotBlocker persistence contracts", () => {
           status: "available",
           hash: verifyHash,
         },
-        ipObservations: [],
+        recentIpHistory: [],
         gateSessionCount: 0,
         behaviorReportCount: 0,
         firstObservedAt: now,

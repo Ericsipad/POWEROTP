@@ -6,7 +6,7 @@ import type {
   FingerprintVerifySource,
   RapidAuthRequest,
 } from "@powerotp/contracts";
-import type { Db, MongoClient } from "mongodb";
+import type { ClientSession, Db, MongoClient } from "mongodb";
 
 import {
   deriveFingerprintVerifyLookup,
@@ -22,6 +22,7 @@ import {
   botBlockerSessionInputRetentionExpiresAt,
   createRiskEventId,
   createUserIntelligenceId,
+  sameBotBlockerScope,
   type BotBlockerScope,
   type DurableRiskEventDocument,
   type GateSessionDocument,
@@ -29,7 +30,7 @@ import {
   type GateSessionNetworkClassification,
   type InitialRequestEventDocument,
   type InitialSessionRequestSnapshotDocument,
-  type IpObservation,
+  type IpEvidence,
   type UserIntelligenceDocument,
   type VisitorTokenMetadataDocument,
 } from "./botblocker-intelligence-persistence.js";
@@ -104,7 +105,7 @@ export class BotBlockerSessionPersistence {
           { session },
         );
         if (existingById) {
-          if (!sameScope(existingById, input.scope)) {
+          if (!sameBotBlockerScope(existingById, input.scope)) {
             throw new BotBlockerSessionPersistenceError("scope_mismatch");
           }
           if (
@@ -136,7 +137,7 @@ export class BotBlockerSessionPersistence {
               "authoritative_binding_not_found",
             );
           }
-          if (!sameScope(bound, input.scope)) {
+          if (!sameBotBlockerScope(bound, input.scope)) {
             throw new BotBlockerSessionPersistenceError("scope_mismatch");
           }
           matched = bound;
@@ -231,12 +232,13 @@ export class BotBlockerSessionPersistence {
             input.verifyHashSecret,
           )
           : {};
+        const ipProfile = await this.#ipProfileFields(matched, input, session);
         if (!matched) {
           const intelligence: UserIntelligenceDocument = {
             _id: userId,
             ...input.scope,
             ...fingerprintProfile,
-            ipObservations: updateIpObservations([], input.ip, input.now),
+            ...ipProfile,
             latestEvidence: evidence,
             gateSessionCount: 1,
             behaviorReportCount: 0,
@@ -255,16 +257,12 @@ export class BotBlockerSessionPersistence {
             { _id: matched._id, ...input.scope },
             {
               $set: {
-                ipObservations: updateIpObservations(
-                  matched.ipObservations,
-                  input.ip,
-                  input.now,
-                ),
                 latestEvidence: evidence,
                 lastObservedAt: input.now,
                 updatedAt: input.now,
                 retentionExpiresAt: botBlockerRetentionExpiresAt(input.now),
                 ...fingerprintProfile,
+                ...ipProfile,
               },
               $inc: { gateSessionCount: 1 },
             },
@@ -302,6 +300,52 @@ export class BotBlockerSessionPersistence {
     if (update.matchedCount !== 1) {
       throw new BotBlockerSessionPersistenceError("session_not_found");
     }
+  }
+
+  /**
+   * Phase 17A gate-session profile synchronization, item 4: explicit
+   * blacklist observation, the 20-entry unique LRU `recentIpHistory`, and
+   * rolling exact-IP reuse counts. Missing trusted IP omits every one of
+   * these updates and leaves the profile's existing evidence untouched.
+   */
+  async #ipProfileFields(
+    matched: UserIntelligenceDocument | null,
+    input: {
+      ip?: string;
+      ipBlacklisted?: boolean;
+      networkClassification?: GateSessionNetworkClassification;
+      scope: BotBlockerScope;
+      now: Date;
+    },
+    session: ClientSession,
+  ): Promise<
+    Pick<UserIntelligenceDocument, "currentIp" | "recentIpHistory" | "currentIpReuse">
+  > {
+    const incoming = buildIncomingIpEvidence(
+      input.ip,
+      input.ipBlacklisted,
+      input.networkClassification,
+    );
+    const { currentIp, recentIpHistory } = updateIpEvidence(
+      {
+        currentIp: matched?.currentIp,
+        recentIpHistory: matched?.recentIpHistory ?? [],
+      },
+      incoming,
+    );
+    const currentIpReuse = incoming
+      ? await this.#reads.countIpReuse(
+        incoming.ip,
+        input.scope,
+        input.now,
+        session,
+      )
+      : matched?.currentIpReuse;
+    return {
+      recentIpHistory,
+      ...(currentIp ? { currentIp } : {}),
+      ...(currentIpReuse ? { currentIpReuse } : {}),
+    };
   }
 }
 
@@ -345,40 +389,63 @@ function fingerprintProfileFields(
   };
 }
 
-function sameScope(
-  document: BotBlockerScope,
-  scope: BotBlockerScope,
-): boolean {
-  return document.customerId === scope.customerId &&
-    document.projectId === scope.projectId &&
-    document.siteId === scope.siteId;
+function buildIncomingIpEvidence(
+  ip: string | undefined,
+  ipBlacklisted: boolean | undefined,
+  networkClassification: GateSessionNetworkClassification | undefined,
+): IpEvidence | undefined {
+  if (ip === undefined || ipBlacklisted === undefined) return undefined;
+  return {
+    ip,
+    blacklisted: ipBlacklisted,
+    ...(networkClassification ? { asnScore: networkClassification.score } : {}),
+  };
 }
 
-function updateIpObservations(
-  current: IpObservation[],
-  ip: string | undefined,
-  now: Date,
-): IpObservation[] {
-  if (!ip) return current;
-  const existing = current.find((observation) => observation.ip === ip);
-  if (!existing) {
-    return [
-      ...current,
-      {
-        ip,
-        firstObservedAt: now,
-        lastObservedAt: now,
-        observationCount: 1,
-      },
-    ];
+/**
+ * Fixed, schema-driven current-IP/history synchronization (Phase 17A):
+ * a same-IP observation refreshes `currentIp` in place without touching
+ * history; an IP change removes any duplicate occurrence of both the
+ * incoming and outgoing IP, moves the outgoing `currentIp` to the newest
+ * history slot, and trims to the 20 most recent unique entries.
+ * `asnScore` uses latest-successful replacement: an incoming session
+ * without a resolved ASN score keeps the last known score for that exact
+ * IP instead of discarding it.
+ */
+function updateIpEvidence(
+  profile: { currentIp?: IpEvidence; recentIpHistory: IpEvidence[] },
+  incoming: IpEvidence | undefined,
+): { currentIp?: IpEvidence; recentIpHistory: IpEvidence[] } {
+  if (!incoming) return profile;
+  if (!profile.currentIp) {
+    return { currentIp: incoming, recentIpHistory: profile.recentIpHistory };
   }
-  return current.map((observation) =>
-    observation.ip === ip
-      ? {
-          ...observation,
-          lastObservedAt: now,
-          observationCount: observation.observationCount + 1,
-        }
-      : observation
+  if (profile.currentIp.ip === incoming.ip) {
+    return {
+      currentIp: withLatestAsnScore(incoming, profile.currentIp.asnScore),
+      recentIpHistory: profile.recentIpHistory,
+    };
+  }
+  const priorEntry = profile.recentIpHistory.find(
+    (entry) => entry.ip === incoming.ip,
   );
+  const remaining = profile.recentIpHistory.filter(
+    (entry) => entry.ip !== incoming.ip && entry.ip !== profile.currentIp!.ip,
+  );
+  return {
+    currentIp: withLatestAsnScore(incoming, priorEntry?.asnScore),
+    recentIpHistory: [profile.currentIp, ...remaining].slice(0, 20),
+  };
+}
+
+function withLatestAsnScore(
+  incoming: IpEvidence,
+  previousAsnScore: number | undefined,
+): IpEvidence {
+  const asnScore = incoming.asnScore ?? previousAsnScore;
+  return {
+    ip: incoming.ip,
+    blacklisted: incoming.blacklisted,
+    ...(asnScore !== undefined ? { asnScore } : {}),
+  };
 }

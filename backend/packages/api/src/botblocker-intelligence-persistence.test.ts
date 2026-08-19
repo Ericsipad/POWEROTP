@@ -100,6 +100,7 @@ function dataDb(): Db {
                 toArray: async () => matching,
               };
             },
+            toArray: async () => matching,
           };
         },
       };
@@ -112,12 +113,15 @@ function matches(
   filter: Record<string, unknown>,
 ): boolean {
   return Object.entries(filter).every(([key, value]) => {
-    if (
-      typeof value === "object" &&
-      value !== null &&
-      "$lt" in value
-    ) {
+    if (typeof value === "object" && value !== null && "$lt" in value) {
       return Number(row[key]) < Number((value as { $lt: number }).$lt);
+    }
+    if (typeof value === "object" && value !== null && "$gte" in value) {
+      const rowValue = row[key];
+      const bound = (value as { $gte: Date }).$gte;
+      return rowValue instanceof Date
+        ? rowValue.getTime() >= bound.getTime()
+        : Number(rowValue) >= Number(bound);
     }
     return row[key] === value;
   });
@@ -196,15 +200,24 @@ describe("BotBlocker intelligence persistence", () => {
     ));
   });
 
-  it("keeps IP lookup non-unique because an IP is an observation", async () => {
+  it("keeps IP lookups non-unique because an IP is an observation", async () => {
     const captured: CapturedIndex[] = [];
     await ensureBotBlockerIntelligenceIndexes(indexDb(captured));
 
-    const ipIndex = captured.find(
-      (index) => index.keys["ipObservations.ip"] === 1,
+    const profileIpIndex = captured.find(
+      (index) => index.keys["currentIp.ip"] === 1,
     );
-    assert.ok(ipIndex);
-    assert.notEqual(ipIndex.options?.unique, true);
+    assert.ok(profileIpIndex);
+    assert.notEqual(profileIpIndex.options?.unique, true);
+
+    const sessionIpIndex = captured.find(
+      (index) =>
+        index.collection === "gateSessions" &&
+        index.keys.ip === 1 &&
+        index.keys.lastObservedAt === -1,
+    );
+    assert.ok(sessionIpIndex);
+    assert.notEqual(sessionIpIndex.options?.unique, true);
   });
 
   it("requires exact customer, project, and site scope for every entity", async () => {
@@ -293,5 +306,82 @@ describe("BotBlocker intelligence persistence", () => {
       observedAt,
     );
     assert.equal(advanced?.lastAppliedSequence, 3);
+  });
+
+  it("counts distinct system-wide and same-site profiles for an exact IP over 1/7/30 days", async () => {
+    const now = new Date("2026-08-18T12:00:00.000Z");
+    const day = 24 * 60 * 60 * 1_000;
+    const sameSiteOtherSession = {
+      _id: "bgs_same_site_other",
+      ...ownerScope,
+      ip: "203.0.113.5",
+      userIntelligenceId: "bui_other_same_site",
+      lastObservedAt: new Date(now.getTime() - 2 * day),
+    };
+    const sameProfileReconnect = {
+      _id: "bgs_same_profile_again",
+      ...ownerScope,
+      ip: "203.0.113.5",
+      userIntelligenceId: "bui_owner_123456",
+      lastObservedAt: new Date(now.getTime() - 5 * day),
+    };
+    const otherSiteSameIp = {
+      _id: "bgs_other_site",
+      ...otherProjectScope,
+      ip: "203.0.113.5",
+      userIntelligenceId: "bui_other_site",
+      lastObservedAt: new Date(now.getTime() - 20 * day),
+    };
+    const staleBeyondWindow = {
+      _id: "bgs_too_old",
+      ...ownerScope,
+      ip: "203.0.113.5",
+      userIntelligenceId: "bui_too_old",
+      lastObservedAt: new Date(now.getTime() - 31 * day),
+    };
+    const differentIp = {
+      _id: "bgs_different_ip",
+      ...ownerScope,
+      ip: "198.51.100.9",
+      userIntelligenceId: "bui_different_ip",
+      lastObservedAt: now,
+    };
+    const db = {
+      collection(name: string) {
+        const rows = name === "gateSessions"
+          ? [
+            sameSiteOtherSession,
+            sameProfileReconnect,
+            otherSiteSameIp,
+            staleBeyondWindow,
+            differentIp,
+          ]
+          : [];
+        return {
+          find(filter: Record<string, unknown>) {
+            const matching = rows.filter((row) => matches(row, filter));
+            return { toArray: async () => matching };
+          },
+        };
+      },
+    } as unknown as Db;
+    const persistence = new BotBlockerIntelligencePersistence(db);
+
+    const reuse = await persistence.countIpReuse(
+      "203.0.113.5",
+      ownerScope,
+      now,
+    );
+
+    assert.deepEqual(reuse.global, {
+      distinctProfiles1d: 0,
+      distinctProfiles7d: 2,
+      distinctProfiles30d: 3,
+    });
+    assert.deepEqual(reuse.site, {
+      distinctProfiles1d: 0,
+      distinctProfiles7d: 2,
+      distinctProfiles30d: 2,
+    });
   });
 });

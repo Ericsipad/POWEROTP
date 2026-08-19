@@ -135,20 +135,43 @@ export const FingerprintVerifyLookupSchema = z.discriminatedUnion("status", [
   }).strict(),
 ]);
 
-export const IpObservationSchema = z
+/** One exact-IP observation carried on `userIntelligence` — either the
+ * profile's `currentIp` or one `recentIpHistory` entry. `asnScore` is the
+ * observation-time configured ASN-type score (Phase 16 step 7) and is
+ * omitted, never zero-substituted, when no network-range match was
+ * available. `blacklisted` is the observation-time dedicated exact-IP
+ * blacklist result and is never inferred from a decision outcome. */
+export const IpEvidenceSchema = z
   .object({
     ip: TrustedProxyIpSchema,
-    firstObservedAt: z.string().datetime(),
-    lastObservedAt: z.string().datetime(),
-    observationCount: z.number().int().positive(),
+    asnScore: z.number().int().optional(),
+    blacklisted: z.boolean(),
+  })
+  .strict();
+
+const IpReuseCountsSchema = z
+  .object({
+    distinctProfiles1d: z.number().int().nonnegative(),
+    distinctProfiles7d: z.number().int().nonnegative(),
+    distinctProfiles30d: z.number().int().nonnegative(),
   })
   .strict()
   .refine(
-    (observation) =>
-      Date.parse(observation.lastObservedAt) >=
-      Date.parse(observation.firstObservedAt),
-    { message: "lastObservedAt cannot precede firstObservedAt" },
+    (counts) =>
+      counts.distinctProfiles1d <= counts.distinctProfiles7d &&
+      counts.distinctProfiles7d <= counts.distinctProfiles30d,
+    { message: "Reuse counts must be monotonic across widening windows" },
   );
+
+/** Separate system-wide and same-site distinct-profile counts for the
+ * profile's current exact IP, over the latest 1/7/30 days. Risk evidence
+ * only — never used to select, merge, or blacklist a profile. */
+export const IpReuseSummarySchema = z
+  .object({
+    global: IpReuseCountsSchema,
+    site: IpReuseCountsSchema,
+  })
+  .strict();
 
 /** Session-level snapshot of the fast-immediate network/ASN classification
  * chain (Phase 16 step 7), taken once at gate-session creation. Purely
@@ -250,7 +273,9 @@ export const UserIntelligenceRecordSchema = ScopedRecordSchema.extend({
   passportUserId: OpaqueIdSchema.optional(),
   fingerprintVerifySource: FingerprintVerifySourceSchema.optional(),
   fingerprintVerifyLookup: FingerprintVerifyLookupSchema.optional(),
-  ipObservations: z.array(IpObservationSchema),
+  currentIp: IpEvidenceSchema.optional(),
+  recentIpHistory: z.array(IpEvidenceSchema).max(20),
+  currentIpReuse: IpReuseSummarySchema.optional(),
   latestEvidence: BrowserEvidenceSchema.optional(),
   gateSessionCount: z.number().int().nonnegative(),
   behaviorReportCount: z.number().int().nonnegative(),
@@ -441,6 +466,8 @@ export type FingerprintVerifySource = z.infer<
 export type FingerprintVerifyLookup = z.infer<
   typeof FingerprintVerifyLookupSchema
 >;
+export type IpEvidence = z.infer<typeof IpEvidenceSchema>;
+export type IpReuseSummary = z.infer<typeof IpReuseSummarySchema>;
 export type DurableRiskEventRecord = z.infer<typeof DurableRiskEventRecordSchema>;
 export type BotBlockerChallengeRecord = z.infer<
   typeof BotBlockerChallengeRecordSchema

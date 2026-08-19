@@ -3484,3 +3484,57 @@ refresh route or middleware bearer replacement, gate-session IP/profile synchron
 scoring fields/runtime, callback/pull flow, behavior-event reducer, external-vendor profile
 integration, billing, edge publication, or global verify Worker. No environment file, migration,
 seed, deployment, or customer traffic was changed. No commit or push was performed.
+
+## 2026-08-18 — BotBlocker Phase 17A (partial): gate-session profile synchronization, IP evidence
+
+**Status: fourth Phase 17 production slice complete.** This entry covers implementation-split item
+4 of the Phase 17A plan — gate-session profile synchronization's IP evidence, superseding the
+Phase 16 `ipObservations` placeholder (which only ever held one entry because its matching rule
+never produced real history). `openGateSession` now applies this synchronization inside its
+existing at-most-once MongoDB transaction, immediately after the fingerprint/verify-lookup
+projection and before the session/profile write commits.
+
+**`userIntelligence.currentIp` and `recentIpHistory`.** Replaced `ipObservations` with `currentIp`
+(`ip`, optional `asnScore`, explicit `blacklisted`) and a unique least-recently-used
+`recentIpHistory` of at most 20 prior entries, exactly per plan: a repeated exact IP refreshes
+`currentIp` in place (ASN score uses latest-successful replacement — an incoming session without a
+resolved ASN score keeps the last known score for that exact IP) without touching history; a
+changed IP removes any duplicate occurrence of both the incoming and outgoing IP, moves the
+outgoing `currentIp` into the newest history slot, and trims to the 20 most recent unique entries.
+A missing trusted IP (or a missing explicit blacklist result) omits every one of these updates and
+leaves the profile's existing evidence untouched — never fabricated. `blacklisted` is stored as the
+observation-time dedicated exact-IP blacklist result already resolved by the existing Phase 16
+network-intelligence chain, never inferred from `latestDecision`.
+
+**`userIntelligence.currentIpReuse`.** Added separate system-wide (`global`) and same-site (`site`)
+distinct-profile counts for the current exact IP over the latest 1/7/30 days
+(`distinctProfiles1d/7d/30d`), computed by `BotBlockerIntelligencePersistence#countIpReuse` from the
+retained 90-day `gateSessions` dataset — the trusted session/profile relationship — by counting
+distinct `userIntelligenceId` values, never raw report/session counts. The read runs inside the
+same transaction and `session`, so it sees the just-inserted current gate session. Omitted whenever
+the trusted IP itself is unavailable.
+
+**Persistence and indexes.** New `backend/packages/api/src/botblocker-intelligence-persistence.ts`
+types `IpEvidence`, `IpReuseCounts`, `IpReuseSummary`, and exported `sameBotBlockerScope` (replacing
+a duplicated private helper previously defined separately in both
+`botblocker-intelligence-persistence.ts` and `botblocker-session-persistence.ts`). Added a
+non-unique `{ ip: 1, lastObservedAt: -1 }` `gateSessions` index supporting `countIpReuse`'s
+unscoped system-wide scan, and replaced the `userIntelligence` `"ipObservations.ip"` index with
+`"currentIp.ip"`. `backend/packages/contracts/src/botblocker-persistence.ts` replaced
+`IpObservationSchema` with `IpEvidenceSchema` and added `IpReuseSummarySchema` (with a monotonic
+1d ≤ 7d ≤ 30d refinement) on `UserIntelligenceRecordSchema`; these boundary schemas remain exercised
+only by their own test file, matching the existing pattern of the other `*RecordSchema` exports.
+`backend/packages/api/src/botblocker-operations-service.ts`'s project-owned visitor report now reads
+`visitor.currentIp?.ip` instead of `visitor.ipObservations[0]?.ip` — the site-owner-facing `ip` field
+in that response is unchanged; only the internal source field name and shape moved.
+
+**Focused verification.** `@powerotp/contracts` build passed and its suite passed **185/185** tests
+across 46 suites. `@powerotp/api` build passed and its suite passed **326/326** tests across 88
+suites. The touched `@powerotp/backend` server workspace passed `tsc --noEmit`. No full-repository
+verification was run.
+
+**Explicitly not shipped.** This slice adds no operator scoring fields/runtime, callback/pull flow,
+behavior-event reducer, external-vendor profile integration, site-return cookie, Passport binding,
+minute-29 refresh, middleware bearer replacement, billing, edge publication, or global verify
+Worker. No environment file, migration, seed, deployment, or customer traffic was changed. No
+commit or push was performed.

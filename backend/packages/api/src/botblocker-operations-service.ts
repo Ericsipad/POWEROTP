@@ -3,7 +3,7 @@ import type { Db } from "mongodb";
 import type { ProductionConfig } from "./config.js";
 import {
   BotBlockerIntelligencePersistence,
-  type IpObservation,
+  type IpEvidence,
 } from "./botblocker-intelligence-persistence.js";
 import type { BotBlockerSiteDocument } from "./botblocker-site-persistence.js";
 import type {
@@ -71,7 +71,7 @@ export class BotBlockerOperationsService {
     );
     return {
       visitors: visitors.map((visitor) => {
-        const ip = latestIp(visitor.ipObservations);
+        const ip = currentIp(visitor.currentIp);
         return {
           visitorId: visitor._id,
           siteId: visitor.siteId,
@@ -187,17 +187,12 @@ export class BotBlockerOperationsService {
 }
 
 /**
- * The visitor's raw IP for the site-owner visitor report (see the Phase 16
- * network-intelligence design's IP-hash reversal). A brand-new profile
- * seeds `ipObservations` with exactly one entry (the session's IP); a
- * later session only merges into an *existing* profile when its IP is
- * already one of that profile's observations (`openGateSession`'s
- * fingerprint-and-IP match), which updates that same entry in place
- * rather than adding a second one. So today there is at most one entry —
- * there is no "earlier IP" to choose between — and this reads it plainly
- * instead of implying a history that the matching rule above never
- * actually produces.
+ * The visitor's raw current IP for the site-owner visitor report (see the
+ * Phase 16 network-intelligence design's IP-hash reversal). Only the
+ * address is exposed here — the profile's own ASN score, blacklist
+ * observation, and prior-IP history remain internal risk evidence, never
+ * customer-facing.
  */
-function latestIp(observations: IpObservation[]): string | undefined {
-  return observations[0]?.ip;
+function currentIp(evidence: IpEvidence | undefined): string | undefined {
+  return evidence?.ip;
 }

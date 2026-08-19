@@ -11,7 +11,7 @@ import type {
   RiskEvent,
   VerificationType,
 } from "@powerotp/contracts";
-import type { Db, Filter } from "mongodb";
+import type { ClientSession, Db, Filter } from "mongodb";
 
 import { createId } from "./security.js";
 
@@ -94,11 +94,30 @@ export interface GateSessionDocument extends BotBlockerScope {
   retentionExpiresAt: Date;
 }
 
-export interface IpObservation {
+/** One exact-IP observation carried on `userIntelligence` — either the
+ * profile's `currentIp` or one `recentIpHistory` entry. `asnScore` is the
+ * observation-time configured ASN-type score (Phase 16 step 7) and is
+ * omitted, never zero-substituted, when no network-range match was
+ * available. `blacklisted` is the observation-time dedicated exact-IP
+ * blacklist result and is never inferred from a decision outcome. */
+export interface IpEvidence {
   ip: string;
-  firstObservedAt: Date;
-  lastObservedAt: Date;
-  observationCount: number;
+  asnScore?: number;
+  blacklisted: boolean;
+}
+
+export interface IpReuseCounts {
+  distinctProfiles1d: number;
+  distinctProfiles7d: number;
+  distinctProfiles30d: number;
+}
+
+/** Separate system-wide and same-site distinct-profile counts for the
+ * profile's current exact IP, over the latest 1/7/30 days. Risk evidence
+ * only — never used to select, merge, or blacklist a profile. */
+export interface IpReuseSummary {
+  global: IpReuseCounts;
+  site: IpReuseCounts;
 }
 
 export interface UserIntelligenceDocument extends BotBlockerScope {
@@ -111,7 +130,17 @@ export interface UserIntelligenceDocument extends BotBlockerScope {
    * from an inbound request or from fingerprintData. */
   fingerprintVerifySource?: FingerprintVerifySource;
   fingerprintVerifyLookup?: FingerprintVerifyLookup;
-  ipObservations: IpObservation[];
+  /** Current exact trusted IP plus its observation-time ASN/blacklist
+   * evidence, using latest replacement (Phase 17A gate-session profile
+   * synchronization). */
+  currentIp?: IpEvidence;
+  /** Unique least-recently-used list of at most 20 prior IP entries. An
+   * IP change moves the outgoing `currentIp` here as the newest entry;
+   * a repeated exact IP never appends a duplicate. */
+  recentIpHistory: IpEvidence[];
+  /** Rolling distinct-profile reuse counts for `currentIp.ip`, refreshed
+   * alongside it. Absent whenever `currentIp` itself is absent. */
+  currentIpReuse?: IpReuseSummary;
   latestEvidence?: BrowserEvidence;
   gateSessionCount: number;
   behaviorReportCount: number;
@@ -194,6 +223,36 @@ export function botBlockerMatchCutoff(now: Date): Date {
   return new Date(now.getTime() - BOTBLOCKER_MATCH_LOOKBACK_SECONDS * 1_000);
 }
 
+export function sameBotBlockerScope(
+  document: BotBlockerScope,
+  scope: BotBlockerScope,
+): boolean {
+  return document.customerId === scope.customerId &&
+    document.projectId === scope.projectId &&
+    document.siteId === scope.siteId;
+}
+
+function ipReuseCutoff(now: Date, days: number): Date {
+  return new Date(now.getTime() - days * 24 * 60 * 60 * 1_000);
+}
+
+function countDistinctProfiles(
+  rows: Pick<GateSessionDocument, "userIntelligenceId" | "lastObservedAt">[],
+  cutoffs: { oneDay: Date; sevenDay: Date; thirtyDay: Date },
+): IpReuseCounts {
+  const distinctSince = (cutoff: Date) =>
+    new Set(
+      rows
+        .filter((row) => row.lastObservedAt >= cutoff)
+        .map((row) => row.userIntelligenceId),
+    ).size;
+  return {
+    distinctProfiles1d: distinctSince(cutoffs.oneDay),
+    distinctProfiles7d: distinctSince(cutoffs.sevenDay),
+    distinctProfiles30d: distinctSince(cutoffs.thirtyDay),
+  };
+}
+
 export async function ensureBotBlockerIntelligenceIndexes(db: Db): Promise<void> {
   await Promise.all([
     db.collection<GateSessionDocument>("gateSessions").createIndex(
@@ -212,6 +271,13 @@ export async function ensureBotBlockerIntelligenceIndexes(db: Db): Promise<void>
       { retentionExpiresAt: 1 },
       { expireAfterSeconds: 0 },
     ),
+    /** Supports `countIpReuse`'s exact-IP, time-windowed scan across the
+     * retained 90-day session dataset — deliberately not scoped to one
+     * customer/project/site, because the system-wide reuse count is
+     * computed from this same index without a scope filter. */
+    db.collection<GateSessionDocument>("gateSessions").createIndex(
+      { ip: 1, lastObservedAt: -1 },
+    ),
     db.collection<UserIntelligenceDocument>("userIntelligence").createIndex(
       {
         customerId: 1,
@@ -226,7 +292,7 @@ export async function ensureBotBlockerIntelligenceIndexes(db: Db): Promise<void>
         customerId: 1,
         projectId: 1,
         siteId: 1,
-        "ipObservations.ip": 1,
+        "currentIp.ip": 1,
         lastObservedAt: -1,
       },
     ),
@@ -381,5 +447,47 @@ export class BotBlockerIntelligencePersistence {
       reportSequence: 1,
       eventIndex: 1,
     }).toArray();
+  }
+
+  /**
+   * Separate system-wide (`global`) and same-site (`site`) distinct-profile
+   * counts for the exact current IP over the latest 1/7/30 days (Phase 17A
+   * gate-session profile synchronization, item 4). Counts distinct
+   * `userIntelligenceId` values from the retained `gateSessions` dataset —
+   * the trusted session/profile relationship — never raw report/session
+   * counts. Accepts the caller's transaction `session` so a newly inserted
+   * gate session is visible to this read within the same transaction.
+   */
+  async countIpReuse(
+    ip: string,
+    scope: BotBlockerScope,
+    now: Date,
+    session?: ClientSession,
+  ): Promise<IpReuseSummary> {
+    const cutoffs = {
+      oneDay: ipReuseCutoff(now, 1),
+      sevenDay: ipReuseCutoff(now, 7),
+      thirtyDay: ipReuseCutoff(now, 30),
+    };
+    const rows = await this.#gateSessions.find(
+      { ip, lastObservedAt: { $gte: cutoffs.thirtyDay } },
+      {
+        projection: {
+          userIntelligenceId: 1,
+          lastObservedAt: 1,
+          customerId: 1,
+          projectId: 1,
+          siteId: 1,
+        },
+        session,
+      },
+    ).toArray();
+    return {
+      global: countDistinctProfiles(rows, cutoffs),
+      site: countDistinctProfiles(
+        rows.filter((row) => sameBotBlockerScope(row, scope)),
+        cutoffs,
+      ),
+    };
   }
 }

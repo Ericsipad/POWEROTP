@@ -156,6 +156,10 @@ function fixture(options: {
         }
         return matches[0] ?? null;
       },
+      find: (filter: Record<string, unknown>) => {
+        const matches = rows.filter((row) => matchesFilter(row, filter));
+        return { toArray: async () => matches };
+      },
       insertOne: async (document: never) => {
         if (name === "gateSessions" && options.failGateInsert) {
           throw new Error("injected gate insert failure");
@@ -244,12 +248,8 @@ function profile(
       status: "unavailable",
       reason: "missing_stable_inputs",
     },
-    ipObservations: [{
-      ip,
-      firstObservedAt: now,
-      lastObservedAt: now,
-      observationCount: 1,
-    }],
+    currentIp: { ip, blacklisted: false },
+    recentIpHistory: [],
     gateSessionCount: 1,
     behaviorReportCount: 0,
     firstObservedAt: now,
@@ -558,11 +558,195 @@ describe("BotBlockerSessionPersistence fingerprint selection", () => {
   });
 });
 
+describe("BotBlockerSessionPersistence gate-session profile synchronization (IP evidence)", () => {
+  it("sets currentIp with empty history on a brand-new profile", async () => {
+    const state = fixture();
+    await state.persistence.openGateSession(openInput());
+
+    assert.deepEqual(state.intelligence[0]!.currentIp, {
+      ip: "203.0.113.5",
+      blacklisted: false,
+    });
+    assert.deepEqual(state.intelligence[0]!.recentIpHistory, []);
+  });
+
+  it("refreshes the current IP's ASN score and blacklist boolean in place when the IP repeats", async () => {
+    const bound = profile("bui_bound_123456789");
+    const state = fixture({
+      intelligence: [bound],
+      fingerprints: [storedFingerprint(bound._id)],
+    });
+    await state.persistence.openGateSession(openInput({
+      gateSessionId: "bgs_repeat_a_123456",
+      authoritativeUserIntelligenceId: bound._id,
+      ipBlacklisted: true,
+      networkClassification: {
+        asn: 64512,
+        asnOrg: "Example Networks",
+        asnType: "datacenter",
+        score: 40,
+        requiresApiLookup: false,
+      },
+      now: new Date(now.getTime() + 1),
+    }));
+
+    assert.deepEqual(state.intelligence[0]!.currentIp, {
+      ip: "203.0.113.5",
+      asnScore: 40,
+      blacklisted: true,
+    });
+    assert.deepEqual(state.intelligence[0]!.recentIpHistory, []);
+  });
+
+  it("moves the outgoing current IP into history when the IP changes", async () => {
+    const bound = profile("bui_bound_123456789");
+    const state = fixture({
+      intelligence: [bound],
+      fingerprints: [storedFingerprint(bound._id)],
+    });
+    await state.persistence.openGateSession(openInput({
+      gateSessionId: "bgs_change_a_123456",
+      authoritativeUserIntelligenceId: bound._id,
+      ip: "198.51.100.7",
+      ipBlacklisted: false,
+      now: new Date(now.getTime() + 1),
+    }));
+
+    assert.deepEqual(state.intelligence[0]!.currentIp, {
+      ip: "198.51.100.7",
+      blacklisted: false,
+    });
+    assert.deepEqual(state.intelligence[0]!.recentIpHistory, [
+      { ip: "203.0.113.5", blacklisted: false },
+    ]);
+  });
+
+  it("moves a reappearing history IP back into currentIp without duplication", async () => {
+    const bound: UserIntelligenceDocument = {
+      ...profile("bui_bound_123456789"),
+      currentIp: { ip: "203.0.113.5", blacklisted: false },
+      recentIpHistory: [
+        { ip: "198.51.100.7", asnScore: 12, blacklisted: false },
+        { ip: "198.51.100.8", blacklisted: false },
+      ],
+    };
+    const state = fixture({
+      intelligence: [bound],
+      fingerprints: [storedFingerprint(bound._id)],
+    });
+    await state.persistence.openGateSession(openInput({
+      gateSessionId: "bgs_reappear_123456",
+      authoritativeUserIntelligenceId: bound._id,
+      ip: "198.51.100.7",
+      ipBlacklisted: false,
+      now: new Date(now.getTime() + 1),
+    }));
+
+    const updated = state.intelligence[0]!;
+    assert.deepEqual(updated.currentIp, {
+      ip: "198.51.100.7",
+      asnScore: 12,
+      blacklisted: false,
+    });
+    assert.deepEqual(updated.recentIpHistory, [
+      { ip: "203.0.113.5", blacklisted: false },
+      { ip: "198.51.100.8", blacklisted: false },
+    ]);
+  });
+
+  it("trims recentIpHistory to the 20 most recent unique entries", async () => {
+    const history = Array.from({ length: 20 }, (_, index) => ({
+      ip: `198.51.100.${index}`,
+      blacklisted: false,
+    }));
+    const bound: UserIntelligenceDocument = {
+      ...profile("bui_bound_123456789"),
+      currentIp: { ip: "203.0.113.5", blacklisted: false },
+      recentIpHistory: history,
+    };
+    const state = fixture({
+      intelligence: [bound],
+      fingerprints: [storedFingerprint(bound._id)],
+    });
+    await state.persistence.openGateSession(openInput({
+      gateSessionId: "bgs_trim_a_1234567",
+      authoritativeUserIntelligenceId: bound._id,
+      ip: "203.0.113.99",
+      ipBlacklisted: false,
+      now: new Date(now.getTime() + 1),
+    }));
+
+    const updated = state.intelligence[0]!;
+    assert.deepEqual(updated.currentIp, { ip: "203.0.113.99", blacklisted: false });
+    assert.equal(updated.recentIpHistory.length, 20);
+    assert.deepEqual(updated.recentIpHistory[0], {
+      ip: "203.0.113.5",
+      blacklisted: false,
+    });
+    assert.equal(
+      updated.recentIpHistory.some((entry) => entry.ip === "198.51.100.19"),
+      false,
+    );
+  });
+
+  it("omits every IP update when the trusted request IP is missing", async () => {
+    const bound = profile("bui_bound_123456789");
+    const state = fixture({
+      intelligence: [bound],
+      fingerprints: [storedFingerprint(bound._id)],
+    });
+    const { ip: _ip, ipBlacklisted: _ipBlacklisted, ...withoutIp } = openInput({
+      gateSessionId: "bgs_no_ip_12345678",
+      authoritativeUserIntelligenceId: bound._id,
+      now: new Date(now.getTime() + 1),
+    });
+
+    await state.persistence.openGateSession(withoutIp);
+
+    assert.deepEqual(state.intelligence[0]!.currentIp, bound.currentIp);
+    assert.deepEqual(state.intelligence[0]!.recentIpHistory, bound.recentIpHistory);
+  });
+
+  it("computes distinct global and same-site IP reuse counts from retained sessions", async () => {
+    const state = fixture();
+    await state.persistence.openGateSession(openInput({
+      gateSessionId: "bgs_reuse_first_123",
+      fingerprint: vector("Linux"),
+    }));
+    await state.persistence.openGateSession(openInput({
+      gateSessionId: "bgs_reuse_second_12",
+      fingerprint: vector("MacIntel"),
+      now: new Date(now.getTime() + 1),
+    }));
+
+    assert.equal(state.intelligence.length, 2);
+    const first = state.intelligence.find(
+      (row) => row._id === state.gateSessions[0]!.userIntelligenceId,
+    )!;
+    const second = state.intelligence.find(
+      (row) => row._id === state.gateSessions[1]!.userIntelligenceId,
+    )!;
+    assert.deepEqual(first.currentIpReuse, {
+      global: { distinctProfiles1d: 1, distinctProfiles7d: 1, distinctProfiles30d: 1 },
+      site: { distinctProfiles1d: 1, distinctProfiles7d: 1, distinctProfiles30d: 1 },
+    });
+    assert.deepEqual(second.currentIpReuse, {
+      global: { distinctProfiles1d: 2, distinctProfiles7d: 2, distinctProfiles30d: 2 },
+      site: { distinctProfiles1d: 2, distinctProfiles7d: 2, distinctProfiles30d: 2 },
+    });
+  });
+});
+
 function matchesFilter(
   row: Record<string, unknown>,
   filter: Record<string, unknown>,
 ): boolean {
-  return Object.entries(filter).every(([key, value]) =>
-    isDeepStrictEqual(row[key], value)
-  );
+  return Object.entries(filter).every(([key, value]) => {
+    if (typeof value === "object" && value !== null && "$gte" in value) {
+      const rowValue = row[key];
+      const bound = (value as { $gte: Date }).$gte;
+      return rowValue instanceof Date && rowValue.getTime() >= bound.getTime();
+    }
+    return isDeepStrictEqual(row[key], value);
+  });
 }

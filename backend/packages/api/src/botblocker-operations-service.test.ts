@@ -47,14 +47,8 @@ function fixture() {
       {
         _id: "bui_1234567890123456",
         ...scope,
-        ipObservations: [
-          {
-            ip: "203.0.113.5",
-            firstObservedAt: now,
-            lastObservedAt: now,
-            observationCount: 3,
-          },
-        ],
+        currentIp: { ip: "203.0.113.5", blacklisted: false },
+        recentIpHistory: [],
         gateSessionCount: 2,
         behaviorReportCount: 4,
         pageViewCount: 4,
@@ -114,7 +108,7 @@ describe("BotBlockerOperationsService", () => {
     assert.equal(response.visitors[0]?.totalActiveDurationMs, 81_000);
     assert.equal(response.visitors[0]?.ip, "203.0.113.5");
     assert.equal("fingerprintHash" in response.visitors[0]!, false);
-    assert.equal("ipObservations" in response.visitors[0]!, false);
+    assert.equal("currentIp" in response.visitors[0]!, false);
     await assert.rejects(
       service.visitors("usr_other", scope.projectId, { limit: 50 }),
       ProjectError,
