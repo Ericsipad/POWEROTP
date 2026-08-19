@@ -144,6 +144,43 @@ h1 em {
   font-weight: 400;
 }
 
+.heroHeadline {
+  align-items: flex-start;
+  display: flex;
+  flex-direction: column;
+}
+
+.heroLine {
+  display: block;
+}
+
+.heroConnector {
+  align-items: center;
+  color: var(--green-dark);
+  display: flex;
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 15px;
+  font-weight: 900;
+  justify-content: center;
+  letter-spacing: 0.12em;
+  line-height: 1;
+  margin: 20px 0;
+  text-transform: uppercase;
+  width: 100%;
+}
+
+.heroConnectorMark {
+  align-items: center;
+  background: var(--green);
+  border-radius: 50%;
+  color: var(--ink);
+  display: inline-flex;
+  font-size: 16px;
+  height: 30px;
+  justify-content: center;
+  width: 30px;
+}
+
 .heroCopy {
   color: var(--muted);
   font-size: 20px;

@@ -57,7 +57,15 @@ export default function Home() {
               <span className="pulse" />
               Programmable phone verification
             </div>
-            <h1>Compliant & Monetized in 5 minutes</h1>
+            <h1 className="heroHeadline">
+              <span className="heroLine">Compliant</span>
+              <span className="heroConnector">
+                <span className="heroConnectorMark">$</span>
+              </span>
+              <span className="heroLine">Monetized</span>
+              <span className="heroConnector">In just</span>
+              <span className="heroLine">5 Minutes</span>
+            </h1>
             <p className="heroMcpLine">
               <code>https://api.powerotp.com/mcp</code> — paste this to your AI tools.
             </p>
