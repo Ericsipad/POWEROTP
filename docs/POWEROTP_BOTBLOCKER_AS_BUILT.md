@@ -3700,9 +3700,11 @@ visitor/site credential boundaries remain unchanged.
 **Focused verification.** `@powerotp/contracts` build passed and its full package suite passed
 **192/192** tests across 49 suites. `@powerotp/api` build passed and its full package suite passed
 **347/347** tests across 92 suites. The server-facing `@powerotp/backend` workspace passed
-`tsc --noEmit`. No gate-next production-bundle check was required because the scoring contracts
-remain backend-only and `@powerotp/contracts/browser` was unchanged. No full-repository
-verification was run.
+`tsc --noEmit` and its focused package suite passed **15/15** tests across 7 suites, including the
+canonical route-inventory guard after adding the operator scoring route to
+`docs/API_ROUTE_INVENTORY.md`. No gate-next production-bundle check was required because the
+scoring contracts remain backend-only and `@powerotp/contracts/browser` was unchanged. No
+full-repository verification was run locally.
 
 **Explicitly not shipped.** This slice adds no Phase 18 customer sensitivity/OTP policy,
 project callback/pull, behavior-event reducer, external IP-vendor profile integration,
