@@ -375,18 +375,72 @@ function fingerprintProfileFields(
 ): Pick<
   UserIntelligenceDocument,
   "fingerprintVerifySource" | "fingerprintVerifyLookup"
-> {
+> & Partial<Pick<
+  UserIntelligenceDocument,
+  | "osCpu"
+  | "screenResolution"
+  | "platform"
+  | "touchSupport"
+  | "vendor"
+  | "architecture"
+  | "applePay"
+>> {
   const fingerprintVerifySource = {
     ...current,
     ...projectFingerprintVerifySource(vector),
   };
   return {
+    ...projectDirectFingerprintFields(vector),
     fingerprintVerifySource,
     fingerprintVerifyLookup: deriveFingerprintVerifyLookup(
       fingerprintVerifySource,
       secret,
     ),
   };
+}
+
+/**
+ * The only direct fingerprint values exposed on the hot profile row.
+ * Unavailable components are omitted so an accepted newer vector cannot
+ * erase the profile's last successful value.
+ */
+function projectDirectFingerprintFields(
+  vector: FingerprintVector,
+): Partial<Pick<
+  UserIntelligenceDocument,
+  | "osCpu"
+  | "screenResolution"
+  | "platform"
+  | "touchSupport"
+  | "vendor"
+  | "architecture"
+  | "applePay"
+>> {
+  const components = vector.components;
+  const osCpu = availableComponent(components.osCpu);
+  const screenResolution = availableComponent(components.screenResolution);
+  const platform = availableComponent(components.platform);
+  const touchSupport = availableComponent(components.touchSupport);
+  const vendor = availableComponent(components.vendor);
+  const architecture = availableComponent(components.architecture);
+  const applePay = availableComponent(components.applePay);
+  return {
+    ...(osCpu !== undefined ? { osCpu } : {}),
+    ...(screenResolution !== undefined ? { screenResolution } : {}),
+    ...(platform !== undefined ? { platform } : {}),
+    ...(touchSupport !== undefined ? { touchSupport } : {}),
+    ...(vendor !== undefined ? { vendor } : {}),
+    ...(architecture !== undefined ? { architecture } : {}),
+    ...(applePay !== undefined ? { applePay } : {}),
+  };
+}
+
+function availableComponent<T>(
+  component: { status: "available"; value: T } | { status: string } | undefined,
+): T | undefined {
+  return component?.status === "available" && "value" in component
+    ? component.value
+    : undefined;
 }
 
 function buildIncomingIpEvidence(

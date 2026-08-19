@@ -3487,12 +3487,13 @@ seed, deployment, or customer traffic was changed. No commit or push was perform
 
 ## 2026-08-18 — BotBlocker Phase 17A (partial): gate-session profile synchronization, IP evidence
 
-**Status: fourth Phase 17 production slice complete.** This entry covers implementation-split item
-4 of the Phase 17A plan — gate-session profile synchronization's IP evidence, superseding the
-Phase 16 `ipObservations` placeholder (which only ever held one entry because its matching rule
-never produced real history). `openGateSession` now applies this synchronization inside its
-existing at-most-once MongoDB transaction, immediately after the fingerprint/verify-lookup
-projection and before the session/profile write commits.
+**Status: Phase 17A implementation-split item 4 IP-evidence portion complete in `dfb2c9a`.**
+This entry covers gate-session profile synchronization's IP evidence, superseding the Phase 16
+`ipObservations` placeholder (which only ever held one entry because its matching rule never
+produced real history). The seven approved direct fingerprint profile fields were not part of
+`dfb2c9a`; their corrective completion is recorded in the following entry. `openGateSession`
+applies the IP synchronization inside its existing at-most-once MongoDB transaction, immediately
+after the fingerprint/verify-lookup projection and before the session/profile write commits.
 
 **`userIntelligence.currentIp` and `recentIpHistory`.** Replaced `ipObservations` with `currentIp`
 (`ip`, optional `asnScore`, explicit `blacklisted`) and a unique least-recently-used
@@ -3535,6 +3536,46 @@ verification was run.
 
 **Explicitly not shipped.** This slice adds no operator scoring fields/runtime, callback/pull flow,
 behavior-event reducer, external-vendor profile integration, site-return cookie, Passport binding,
+minute-29 refresh, middleware bearer replacement, billing, edge publication, or global verify
+Worker. No environment file, migration, seed, deployment, or customer traffic was changed. No
+commit or push was performed.
+
+## 2026-08-18 — BotBlocker Phase 17A: complete selected direct fingerprint profile fields
+
+**Status: Phase 17A implementation-split item 4 corrective completion complete.** Together with
+the IP evidence shipped in `dfb2c9a`, this completes item 4. Added exactly the approved
+latest-successful direct fingerprint fields to the backend-only `userIntelligence` persistence
+type and record contract: `osCpu`, `screenResolution` (`width`, `height`), `platform`,
+`touchSupport` (`maxTouchPoints`, `touchEvent`, `touchStart`), `vendor`, `architecture`, and
+`applePay`. The complete fingerprint vector remains only in `fingerprintData`; no other direct
+operator/scoring field, inbound hash, alias, fuzzy match, or IP identity path was added.
+
+**Transactional synchronization and ordering.** `openGateSession` projects a direct value only
+when that component has an `available` result and only when `FingerprintPersistence#writeCurrent`
+accepts the vector under the existing `serverObservedAt` plus `gateSessionId` ordering. Available
+values replace the prior direct value exactly; unavailable, blocked, skipped, or error components
+omit their field update and preserve the last successful profile value. Independent available
+components still update. Stale/lower-tie sessions retain their own immutable session data without
+overwriting newer direct profile fields. The update remains inside the existing session,
+initial-event, `fingerprintData`, `userIntelligence`, and IP-evidence transaction; exact replay is
+a no-op and a failed profile write rolls every category back.
+
+**Verify-lookup separation.** `fingerprintVerifySource` and `fingerprintVerifyLookup` remain
+separate. Their approved stable-source projection and HMAC recipe are unchanged; the direct
+fields do not become a second lookup recipe and `osCpu`, for example, remains excluded as before.
+Existing `currentIp`, `recentIpHistory`, and `currentIpReuse` synchronization remains intact and
+independent of fingerprint acceptance.
+
+**Focused verification.** `@powerotp/contracts` build passed and its full package suite passed
+**187/187** tests across 47 suites. `@powerotp/api` build passed and its full package suite passed
+**334/334** tests across 89 suites. The server-facing `@powerotp/backend` workspace passed
+`tsc --noEmit`. No gate-next bundle check was required because the backend-only persistence
+contract remains unreachable from `@powerotp/contracts/browser`. No full-repository verification
+was run.
+
+**Explicitly not shipped.** Phase 17A item 5 profile scoring configuration/runtime is not
+implemented. This correction also adds no customer score sensitivity or OTP policy, callback/pull
+flow, behavior-event reducer, external-vendor profile integration, site-return cookie, Passport,
 minute-29 refresh, middleware bearer replacement, billing, edge publication, or global verify
 Worker. No environment file, migration, seed, deployment, or customer traffic was changed. No
 commit or push was performed.

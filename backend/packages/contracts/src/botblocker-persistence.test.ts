@@ -194,6 +194,17 @@ describe("Phase 6 BotBlocker persistence contracts", () => {
         status: "unavailable",
         reason: "missing_stable_inputs",
       },
+      osCpu: "Windows NT 10.0",
+      screenResolution: { width: 1920, height: 1080 },
+      platform: "Win32",
+      touchSupport: {
+        maxTouchPoints: 0,
+        touchEvent: false,
+        touchStart: false,
+      },
+      vendor: "Google Inc.",
+      architecture: 255,
+      applePay: -1,
       currentIp: { ip, blacklisted: false },
       recentIpHistory: [{ ip: "198.51.100.9", asnScore: 10, blacklisted: false }],
       currentIpReuse: {
@@ -226,6 +237,23 @@ describe("Phase 6 BotBlocker persistence contracts", () => {
       }).success,
       true,
     );
+    for (const field of [
+      "components",
+      "hardwareConcurrency",
+      "deviceMemory",
+      "colorDepth",
+      "timezone",
+      "fingerprintHash",
+    ]) {
+      assert.equal(
+        UserIntelligenceRecordSchema.safeParse({
+          ...intelligence,
+          [field]: "not-an-approved-direct-field",
+        }).success,
+        false,
+        field,
+      );
+    }
   });
 
   it("bounds recentIpHistory to 20 entries and requires monotonic reuse counts", () => {

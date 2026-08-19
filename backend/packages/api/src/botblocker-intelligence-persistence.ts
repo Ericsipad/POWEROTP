@@ -9,6 +9,7 @@ import type {
   RapidAuthRequest,
   ReportSequence,
   RiskEvent,
+  UserIntelligenceRecord,
   VerificationType,
 } from "@powerotp/contracts";
 import type { ClientSession, Db, Filter } from "mongodb";
@@ -120,7 +121,17 @@ export interface IpReuseSummary {
   site: IpReuseCounts;
 }
 
-export interface UserIntelligenceDocument extends BotBlockerScope {
+export interface UserIntelligenceDocument extends BotBlockerScope,
+  Pick<
+    UserIntelligenceRecord,
+    | "osCpu"
+    | "screenResolution"
+    | "platform"
+    | "touchSupport"
+    | "vendor"
+    | "architecture"
+    | "applePay"
+  > {
   _id: string;
   /** Internal authoritative Passport account reference. This remains absent
    * until a later Passport phase verifies and binds a real Passport user. */

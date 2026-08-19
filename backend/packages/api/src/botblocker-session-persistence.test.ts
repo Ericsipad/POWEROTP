@@ -65,6 +65,7 @@ function completeVector(): FingerprintVector {
           bitness: "64",
         },
       },
+      osCpu: { status: "available", value: "Windows NT 10.0" },
       architecture: { status: "available", value: 255 },
       hardwareConcurrency: { status: "available", value: 8 },
       deviceMemory: { status: "available", value: 12 },
@@ -76,6 +77,7 @@ function completeVector(): FingerprintVector {
         status: "available",
         value: { width: 1920, height: 1080 },
       },
+      platform: { status: "available", value: "Win32" },
       colorDepth: { status: "available", value: 24 },
       colorGamut: { status: "available", value: "srgb" },
       webGlBasics: {
@@ -120,6 +122,7 @@ function completeVector(): FingerprintVector {
         },
       },
       vendor: { status: "available", value: "Example Inc." },
+      applePay: { status: "available", value: -1 },
     },
   };
 }
@@ -129,6 +132,7 @@ function fixture(options: {
   fingerprints?: FingerprintDataDocument[];
   failGateInsert?: boolean;
   failRiskInsert?: boolean;
+  failIntelligenceWrite?: boolean;
 } = {}) {
   const gateSessions: GateSessionDocument[] = [];
   const riskEvents: DurableRiskEventDocument[] = [];
@@ -167,6 +171,9 @@ function fixture(options: {
         if (name === "riskEvents" && options.failRiskInsert) {
           throw new Error("injected risk insert failure");
         }
+        if (name === "userIntelligence" && options.failIntelligenceWrite) {
+          throw new Error("injected intelligence write failure");
+        }
         (rows as unknown[]).push(document);
       },
       replaceOne: async (
@@ -186,6 +193,9 @@ function fixture(options: {
           $inc?: Record<string, number>;
         },
       ) => {
+        if (name === "userIntelligence" && options.failIntelligenceWrite) {
+          throw new Error("injected intelligence write failure");
+        }
         const row = rows.find((candidate) => matchesFilter(candidate, filter));
         if (!row) return { matchedCount: 0 };
         Object.assign(row, update.$set);
@@ -558,6 +568,202 @@ describe("BotBlockerSessionPersistence fingerprint selection", () => {
   });
 });
 
+describe("BotBlockerSessionPersistence direct fingerprint profile synchronization", () => {
+  it("stores exactly the seven approved available fields on a new profile", async () => {
+    const state = fixture();
+    await state.persistence.openGateSession(openInput({
+      fingerprint: completeVector(),
+    }));
+
+    const stored = state.intelligence[0]!;
+    assert.deepEqual(
+      Object.fromEntries(directFingerprintKeys.map((key) => [key, stored[key]])),
+      {
+        osCpu: "Windows NT 10.0",
+        screenResolution: { width: 1920, height: 1080 },
+        platform: "Win32",
+        touchSupport: {
+          maxTouchPoints: 0,
+          touchEvent: false,
+          touchStart: false,
+        },
+        vendor: "Example Inc.",
+        architecture: 255,
+        applePay: -1,
+      },
+    );
+    assert.equal("components" in stored, false);
+    assert.equal("hardwareConcurrency" in stored, false);
+    assert.equal("deviceMemory" in stored, false);
+    assert.equal("colorDepth" in stored, false);
+  });
+
+  it("replaces existing direct fields with the latest accepted successful values", async () => {
+    const bound: UserIntelligenceDocument = {
+      ...profile("bui_bound_123456789"),
+      osCpu: "Old OS",
+      screenResolution: { width: 800, height: 600 },
+      platform: "Old Platform",
+      touchSupport: {
+        maxTouchPoints: 1,
+        touchEvent: true,
+        touchStart: true,
+      },
+      vendor: "Old Vendor",
+      architecture: 1,
+      applePay: 0,
+    };
+    const state = fixture({
+      intelligence: [bound],
+      fingerprints: [storedFingerprint(bound._id)],
+    });
+    await state.persistence.openGateSession(openInput({
+      gateSessionId: "bgs_latest_z_123456",
+      authoritativeUserIntelligenceId: bound._id,
+      fingerprint: completeVector(),
+      now: new Date(now.getTime() + 1),
+    }));
+
+    assert.equal(state.intelligence[0]!.osCpu, "Windows NT 10.0");
+    assert.deepEqual(state.intelligence[0]!.screenResolution, {
+      width: 1920,
+      height: 1080,
+    });
+    assert.equal(state.intelligence[0]!.platform, "Win32");
+    assert.equal(state.intelligence[0]!.vendor, "Example Inc.");
+    assert.equal(state.intelligence[0]!.architecture, 255);
+    assert.equal(state.intelligence[0]!.applePay, -1);
+  });
+
+  it("preserves unavailable fields while updating available fields independently", async () => {
+    const bound: UserIntelligenceDocument = {
+      ...profile("bui_bound_123456789"),
+      osCpu: "Last Successful OS",
+      platform: "Old Platform",
+    };
+    const incoming = completeVector();
+    incoming.components.osCpu = { status: "blocked" };
+    incoming.components.platform = { status: "available", value: "Linux x86_64" };
+    const state = fixture({
+      intelligence: [bound],
+      fingerprints: [storedFingerprint(bound._id)],
+    });
+    await state.persistence.openGateSession(openInput({
+      gateSessionId: "bgs_partial_z_12345",
+      authoritativeUserIntelligenceId: bound._id,
+      fingerprint: incoming,
+      now: new Date(now.getTime() + 1),
+    }));
+
+    assert.equal(state.intelligence[0]!.osCpu, "Last Successful OS");
+    assert.equal(state.intelligence[0]!.platform, "Linux x86_64");
+  });
+
+  it("does not add direct fields that have never been successfully observed", async () => {
+    const state = fixture();
+    await state.persistence.openGateSession(openInput());
+
+    for (const key of directFingerprintKeys) {
+      assert.equal(key in state.intelligence[0]!, false, key);
+    }
+  });
+
+  it("prevents a stale observation from overwriting direct fields", async () => {
+    const bound: UserIntelligenceDocument = {
+      ...profile("bui_bound_123456789"),
+      platform: "Current Platform",
+    };
+    const incoming = completeVector();
+    incoming.components.platform = { status: "available", value: "Stale Platform" };
+    const state = fixture({
+      intelligence: [bound],
+      fingerprints: [storedFingerprint(bound._id)],
+    });
+    await state.persistence.openGateSession(openInput({
+      gateSessionId: "bgs_stale_z_123456",
+      authoritativeUserIntelligenceId: bound._id,
+      fingerprint: incoming,
+      now: new Date(now.getTime() - 1),
+    }));
+
+    assert.equal(state.intelligence[0]!.platform, "Current Platform");
+  });
+
+  it("uses the fingerprint ordering gate-session ID tie-breaker consistently", async () => {
+    const bound: UserIntelligenceDocument = {
+      ...profile("bui_bound_123456789"),
+      platform: "Current Platform",
+    };
+    const lower = completeVector();
+    lower.components.platform = { status: "available", value: "Lower Tie" };
+    const higher = completeVector();
+    higher.components.platform = { status: "available", value: "Higher Tie" };
+    const state = fixture({
+      intelligence: [bound],
+      fingerprints: [storedFingerprint(bound._id)],
+    });
+
+    await state.persistence.openGateSession(openInput({
+      gateSessionId: "bgs_a_lower_123456",
+      authoritativeUserIntelligenceId: bound._id,
+      fingerprint: lower,
+    }));
+    assert.equal(state.intelligence[0]!.platform, "Current Platform");
+
+    await state.persistence.openGateSession(openInput({
+      gateSessionId: "bgs_z_higher_12345",
+      authoritativeUserIntelligenceId: bound._id,
+      fingerprint: higher,
+    }));
+    assert.equal(state.intelligence[0]!.platform, "Higher Tie");
+  });
+
+  it("does not apply direct-field synchronization twice on exact replay", async () => {
+    const state = fixture();
+    await state.persistence.openGateSession(openInput({
+      fingerprint: completeVector(),
+    }));
+    const firstProfile = structuredClone(state.intelligence[0]!);
+
+    await state.persistence.openGateSession(openInput({
+      fingerprint: completeVector(),
+    }));
+
+    assert.deepEqual(state.intelligence[0], firstProfile);
+    assert.equal(state.gateSessions.length, 1);
+    assert.equal(state.riskEvents.length, 1);
+    assert.equal(state.fingerprints.length, 1);
+  });
+
+  it("rolls back direct fields, fingerprint, session, and event when the profile write fails", async () => {
+    const bound: UserIntelligenceDocument = {
+      ...profile("bui_bound_123456789"),
+      platform: "Current Platform",
+    };
+    const originalFingerprint = storedFingerprint(bound._id);
+    const state = fixture({
+      intelligence: [bound],
+      fingerprints: [originalFingerprint],
+      failIntelligenceWrite: true,
+    });
+
+    await assert.rejects(
+      state.persistence.openGateSession(openInput({
+        gateSessionId: "bgs_failure_z_12345",
+        authoritativeUserIntelligenceId: bound._id,
+        fingerprint: completeVector(),
+        now: new Date(now.getTime() + 1),
+      })),
+      /injected intelligence write failure/,
+    );
+
+    assert.deepEqual(state.intelligence, [bound]);
+    assert.deepEqual(state.fingerprints, [originalFingerprint]);
+    assert.deepEqual(state.gateSessions, []);
+    assert.deepEqual(state.riskEvents, []);
+  });
+});
+
 describe("BotBlockerSessionPersistence gate-session profile synchronization (IP evidence)", () => {
   it("sets currentIp with empty history on a brand-new profile", async () => {
     const state = fixture();
@@ -736,6 +942,16 @@ describe("BotBlockerSessionPersistence gate-session profile synchronization (IP 
     });
   });
 });
+
+const directFingerprintKeys = [
+  "osCpu",
+  "screenResolution",
+  "platform",
+  "touchSupport",
+  "vendor",
+  "architecture",
+  "applePay",
+] as const;
 
 function matchesFilter(
   row: Record<string, unknown>,
