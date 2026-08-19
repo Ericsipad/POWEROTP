@@ -66,8 +66,8 @@ and a previous `allow` or clearance may be revised to `otp`.
 
 ## Product invariants
 
-- The Gate Adapter runs in the customer's own request path, gathers trusted data, performs
-  initial RapidAuth/session creation with the server-only site credential, uses narrow
+- The Gate Adapter runs in the customer's own request path, gathers trusted data, sends the
+  first canonical report/session creation with the server-only site credential, uses narrow
   server-held visitor tokens for later calls, and attaches the recommended state. It never
   blocks, rewrites, replaces, or consumes the customer's response itself. The installed
   provider reports state only; no generated or supported integration enforces it.
@@ -119,8 +119,9 @@ and a previous `allow` or clearance may be revised to `otp`.
 - The browser never supplies an API key, gate-session ID, site ID, user-intelligence ID, or OTP
   selection to `openOtp()`. Its empty same-origin request is bound by the HttpOnly session
   cookie; the server adapter retrieves its stored scoped gate-session token.
-- Within the per-visitor flow, the site credential authenticates initial RapidAuth/session
-  creation; separately authorized site-level configuration operations may still use it. The
+- Within the per-visitor flow, the site credential authenticates the first canonical
+  report/session creation; separately authorized site-level configuration operations may still
+  use it. The
   resulting short-lived gate-session token authorizes only that visitor's approved
   launch/status operations, is site/session/audience-bound and revocable, and remains
   server-side. It is sufficient for `openOtp()` without resending the broader site credential.
@@ -332,7 +333,7 @@ Immediate remote revocation and zero lookups cannot both be guaranteed. Short ac
 These rules govern every current and future BotBlocker implementation plan:
 
 1. The visitor session token is the write authority for one visitor session. Its session ID joins
-   the session header, initial risk event, later risk events, and linked `userIntelligence` row.
+   the session header, canonical immutable report rows, and linked `userIntelligence` row.
    Initial contact creates the session row first, then issues a 30-minute server-held visitor
    token and writes only its token ID, expiry, and one-way nonce/token digest metadata to that
    session row before returning. The reusable bearer token is never persisted or exposed to the
@@ -340,11 +341,11 @@ These rules govern every current and future BotBlocker implementation plan:
    middleware sends the refresh request, POWEROTP rotates the safe metadata on the same durable
    session row, and the middleware replaces the bearer in its server-side gate session without
    changing the session ID or `userIntelligence` binding.
-2. Every initial middleware session request carries the available trusted IP, browser/device
-   fingerprint, request context, proofs, and risk evidence. The server saves that request rather
-   than discarding it: the session snapshot and first immutable `riskEvents` row are written, the
-   raw fingerprint vector is retained in `fingerprintData`, and the linked `userIntelligence`
-   profile is created or updated before the caller receives the initial result.
+2. The middleware uses one canonical report shape for its initial session contact and every later
+   update, carrying whatever approved trusted IP, browser/device fingerprint, request context,
+   proof, behavior, and risk evidence is available. Every accepted report creates one immutable
+   `riskEvents` row. The initial report also establishes the session/profile and retains the raw
+   fingerprint vector in `fingerprintData` when present before returning the scoped visitor token.
 3. Inbound IP, browser, fingerprint, and risk values remain raw. POWEROTP does not hash incoming
    fingerprint or IP data and does not use a separate inbound fingerprint hash as identity.
    A valid `powerotp_site_return` credential, authoritative Passport, or exact raw-fingerprint
@@ -505,14 +506,15 @@ callback use. Server observation time plus a gate-session-ID tie-breaker prevent
 from overwriting newer direct fields; concurrent IP changes cannot lose an accepted update, and
 failure leaves no partial state.
 
-The detailed `riskEvents` behavior/risk reducer remains separately deferred until its field
-mappings and aggregation semantics are approved. External IP-vendor profile fields likewise wait
-for selection of a real vendor and approval of bounded fields; raw vendor payloads remain in the
-vendor cache. Missing fields from either future updater do not block scoring. The separate
-operator scoring layer enables approved present profile fields, applies validated restricted math
-and nonnegative weights, then applies a validated final-total expression to produce the current
-`0..100` risk score. Unconfigured scoring is typed unavailable. Only the current aggregate and
-score are stored; score history and scoring-model versions are not.
+The approved unified risk-report reducer is specified in
+[`POWEROTP_BOTBLOCKER_PHASE17A_RISK_REPORT_REDUCER_PLAN.md`](POWEROTP_BOTBLOCKER_PHASE17A_RISK_REPORT_REDUCER_PLAN.md).
+A separate unseeded operator configuration scores simple present fields on each immutable event
+row. Available insert-time row scores atomically update the linked profile's arithmetic average in
+`risk_events_sum`, which is one configurable numeric field in the existing overall profile
+scorer. Detailed route/page/click/pointer/navigation data and the full fingerprint remain on their
+bounded source rows rather than being copied to the hot profile. External IP-vendor profile fields
+still wait for a real vendor and approved bounded fields. Missing inputs never block either
+scorer. No hardcoded formula, weight, threshold, backfill, or profile `currentScore` history exists.
 
 `gateSessions` plus linked immutable `riskEvents` form one logical session dataset while remaining
 physically split to avoid unbounded MongoDB documents. Both expire after 90 days.
@@ -715,16 +717,14 @@ resolve the lookup. Operator-only routes use the separately authenticated
 Every visitor runtime route below requires an immutable, self-validating project-scoped
 `webhookId` path segment (see "Project-scoped webhook endpoint" below). Malformed or forged
 tokens receive a bare 404 before Valkey, MongoDB, body parsing, credential authentication,
-nonce/idempotency, or business logic. Initial RapidAuth uses the site credential; later
+nonce/idempotency, or business logic. The first canonical report uses the site credential; later
 per-visitor calls use only the returned scoped visitor token. `GET
 /v1/botblocker/policy/{siteId}` is intentionally exempt: it is a public,
 anonymous, cacheable read with no credential to protect, and already uses the low-privilege
 public `siteId` for the same routing purpose.
 
-- `POST /v1/botblocker/rapid-auth/{webhookId}`
+- `POST /v1/botblocker/reports/{webhookId}`
 - `POST /v1/botblocker/visitor-token-refresh/{webhookId}`
-- `POST /v1/botblocker/browser-assessment/{webhookId}`
-- `POST /v1/botblocker/risk-events/{webhookId}`
 - `POST /v1/botblocker/challenges/{webhookId}`
 - `GET /v1/botblocker/challenges/{webhookId}/{challengeId}`
 - `POST /v1/botblocker/challenges/{webhookId}/{challengeId}/complete`
@@ -756,8 +756,8 @@ decision, score, or approval. The exact request/response shapes are defined in
 
 ### Project-scoped webhook endpoint
 
-Every runtime call that originates from actual website visitor traffic — reports, risk events,
-the initial RapidAuth contact, and OTP challenge create/poll/complete — must reach POWEROTP
+Every runtime call that originates from actual website visitor traffic — canonical reports and
+OTP challenge create/poll/complete — must reach POWEROTP
 through the project's own scoped webhook URL, never a fixed, shared, unscoped path. A dashboard
 API call the customer's own backend makes directly (project configuration, credential rotation,
 visitor listing) is a different traffic class and stays protected by the existing customer
@@ -773,10 +773,10 @@ session/CSRF/project-ownership boundary instead.
   binds all four. Validation is constant-time after strict local syntax/length checks.
 - `webhookId` is immutable: it has no patch, rotation, or replacement API. It is safe to expose
   in setup configuration because it routes requests but grants no visitor or customer authority.
-- Initial contact validates the path, resolves the exact project/site, confirms readiness,
-  authenticates the site credential, saves the complete initial request as session plus initial
-  risk event, creates or binds `userIntelligence`, persists safe token metadata, and returns a
-  30-minute token. Every later report/challenge operation must present that token with matching
+- The first canonical report validates the path, resolves the exact project/site, confirms
+  readiness, authenticates the site credential, saves one immutable report row, creates or binds
+  `userIntelligence`, persists safe token metadata, and returns a 30-minute token. Every later
+  report/challenge operation must present that token with matching
   project/site/session/audience claims; at minute 29 middleware sends the refresh request and
   replaces the bearer in its server-side gate session.
 - Because the platform's advisory model is fail-open by design (a decision timeout or unreachable

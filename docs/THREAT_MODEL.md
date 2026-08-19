@@ -445,6 +445,11 @@ across every customer at once, without needing to know any customer's credential
 - `GET /v1/botblocker/policy/{siteId}` is intentionally unaffected: it is already a public,
   anonymous, cacheable read scoped by the low-privilege public `siteId`, with no credential to
   protect and no fail-open flood-amplification risk of its own.
+- The approved Phase 17A target consolidates `rapid-auth`, `browser-assessment`, and `risk-events`
+  into one scoped `POST /v1/botblocker/reports/{webhookId}` contract. The first report uses the
+  site credential and returns the scoped visitor token; every later report uses that token.
+  Consolidation removes duplicate report logic but does not weaken endpoint, audience, freshness,
+  nonce, idempotency, rate-limit, or scope validation.
 
 ### CleanDataPage access, content, and revenue integrity
 
@@ -503,13 +508,14 @@ The future viewer opens the server-derived `audience origin + sanitized routePat
 uses a browser-supplied full URL or query string. Page labels are opt-in customer-authored
 `data-powerotp-page-*` attributes, not scraped content.
 
-The target authoritative ingestion service applies the same strict schemas before opening a
-session or writing an event. The complete first middleware request is retained as the session
-snapshot and initial immutable risk event, including available trusted IP, browser/fingerprint,
-request, proof, and risk data. MongoDB transactions bind every report/event to the authenticated
-customer/project/site and gate session, advance only a strictly newer per-session sequence, and
-return an exact replay as an idempotent duplicate rather than writing it twice. A conflicting or
-older sequence is rejected. Gate-session headers and linked behavior/risk-event inputs use
+The target authoritative ingestion service applies one strict canonical report schema before
+opening or updating a session. The first and every later middleware send use the same optional
+evidence fields; only closed scope/order/authentication-binding metadata is required. Every
+accepted report creates one immutable row containing all available trusted IP,
+browser/fingerprint, request, proof, behavior, and risk data. MongoDB transactions bind each row
+to the authenticated customer/project/site and gate session, advance only a strictly newer
+per-session sequence, and return an exact replay as an idempotent duplicate rather than writing
+it twice. A conflicting or older sequence is rejected. Gate-session headers and report rows use
 90-day TTLs. The aggregated `userIntelligence` profile refreshes its 548-day TTL from accepted
 activity.
 
@@ -565,10 +571,15 @@ retention, and commits before scoring or callback use. Server observation time a
 gate-session-ID tie-breaker prevent stale overwrite; exact replay is a no-op, concurrent IP
 changes cannot lose an accepted update, and database failure leaves no partial synchronization.
 
-Detailed `riskEvents` behavior mapping remains a separately approved future reducer. External
-IP-vendor profile/scoring fields also remain deferred until a real vendor and bounded field set are
-approved; raw vendor payloads remain in the vendor cache. Missing fields from either source are
-omitted from scoring and never block the evaluator or callback path.
+The approved unified reducer scores only simple present fields on each immutable report row under
+a separate unseeded operator configuration. An available insert-time row score atomically updates
+the linked profile's arithmetic average in `risk_events_sum`. That numeric field is separately
+configurable in the existing overall profile scorer. Detailed route/page/click/pointer/navigation
+data and the full fingerprint remain on the source row rather than being copied to the hot
+profile. Missing, disabled, deferred, or unusable fields are omitted and never block either
+scorer or the callback path. Configuration changes do not backfill immutable row scores or reset
+the profile average. External IP-vendor profile/scoring fields remain deferred until a real
+vendor and bounded field set are approved; raw vendor payloads remain in the vendor cache.
 
 ### Public MCP generator
 

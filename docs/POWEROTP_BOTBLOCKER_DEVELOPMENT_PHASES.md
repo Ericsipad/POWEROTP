@@ -365,10 +365,9 @@ admin audit, lookup, and signed snapshots. Allowlist maps to `allow`; blacklist 
 
 ### Phase 17 — Proprietary scoring
 
-**Implementation status:** in progress. The fingerprint contracts and once-per-gate-session
-collector slice completed on 2026-08-17; complete initial-event persistence, durable return-cookie
-binding, middleware token refresh, raw fingerprint persistence, user-row verify lookup, profile
-synchronization, scoring, callbacks, reducers, and external-vendor profile integration remain.
+**Implementation status:** in progress. Phase 17 execution steps 1–6 are complete. The unified
+risk-report/reducer design for step 7 was approved on 2026-08-19; its three runtime implementation
+slices and the later external-vendor profile integration remain.
 The approved design is saved in
 [`POWEROTP_BOTBLOCKER_PHASE17_PROPRIETARY_SCORING_PLAN.md`](POWEROTP_BOTBLOCKER_PHASE17_PROPRIETARY_SCORING_PLAN.md);
 the approved gate-session synchronization subplan is saved in
@@ -396,25 +395,25 @@ and same-site exact-IP distinct-profile counts for 1, 7, and 30 days. Apply it a
 accepted gate session in one transaction before scoring/callback use. Keep `gateSessions` and
 linked `riskEvents` as one logical 90-day session dataset.
 
-The `riskEvents` behavior/risk reducer remains a later dedicated design and implementation
-session; do not invent its mappings. External vendor profile/scoring fields also remain deferred
-until a real vendor is selected and its bounded fields are approved. Neither omission blocks
-scoring: a separate operator configuration selects present scoreable profile fields, validated
-restricted math, nonnegative weights, and a validated final-total formula. Recalculate and
-overwrite the profile's one current `0..100` score after an accepted profile update. Missing
-inputs are excluded; unconfigured scoring is typed unavailable. Store no prior scores or
-score-model/input version. Formula changes apply on the next accepted profile update.
+The approved step-7 design is
+[`POWEROTP_BOTBLOCKER_PHASE17A_RISK_REPORT_REDUCER_PLAN.md`](POWEROTP_BOTBLOCKER_PHASE17A_RISK_REPORT_REDUCER_PLAN.md).
+Replace the separate initial, behavior, and risk-signal report inputs with one canonical report
+used at session start and for every update. One immutable `riskEvents` row is scored at insert
+time by a separate unseeded operator field registry. Available row scores atomically update
+`userIntelligence.risk_events_sum`, the arithmetic average exposed as one configurable numeric
+input to the existing overall profile scorer. Raw report detail stays on the event row. Missing
+inputs are excluded; configuration changes do not backfill prior row scores or reset the average.
+External vendor profile/scoring fields remain deferred until a real vendor and bounded fields are
+approved.
 
-Initial RapidAuth preserves blacklist-first precedence, then awaits the current profile score
-within the existing 50–2,000 ms timeout. Later accepted updates enqueue a signed project-specific
-data-ready callback; middleware verifies it and pulls authoritative session data with the scoped
-visitor token. Local headless detection remains advisory only. CGNAT is not a direct observable
-signal, and IPv4/IPv6 remain lookup/storage families rather than score inputs. Split execution into
-fresh sessions for: fingerprint contracts/collector; complete initial request/risk-event
-persistence plus user-intelligence-bound return cookie and middleware-requested minute-29 token
-refresh; `fingerprintData` persistence plus the user-row-derived verify lookup field; gate-session profile
-synchronization and IP history/counts; scoring configuration/runtime; project callback/pull; the
-later `riskEvents` reducer; and later external IP profile/scoring integration.
+The first canonical report preserves blacklist-first precedence, then awaits the current profile
+score within the existing 50–2,000 ms timeout. Later accepted reports enqueue a signed
+project-specific data-ready callback only after committed profile scoring; middleware verifies it
+and pulls authoritative session data with the scoped visitor token. Local headless detection
+remains advisory only. CGNAT is not a direct observable signal, and IPv4/IPv6 remain lookup/storage
+families rather than score inputs. Complete step 7 in fresh sessions for canonical
+contract/transport, event-row configuration/scoring, and `risk_events_sum` profile integration.
+Step 8 later owns external IP profile/scoring integration.
 
 ### Phase 18 — Customer risk/OTP policy
 

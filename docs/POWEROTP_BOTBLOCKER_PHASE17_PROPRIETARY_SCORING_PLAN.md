@@ -1,7 +1,7 @@
 # BotBlocker Phase 17 — Proprietary scoring design plan
 
-**Status: implementation in progress; fingerprint contracts/collector slice complete
-(2026-08-17).** This document is the durable, repo-tracked result of
+**Status: implementation in progress; unified risk-report/reducer design approved
+(2026-08-19).** This document is the durable, repo-tracked result of
 the Phase 17 design conversation. It does not claim that fingerprint collection, profile
 aggregation, scoring, callback delivery, or rapid-server synchronization has shipped.
 
@@ -31,8 +31,9 @@ approve. Phase 17 must correct them rather than build on them:
 5. **Gate-session synchronization is fixed and schema-driven.** Selected fingerprint fields use
    latest-successful replacement, IP evidence uses current-value and bounded unique-LRU rules,
    and exact-IP reuse uses rolling distinct-profile counts. This is not an operator-authored
-   conversion-formula layer. The separate `riskEvents` behavior reducer remains deferred until
-   its fields and aggregation semantics are explicitly designed.
+   conversion-formula layer. The separate unified `riskEvents` row scorer and
+   `userIntelligence.risk_events_sum` average are approved in
+   [`POWEROTP_BOTBLOCKER_PHASE17A_RISK_REPORT_REDUCER_PLAN.md`](POWEROTP_BOTBLOCKER_PHASE17A_RISK_REPORT_REDUCER_PLAN.md).
 6. **No score-model/input version is stored.** Scoring configuration is live operator
    configuration. Browser fingerprint contracts and hash recipes remain versioned because those
    are client/sensor compatibility boundaries.
@@ -124,14 +125,17 @@ IDs are never authoritative, and no other fingerprint-derived hash is retained.
 
 ## Session data and profile synchronization
 
-`gateSessions` remains the small session header. The complete initial middleware request is saved
-as its session snapshot and first immutable `riskEvents` row; later accepted behavior reports and
-risk signals append linked events. Both are one logical session dataset and expire after 90 days.
-This preserves indexed idempotency/order checks and avoids MongoDB's 16 MB document limit.
+`gateSessions` remains the small session header. The approved target replaces the separate initial,
+behavior, and risk-signal report inputs with one canonical middleware report used at session start
+and for every update. Each accepted report creates one immutable `riskEvents` row. Gate-session
+headers and linked rows remain one logical session dataset and expire after 90 days, preserving
+indexed idempotency/order checks and avoiding MongoDB's 16 MB document limit.
 
-The approved gate-session synchronization design is now durable in
+The approved gate-session synchronization design is durable in
 [`POWEROTP_BOTBLOCKER_PHASE17A_SESSION_INPUT_REDUCER_PLAN.md`](POWEROTP_BOTBLOCKER_PHASE17A_SESSION_INPUT_REDUCER_PLAN.md).
-Despite that historical filename, it does not design the separate `riskEvents` reducer.
+The unified report, row-scoring registry, immutable row score, and profile-average design is
+durable in
+[`POWEROTP_BOTBLOCKER_PHASE17A_RISK_REPORT_REDUCER_PLAN.md`](POWEROTP_BOTBLOCKER_PHASE17A_RISK_REPORT_REDUCER_PLAN.md).
 
 The complete bounded FingerprintJS vector lives in the shared platform-level `fingerprintData`
 collection, with one current record per `userIntelligence` row and 548-day retention. A newer
@@ -165,12 +169,11 @@ Server observation time orders competing sessions, with
 sessions cannot overwrite newer direct values, concurrent IP changes cannot lose an accepted
 update, and database failure leaves no partial raw synchronization.
 
-Writing the initial risk event is required now. Only the detailed later `riskEvents`
-behavior/risk-to-profile mapping remains deferred to a dedicated design and implementation
-session. It must explicitly map routes/pages, click categories and normalized positions, mouse
-and scroll aggregates, honeypots, page timing/dimensions, pointer heatmaps, navigation targets,
-automation indicators, and risk-event kinds. Missing fields from that future updater do not block
-scoring; the evaluator uses present fields and omits unavailable inputs.
+The unified reducer does not copy report detail onto the hot profile. Instead, an independent
+unseeded operator registry scores direct, unambiguous fields on each accepted immutable row.
+Detailed routes/pages, click IDs/positions, pointer bins, navigation values, labels, and the full
+fingerprint remain event data. Available row scores update the profile's arithmetic average in
+`risk_events_sum`; missing or deferred fields are excluded and never block row or profile scoring.
 
 External IP-reputation fields are also deferred. FingerprintJS supplies none. The current
 gate-session synchronizer uses trusted middleware IP, local network/ASN resolution, and the
@@ -195,9 +198,11 @@ Missing fields are excluded from both the aggregate and its denominator. Configu
 unconfigured; until at least one enabled field has usable evidence and the final expression is
 valid, score status is typed unavailable rather than a fabricated zero or neutral score.
 
-Configuration changes do not trigger a backfill job. The next accepted session update recalculates
-the row's one current score using its current aggregate values and the then-current configuration.
-No historical scores or score-model versions are stored.
+Profile-scoring configuration changes do not trigger a backfill job. The next accepted report
+recalculates the profile's one current score using its current fields and then-current
+configuration. No `currentScore` history or score-model version is stored. Separately, the unified
+design stores each immutable event row's insert-time observation score; those row scores and
+`risk_events_sum` are not backfilled when risk-event configuration changes.
 
 ## Runtime behavior
 
@@ -295,8 +300,9 @@ work in dependency-ordered fresh sessions:
    typed-unavailable behavior without invented defaults.
 6. **Project callback/pull.** Extend the existing signed project callback and scoped-token pull
    boundary after committed profile/score updates.
-7. **Deferred `riskEvents` reducer.** Run its dedicated field-by-field design session before
-   implementing behavior/risk profile mappings.
+7. **Status: design complete (2026-08-19). Unified report and `riskEvents` scoring.** Implement
+   the dedicated plan in three fresh slices: canonical contract/transport, event configuration
+   and row scoring, then `risk_events_sum` and overall profile-scoring integration.
 8. **Deferred external IP profile/scoring integration.** Select and confirm a real vendor first,
    approve its bounded fields, then append approved profile inputs and scoring registration.
 

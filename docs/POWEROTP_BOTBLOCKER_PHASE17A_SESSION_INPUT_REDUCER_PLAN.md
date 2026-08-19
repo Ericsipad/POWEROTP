@@ -1,7 +1,7 @@
 # BotBlocker Phase 17A — Fingerprint collection and gate-session profile sync plan
 
-**Status: implementation in progress; fingerprint contracts/collector slice complete
-(2026-08-17).** This document is the durable result of the
+**Status: implementation in progress; unified risk-report/reducer design approved
+(2026-08-19).** This document is the durable result of the
 Phase 17A design session. Despite the historical filename, this phase does not design the
 separate `riskEvents` behavior reducer. It defines:
 
@@ -11,9 +11,11 @@ separate `riskEvents` behavior reducer. It defines:
 4. current and recent exact-IP profile evidence; and
 5. the atomic/idempotent boundary that later implementation must follow.
 
-The separate `riskEvents` → `userIntelligence` updater remains deferred to its own design and
-implementation session. Missing fields from that deferred updater do not block scoring: scoring
-uses the profile fields that are present and omits unavailable fields.
+The separate `riskEvents` → `userIntelligence` design is now approved in
+[`POWEROTP_BOTBLOCKER_PHASE17A_RISK_REPORT_REDUCER_PLAN.md`](POWEROTP_BOTBLOCKER_PHASE17A_RISK_REPORT_REDUCER_PLAN.md).
+It replaces the historical multi-record assumption with one canonical middleware report, one
+immutable row score, and the `userIntelligence.risk_events_sum` average. Runtime implementation
+remains split into later fresh sessions.
 
 Ground truth for shipped behavior remains
 [`POWEROTP_BOTBLOCKER_AS_BUILT.md`](POWEROTP_BOTBLOCKER_AS_BUILT.md). The approved parent design
@@ -26,9 +28,9 @@ Nothing in this document is as-built evidence.
    collected and stored before every possible `userIntelligence` updater exists. Scoring,
    callbacks, and other functions must continue using present fields; one missing field never
    breaks the whole process.
-2. **There are two distinct future profile update paths.**
+2. **There are two distinct profile update paths.**
    - This plan defines fixed synchronization from accepted gate-session data.
-   - Detailed `riskEvents` behavior/risk inputs require a later dedicated mapping and reducer.
+   - The approved unified risk-report plan defines insert-time row scoring and the profile average.
 3. **Gate-session synchronization is not operator-authored math.** Source and target fields keep
    the same names. The update operation is fixed by field semantics: latest successful
    replacement, bounded exact-value history, or rolling exact-IP count.
@@ -334,29 +336,20 @@ gate-session updater. A later dedicated session will:
 That later append does not require redesigning or blocking the scoring engine. Until those fields
 exist, scoring continues with present profile inputs.
 
-## Deferred `riskEvents` profile updater
+## Unified `riskEvents` profile updater
 
-The complete initial middleware request must be written immediately as its own immutable risk
-event; that write is not deferred. The detailed fields under later
-`riskEvents.recordType: "behavior_report"` and `riskEvents.recordType: "risk_signal"` are already
-collected. Their conversion into `userIntelligence` remains a separate later design session
-because it must explicitly decide behavior aggregation and formulas without invention.
+The approved design now lives in
+[`POWEROTP_BOTBLOCKER_PHASE17A_RISK_REPORT_REDUCER_PLAN.md`](POWEROTP_BOTBLOCKER_PHASE17A_RISK_REPORT_REDUCER_PLAN.md).
+The middleware uses one report shape for the first session contact and every later update. Each
+accepted report creates one immutable `riskEvents` row, receives an insert-time score from a
+separate unseeded operator configuration, and atomically updates the linked profile's
+`risk_events_sum` arithmetic average. That average is one configurable numeric input to the
+existing overall profile scorer.
 
-That future session must inventory and map:
-
-- route/page values;
-- click categories, explicit IDs, and normalized positions;
-- mouse directness and sample counts;
-- scroll smoothness and high-speed counts;
-- honeypot activations;
-- page duration/activity/dimensions;
-- pointer heatmap bins;
-- navigation targets;
-- existing automation indicators; and
-- risk-event kinds and conditional honeypot fields.
-
-Nothing in this plan supplies those mappings. Their absence leaves corresponding profile fields
-blank and excluded from scoring.
+Detailed route/page, click, pointer, navigation, label, and full fingerprint data stays on the
+90-day event row. Only direct, unambiguous numeric/count/presence fields enter the initial event
+registry; less-obvious fields remain unavailable/off until explicitly designed. Missing fields
+are omitted and never block the row or overall profile scorer.
 
 ## Atomic sequence, concurrency, and idempotency
 
@@ -445,8 +438,9 @@ This design is larger than one implementation session. Execute in fresh sessions
    transient bounded history aggregates, while missing inputs remain excluded.
 6. **Project callback/pull updates.** Notify middleware after committed profile/score changes
    using the existing project callback boundary and scoped visitor-token pull.
-7. **Deferred `riskEvents` reducer design/implementation.** Run its own mapping session before
-   writing the behavior reducer.
+7. **Status: design complete (2026-08-19); implementation split pending. Unified risk report,
+   row scoring, and profile average.** Follow the dedicated plan's three fresh implementation
+   sessions. Do not retain the superseded parallel initial/behavior/risk ingestion paths.
 8. **Deferred external IP profile/scoring integration.** Select a real vendor first, approve its
    bounded profile fields, then append and score them.
 
@@ -474,8 +468,8 @@ verify only their touched workspaces:
 
 ## Explicit exclusions
 
-- No reducer implementation in this design session.
-- No detailed `riskEvents` → `userIntelligence` mapping.
+- No unified risk-report reducer runtime implementation in this design session.
+- No seeded risk-event or user-intelligence scoring functions, weights, or thresholds.
 - No live external IP-reputation vendor or vendor-field mapping.
 - No hardcoded score formulas, weights, coefficients, thresholds, or customer sliders.
 - No customer OTP policy, callback implementation, Passport, billing, Cloudflare/verify-server
