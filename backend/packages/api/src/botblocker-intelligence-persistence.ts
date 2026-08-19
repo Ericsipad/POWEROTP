@@ -77,7 +77,7 @@ export interface GateSessionDocument extends BotBlockerScope {
   _id: string;
   userIntelligenceId: string;
   initialRequest: InitialSessionRequestSnapshotDocument;
-  visitorToken?: VisitorTokenMetadataDocument;
+  tokenMetadata?: VisitorTokenMetadataDocument;
   /** Trusted request IP is stored raw for site-owner reporting and
    * security correlation. It is never identity authority. */
   ip?: string;

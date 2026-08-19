@@ -187,13 +187,13 @@ class MemoryIngestionStore {
 
   saveVisitorTokenMetadata(input: {
     gateSessionId: string;
-    metadata: NonNullable<GateSessionDocument["visitorToken"]>;
+    metadata: NonNullable<GateSessionDocument["tokenMetadata"]>;
   }) {
     const session = this.sessions.get(input.gateSessionId);
     if (!session) {
       throw new BotBlockerIngestionPersistenceError("session_not_found");
     }
-    session.visitorToken = input.metadata;
+    session.tokenMetadata = input.metadata;
     return Promise.resolve();
   }
 

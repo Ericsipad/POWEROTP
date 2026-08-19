@@ -294,7 +294,7 @@ export class BotBlockerSessionPersistence {
       { _id: input.gateSessionId, ...input.scope },
       {
         $set: {
-          visitorToken: input.metadata,
+          tokenMetadata: input.metadata,
           updatedAt: input.now,
         },
       },

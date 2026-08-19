@@ -553,7 +553,7 @@ describe("BotBlockerSessionPersistence fingerprint selection", () => {
       now,
     });
 
-    assert.equal(state.gateSessions[0]!.visitorToken?.tokenId, "bvt_token_123456789");
+    assert.equal(state.gateSessions[0]!.tokenMetadata?.tokenId, "bvt_token_123456789");
     assert.equal(JSON.stringify(state.gateSessions[0]).includes("visitorBearer"), false);
   });
 });

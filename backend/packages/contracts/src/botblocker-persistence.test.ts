@@ -145,7 +145,7 @@ describe("Phase 6 BotBlocker persistence contracts", () => {
     assert.equal(
       GateSessionRecordSchema.safeParse({
         ...gateSession,
-        visitorToken: {
+        tokenMetadata: {
           tokenId: "bvt_token_123456789",
           expiresAt: "2026-08-13T12:30:00.000Z",
           nonceDigest: "a".repeat(64),

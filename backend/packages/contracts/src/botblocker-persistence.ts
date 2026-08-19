@@ -201,7 +201,7 @@ export const GateSessionRecordSchema = ScopedRecordSchema.extend({
   gateSessionId: OpaqueIdSchema,
   userIntelligenceId: OpaqueIdSchema,
   initialRequest: InitialSessionRequestSnapshotSchema,
-  visitorToken: VisitorTokenMetadataSchema.optional(),
+  tokenMetadata: VisitorTokenMetadataSchema.optional(),
   ip: TrustedProxyIpSchema.optional(),
   state: z.enum(["active", "ended"]),
   latestDecision: BotBlockerDecisionOutcomeSchema.optional(),
