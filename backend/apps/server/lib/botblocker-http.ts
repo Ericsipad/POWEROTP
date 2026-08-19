@@ -93,7 +93,7 @@ export async function rapidAuthMutation(
       600,
       60,
     );
-    const requestIp = clientIp(request);
+    const requestIp = body.payload.request.clientIp;
     const intelligence = await context.botBlockerNetworkIntelligence.resolve(
       requestIp,
       new Date(),
@@ -105,11 +105,8 @@ export async function rapidAuthMutation(
         siteId: site.siteId,
       },
       gateSessionId: body.gateSessionId,
-      evidence: body.payload.browser.evidence,
-      ...(body.payload.browser.fingerprint
-        ? { fingerprint: body.payload.browser.fingerprint }
-        : {}),
-      ...(requestIp ? { trustedClientIp: requestIp } : {}),
+      initialRequest: body,
+      ...(requestIp ? { ipBlacklisted: intelligence.blacklisted } : {}),
       ...(intelligence.blacklisted ? { latestDecision: "otp" } : {}),
       ...(intelligence.networkClassification
         ? { networkClassification: intelligence.networkClassification }
@@ -121,6 +118,15 @@ export async function rapidAuthMutation(
       siteId: site.siteId,
       gateSessionId: body.gateSessionId,
       audience: body.audience,
+    });
+    await context.botBlockerIngestion.saveVisitorTokenMetadata({
+      scope: {
+        customerId: site.customerId,
+        projectId: site.projectId,
+        siteId: site.siteId,
+      },
+      gateSessionId: body.gateSessionId,
+      metadata: issued.metadata,
     });
     return NextResponse.json({
       status: "ready",

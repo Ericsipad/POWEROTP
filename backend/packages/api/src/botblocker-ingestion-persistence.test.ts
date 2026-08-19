@@ -8,7 +8,7 @@ import {
   BotBlockerIngestionPersistence,
 } from "./botblocker-ingestion-persistence.js";
 import {
-  BOTBLOCKER_RETENTION_SECONDS,
+  BOTBLOCKER_SESSION_INPUT_RETENTION_SECONDS,
   type DurableRiskEventDocument,
   type GateSessionDocument,
 } from "./botblocker-intelligence-persistence.js";
@@ -83,6 +83,31 @@ function fixture() {
     _id: "bgs_session_123456789",
     ...scope,
     userIntelligenceId: "bui_owner_123456789",
+    initialRequest: {
+      request: {
+        protocolVersion: 1,
+        siteId: scope.siteId,
+        gateSessionId: "bgs_session_123456789",
+        audience: "https://customer.example",
+        nonce: "nonce_initial_request_123456",
+        issuedAt: now.getTime(),
+        payload: {
+          gateSessionId: "bgs_session_123456789",
+          request: {
+            siteId: scope.siteId,
+            method: "GET",
+            path: "/account",
+          },
+          browser: {
+            protocolVersion: 1,
+            evidence: behaviorReport(0).evidence,
+            proofs: {},
+          },
+        },
+      },
+      risk: {},
+      serverObservedAt: now,
+    },
     state: "active",
     lastAppliedSequence: -1,
     startedAt: now,
@@ -181,7 +206,7 @@ describe("BotBlockerIngestionPersistence", () => {
     assert.equal(stored.report.evidence.pageView?.activeDurationMs, 28_000);
     assert.equal(
       stored.retentionExpiresAt.getTime() - stored.occurredAt.getTime(),
-      BOTBLOCKER_RETENTION_SECONDS * 1_000,
+      BOTBLOCKER_SESSION_INPUT_RETENTION_SECONDS * 1_000,
     );
     assert.equal(JSON.stringify(stored).includes("pointerCoordinates"), false);
     assert.equal(JSON.stringify(stored).includes("fingerprintHash"), false);
@@ -238,7 +263,7 @@ describe("BotBlockerIngestionPersistence", () => {
     assert.equal(stored.eventIndex, 1);
     assert.equal(
       stored.retentionExpiresAt.getTime() - stored.occurredAt.getTime(),
-      BOTBLOCKER_RETENTION_SECONDS * 1_000,
+      BOTBLOCKER_SESSION_INPUT_RETENTION_SECONDS * 1_000,
     );
   });
 });

@@ -11,6 +11,7 @@ import {
   BotBlockerChallengeRecordSchema,
   FingerprintDataRecordSchema,
   GateSessionRecordSchema,
+  InitialRequestEventRecordSchema,
   RiskSignalEventRecordSchema,
   UserIntelligenceRecordSchema,
 } from "./botblocker-persistence.js";
@@ -31,11 +32,38 @@ const evidence = {
   scroll: { smoothnessScore: 0.8, highSpeedEventCount: 1 },
   honeypotActivations: [],
 };
+const initialRequest = {
+  request: {
+    protocolVersion: 1 as const,
+    siteId: scope.siteId,
+    gateSessionId: "bgs_session_123456",
+    audience: "https://customer.example",
+    nonce: "nonce_initial_123456789",
+    issuedAt: Date.parse(now),
+    payload: {
+      gateSessionId: "bgs_session_123456",
+      request: {
+        siteId: scope.siteId,
+        clientIp: ip,
+        method: "GET" as const,
+        path: "/products",
+      },
+      browser: {
+        protocolVersion: 1 as const,
+        evidence,
+        proofs: {},
+      },
+    },
+  },
+  risk: { ipBlacklisted: false },
+  serverObservedAt: now,
+};
 
 const gateSession = {
   ...scope,
   gateSessionId: "bgs_session_123456",
   userIntelligenceId: "bui_visitor_123456",
+  initialRequest,
   ip,
   state: "active" as const,
   lastAppliedSequence: -1,
@@ -114,6 +142,18 @@ describe("Phase 6 BotBlocker persistence contracts", () => {
 
   it("accepts a scoped gate session with an IP observation and stale-update state", () => {
     assert.equal(GateSessionRecordSchema.safeParse(gateSession).success, true);
+    assert.equal(
+      GateSessionRecordSchema.safeParse({
+        ...gateSession,
+        visitorToken: {
+          tokenId: "bvt_token_123456789",
+          expiresAt: "2026-08-13T12:30:00.000Z",
+          nonceDigest: "a".repeat(64),
+          tokenDigest: "b".repeat(64),
+        },
+      }).success,
+      true,
+    );
   });
 
   it("requires customer, project, site, and intelligence scope", () => {
@@ -127,6 +167,17 @@ describe("Phase 6 BotBlocker persistence contracts", () => {
       ...gateSession,
       gateSessionId: "bgs_session_654321",
       userIntelligenceId: "bui_visitor_654321",
+      initialRequest: {
+        ...initialRequest,
+        request: {
+          ...initialRequest.request,
+          gateSessionId: "bgs_session_654321",
+          payload: {
+            ...initialRequest.request.payload,
+            gateSessionId: "bgs_session_654321",
+          },
+        },
+      },
     });
 
     assert.equal(first.ip, second.ip);
@@ -241,6 +292,31 @@ describe("Phase 6 BotBlocker persistence contracts", () => {
       BehaviorReportEventRecordSchema.safeParse({
         ...record,
         pageUrl: "https://customer.example/products?secret=value",
+      }).success,
+      false,
+    );
+  });
+
+  it("binds the complete initial request to the first immutable risk event", () => {
+    const record = {
+      ...scope,
+      riskEventId: "bre_initial_12345678",
+      userIntelligenceId: gateSession.userIntelligenceId,
+      gateSessionId: gateSession.gateSessionId,
+      reportSequence: -1 as const,
+      eventIndex: 0 as const,
+      recordType: "initial_request" as const,
+      initialRequest,
+      occurredAt: now,
+      createdAt: now,
+      updatedAt: now,
+      retentionExpiresAt: later,
+    };
+    assert.equal(InitialRequestEventRecordSchema.safeParse(record).success, true);
+    assert.equal(
+      InitialRequestEventRecordSchema.safeParse({
+        ...record,
+        gateSessionId: "bgs_other_session_123",
       }).success,
       false,
     );

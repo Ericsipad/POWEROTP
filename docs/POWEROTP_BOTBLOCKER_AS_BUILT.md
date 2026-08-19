@@ -3448,3 +3448,39 @@ visitor-token metadata, minute-29 refresh, middleware bearer replacement, select
 scoring-field synchronization, IP history/reuse aggregation, profile scoring, callbacks, reducer,
 external-vendor profile mapping, edge publication, or global verify Worker. No environment file,
 migration, seed, deployment, or customer traffic was changed. No commit or push was performed.
+
+## 2026-08-18 — BotBlocker Phase 17 (partial): initial session and risk-event persistence
+
+**Status: third Phase 17 production slice complete.** Initial RapidAuth now passes the complete
+validated authenticated request envelope into persistence. The bounded session snapshot preserves
+the request context, complete available raw browser/fingerprint input, candidate proofs, browser
+risk evidence, server observation time, and available server-derived blacklist/network/reputation
+evidence. The trusted visitor IP comes from the authenticated adapter request context, not the
+adapter-to-API transport address, remains raw, and is omitted when unavailable.
+
+The scoped `gateSessions` row and the same snapshot as one immutable
+`riskEvents.recordType: "initial_request"` row are inserted in the existing MongoDB transaction
+before fingerprint/profile persistence completes. Both records carry the exact
+customer/project/site, gate-session, and user-intelligence binding. Exact request replay returns
+the existing session without another event, fingerprint, or profile update; changed equal/older
+input is rejected as stale and changed newer input as conflicting. A failed session, initial-event,
+fingerprint, or profile write aborts all four categories.
+
+**Visitor authority and retention.** The 30-minute visitor bearer is issued only after durable
+session creation. Before the response is returned, the session stores only a random token ID,
+expiry, SHA-256 nonce digest, and SHA-256 token digest. Neither the reusable bearer nor raw token
+nonce is persisted. Gate-session headers, the initial event, and later behavior/risk-event inputs
+now use the approved 90-day retention boundary; `fingerprintData` and `userIntelligence` remain at
+548 days. A later browser-assessment request can no longer fabricate a missing initial session
+from incomplete report data.
+
+**Focused verification.** `@powerotp/contracts` build passed and its corrected final suite passed
+**184/184** tests across 46 suites. `@powerotp/api` build passed and its suite passed **318/318**
+tests across 87 suites. The touched `@powerotp/backend` server integration passed `tsc --noEmit`.
+No full-repository verification was run.
+
+**Explicitly not shipped.** This slice adds no site-return cookie, Passport binding, minute-29
+refresh route or middleware bearer replacement, gate-session IP/profile synchronizer, operator
+scoring fields/runtime, callback/pull flow, behavior-event reducer, external-vendor profile
+integration, billing, edge publication, or global verify Worker. No environment file, migration,
+seed, deployment, or customer traffic was changed. No commit or push was performed.

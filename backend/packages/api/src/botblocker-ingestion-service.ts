@@ -1,12 +1,10 @@
 import {
   BehaviorReportSchema,
-  BrowserEvidenceSchema,
-  FingerprintVectorSchema,
+  RapidAuthRequestSchema,
   RiskEventBatchSchema,
   type BehaviorReport,
   type BotBlockerDecisionOutcome,
-  type BrowserEvidence,
-  type FingerprintVector,
+  type RapidAuthRequest,
   type RiskEventBatch,
 } from "@powerotp/contracts";
 
@@ -31,6 +29,7 @@ type IngestionStore = Pick<
   BotBlockerIngestionPersistence,
   | "findGateSession"
   | "openGateSession"
+  | "saveVisitorTokenMetadata"
   | "ingestBehaviorReport"
   | "ingestRiskEvents"
 >;
@@ -49,11 +48,10 @@ export class BotBlockerIngestionService {
   async startSession(input: {
     scope: BotBlockerScope;
     gateSessionId: string;
-    evidence: BrowserEvidence;
-    fingerprint?: FingerprintVector;
+    initialRequest: RapidAuthRequest;
     /** Trusted server-held binding only; never copied from browser evidence. */
     authoritativeUserIntelligenceId?: string;
-    trustedClientIp?: string;
+    ipBlacklisted?: boolean;
     /** Already-resolved fast-immediate-branch network intelligence
      * (Phase 16 step 7's `rapidAuthMutation` wiring) to land on the gate
      * session row at creation time. Absent for every other caller of this
@@ -63,16 +61,20 @@ export class BotBlockerIngestionService {
     networkClassification?: GateSessionNetworkClassification;
     ipReputation?: GateSessionIpReputation;
   }) {
-    const evidence = parseEvidence(input.evidence);
-    const fingerprint = input.fingerprint
-      ? parseFingerprint(input.fingerprint)
-      : undefined;
+    const initialRequest = parseInitialRequest(input.initialRequest);
     const now = this.now();
+    if (
+      initialRequest.siteId !== input.scope.siteId ||
+      initialRequest.gateSessionId !== input.gateSessionId
+    ) {
+      throw new BotBlockerRuntimeError("invalid_request", 400);
+    }
+    this.#requireCurrentTimestamp(initialRequest.issuedAt, now);
     try {
       return await this.persistence.openGateSession({
         scope: input.scope,
         gateSessionId: input.gateSessionId,
-        ...(fingerprint ? { fingerprint } : {}),
+        initialRequest,
         ...(this.#hashSecret ? { verifyHashSecret: this.#hashSecret } : {}),
         ...(input.authoritativeUserIntelligenceId
           ? {
@@ -80,20 +82,45 @@ export class BotBlockerIngestionService {
               input.authoritativeUserIntelligenceId,
           }
           : {}),
-        ...(input.trustedClientIp
-          ? { ip: this.#normalizedIp(input.trustedClientIp) }
+        ...(initialRequest.payload.request.clientIp
+          ? { ip: this.#normalizedIp(initialRequest.payload.request.clientIp) }
+          : {}),
+        ...(input.ipBlacklisted !== undefined
+          ? { ipBlacklisted: input.ipBlacklisted }
           : {}),
         ...(input.latestDecision ? { latestDecision: input.latestDecision } : {}),
         ...(input.networkClassification
           ? { networkClassification: input.networkClassification }
           : {}),
         ...(input.ipReputation ? { ipReputation: input.ipReputation } : {}),
-        evidence,
         now,
       });
     } catch (error) {
       if (error instanceof BotBlockerIngestionPersistenceError) {
-        throw new BotBlockerRuntimeError("invalid_request", 404);
+        throw persistenceError(error);
+      }
+      throw error;
+    }
+  }
+
+  async saveVisitorTokenMetadata(input: {
+    scope: BotBlockerScope;
+    gateSessionId: string;
+    metadata: {
+      tokenId: string;
+      expiresAt: Date;
+      nonceDigest: string;
+      tokenDigest: string;
+    };
+  }): Promise<void> {
+    try {
+      await this.persistence.saveVisitorTokenMetadata({
+        ...input,
+        now: this.now(),
+      });
+    } catch (error) {
+      if (error instanceof BotBlockerIngestionPersistenceError) {
+        throw persistenceError(error);
       }
       throw error;
     }
@@ -111,16 +138,12 @@ export class BotBlockerIngestionService {
     }
     this.#requireCurrentTimestamp(report.sequence.issuedAt, now);
     const scope = scopeFor(site);
-    let gateSession = await this.persistence.findGateSession(
+    const gateSession = await this.persistence.findGateSession(
       scope,
       report.sequence.gateSessionId,
     );
     if (!gateSession) {
-      gateSession = await this.startSession({
-        scope,
-        gateSessionId: report.sequence.gateSessionId,
-        evidence: report.evidence,
-      });
+      throw new BotBlockerRuntimeError("invalid_request", 404);
     }
     const result = await this.persistence.ingestBehaviorReport(
       scope,
@@ -174,14 +197,8 @@ export class BotBlockerIngestionService {
   }
 }
 
-function parseEvidence(candidate: BrowserEvidence): BrowserEvidence {
-  const parsed = BrowserEvidenceSchema.safeParse(candidate);
-  if (!parsed.success) throw new BotBlockerRuntimeError("invalid_request", 400);
-  return parsed.data;
-}
-
-function parseFingerprint(candidate: FingerprintVector): FingerprintVector {
-  const parsed = FingerprintVectorSchema.safeParse(candidate);
+function parseInitialRequest(candidate: RapidAuthRequest): RapidAuthRequest {
+  const parsed = RapidAuthRequestSchema.safeParse(candidate);
   if (!parsed.success) throw new BotBlockerRuntimeError("invalid_request", 400);
   return parsed.data;
 }
@@ -217,4 +234,13 @@ function pageUrl(audience: string, routePath: string): string {
 
 function staleSequence(): BotBlockerRuntimeError {
   return new BotBlockerRuntimeError("stale_sequence", 409);
+}
+
+function persistenceError(
+  error: BotBlockerIngestionPersistenceError,
+): BotBlockerRuntimeError {
+  return error.code === "conflicting_replay" ||
+      error.code === "stale_initial_request"
+    ? staleSequence()
+    : new BotBlockerRuntimeError("invalid_request", 404);
 }

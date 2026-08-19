@@ -25,6 +25,12 @@ describe("BotBlockerVisitorTokenService", () => {
       now + 29 * 60_000,
     );
     assert.equal(claims.expiresAt, now + 30 * 60_000);
+    assert.equal(issued.metadata.tokenId, claims.tokenId);
+    assert.equal(issued.metadata.expiresAt.getTime(), claims.expiresAt);
+    assert.match(issued.metadata.nonceDigest, /^[a-f0-9]{64}$/);
+    assert.match(issued.metadata.tokenDigest, /^[a-f0-9]{64}$/);
+    assert.equal(JSON.stringify(issued.metadata).includes(issued.token), false);
+    assert.equal(JSON.stringify(issued.metadata).includes(claims.nonce), false);
   });
 
   it("rejects tampering, expiry, and every scope mismatch", () => {

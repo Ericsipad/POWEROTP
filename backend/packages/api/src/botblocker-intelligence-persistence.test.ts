@@ -6,9 +6,11 @@ import type { Db } from "mongodb";
 import {
   BOTBLOCKER_MATCH_LOOKBACK_SECONDS,
   BOTBLOCKER_RETENTION_SECONDS,
+  BOTBLOCKER_SESSION_INPUT_RETENTION_SECONDS,
   BotBlockerIntelligencePersistence,
   botBlockerMatchCutoff,
   botBlockerRetentionExpiresAt,
+  botBlockerSessionInputRetentionExpiresAt,
   createBotBlockerChallengeId,
   createGateSessionId,
   createRiskEventId,
@@ -137,14 +139,23 @@ describe("BotBlocker intelligence persistence", () => {
     );
   });
 
-  it("encodes the approved 18-month retention and 30-day matching window", () => {
+  it("encodes 90-day session inputs, 18-month profiles, and 30-day matching", () => {
     assert.equal(BOTBLOCKER_RETENTION_SECONDS, 548 * 24 * 60 * 60);
+    assert.equal(
+      BOTBLOCKER_SESSION_INPUT_RETENTION_SECONDS,
+      90 * 24 * 60 * 60,
+    );
     assert.equal(BOTBLOCKER_MATCH_LOOKBACK_SECONDS, 30 * 24 * 60 * 60);
 
     const anchor = new Date("2026-08-13T12:00:00.000Z");
     assert.equal(
       botBlockerRetentionExpiresAt(anchor).getTime() - anchor.getTime(),
       BOTBLOCKER_RETENTION_SECONDS * 1_000,
+    );
+    assert.equal(
+      botBlockerSessionInputRetentionExpiresAt(anchor).getTime() -
+        anchor.getTime(),
+      BOTBLOCKER_SESSION_INPUT_RETENTION_SECONDS * 1_000,
     );
     assert.equal(
       anchor.getTime() - botBlockerMatchCutoff(anchor).getTime(),

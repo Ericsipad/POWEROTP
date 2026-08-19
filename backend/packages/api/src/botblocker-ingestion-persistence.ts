@@ -8,6 +8,7 @@ import type { ClientSession, Db, MongoClient } from "mongodb";
 
 import {
   botBlockerRetentionExpiresAt,
+  botBlockerSessionInputRetentionExpiresAt,
   createRiskEventId,
   type BehaviorReportEventDocument,
   type BotBlockerScope,
@@ -50,6 +51,14 @@ export class BotBlockerIngestionPersistence {
     input: Parameters<BotBlockerSessionPersistence["openGateSession"]>[0],
   ) {
     return this.#sessions.openGateSession(input);
+  }
+
+  saveVisitorTokenMetadata(
+    input: Parameters<
+      BotBlockerSessionPersistence["saveVisitorTokenMetadata"]
+    >[0],
+  ) {
+    return this.#sessions.saveVisitorTokenMetadata(input);
   }
 
   async ingestBehaviorReport(
@@ -117,7 +126,8 @@ export class BotBlockerIngestionPersistence {
           occurredAt,
           createdAt: now,
           updatedAt: now,
-          retentionExpiresAt: botBlockerRetentionExpiresAt(occurredAt),
+          retentionExpiresAt:
+            botBlockerSessionInputRetentionExpiresAt(occurredAt),
         };
         await this.#riskEvents.insertOne(document, { session });
         await this.#userIntelligence.updateOne(
@@ -227,7 +237,8 @@ export class BotBlockerIngestionPersistence {
               occurredAt,
               createdAt: now,
               updatedAt: now,
-              retentionExpiresAt: botBlockerRetentionExpiresAt(occurredAt),
+              retentionExpiresAt:
+                botBlockerSessionInputRetentionExpiresAt(occurredAt),
             };
           },
         );
@@ -267,7 +278,7 @@ export class BotBlockerIngestionPersistence {
           lastAppliedSequence: sequence,
           lastObservedAt: now,
           updatedAt: now,
-          retentionExpiresAt: botBlockerRetentionExpiresAt(now),
+          retentionExpiresAt: botBlockerSessionInputRetentionExpiresAt(now),
         },
       },
       { returnDocument: "after", session },

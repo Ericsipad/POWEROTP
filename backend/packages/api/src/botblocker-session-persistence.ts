@@ -1,8 +1,10 @@
+import { isDeepStrictEqual } from "node:util";
+
 import type {
   BotBlockerDecisionOutcome,
-  BrowserEvidence,
-  FingerprintVerifySource,
   FingerprintVector,
+  FingerprintVerifySource,
+  RapidAuthRequest,
 } from "@powerotp/contracts";
 import type { Db, MongoClient } from "mongodb";
 
@@ -17,13 +19,19 @@ import {
 import {
   BotBlockerIntelligencePersistence,
   botBlockerRetentionExpiresAt,
+  botBlockerSessionInputRetentionExpiresAt,
+  createRiskEventId,
   createUserIntelligenceId,
   type BotBlockerScope,
+  type DurableRiskEventDocument,
   type GateSessionDocument,
   type GateSessionIpReputation,
   type GateSessionNetworkClassification,
+  type InitialRequestEventDocument,
+  type InitialSessionRequestSnapshotDocument,
   type IpObservation,
   type UserIntelligenceDocument,
+  type VisitorTokenMetadataDocument,
 } from "./botblocker-intelligence-persistence.js";
 
 export class BotBlockerSessionPersistenceError extends Error {
@@ -32,7 +40,8 @@ export class BotBlockerSessionPersistenceError extends Error {
       | "scope_mismatch"
       | "session_not_found"
       | "authoritative_binding_not_found"
-      | "conflicting_replay",
+      | "conflicting_replay"
+      | "stale_initial_request",
   ) {
     super(code);
     this.name = "BotBlockerSessionPersistenceError";
@@ -43,6 +52,7 @@ export class BotBlockerSessionPersistence {
   readonly #client: MongoClient;
   readonly #gateSessions;
   readonly #userIntelligence;
+  readonly #riskEvents;
   readonly #fingerprints: FingerprintPersistence;
   readonly #reads: BotBlockerIntelligencePersistence;
 
@@ -51,6 +61,7 @@ export class BotBlockerSessionPersistence {
     this.#gateSessions = db.collection<GateSessionDocument>("gateSessions");
     this.#userIntelligence =
       db.collection<UserIntelligenceDocument>("userIntelligence");
+    this.#riskEvents = db.collection<DurableRiskEventDocument>("riskEvents");
     this.#fingerprints = new FingerprintPersistence(db);
     this.#reads = new BotBlockerIntelligencePersistence(db);
   }
@@ -62,7 +73,7 @@ export class BotBlockerSessionPersistence {
   async openGateSession(input: {
     scope: BotBlockerScope;
     gateSessionId: string;
-    fingerprint?: FingerprintVector;
+    initialRequest: RapidAuthRequest;
     /** Independent server-only HMAC key. It is used only after stable source
      * values have been projected onto the user-intelligence row. */
     verifyHashSecret?: string;
@@ -70,7 +81,7 @@ export class BotBlockerSessionPersistence {
      * browser payload. */
     authoritativeUserIntelligenceId?: string;
     ip?: string;
-    evidence: BrowserEvidence;
+    ipBlacklisted?: boolean;
     /** Set only when the fast-immediate branch's network intelligence
      * chain (Phase 16 step 7) already resolved a visitor-facing outcome
      * before the session was created — currently only a dedicated
@@ -81,6 +92,9 @@ export class BotBlockerSessionPersistence {
     now: Date;
   }): Promise<GateSessionDocument> {
     const userIntelligenceId = createUserIntelligenceId();
+    const fingerprint = input.initialRequest.payload.browser.fingerprint;
+    const evidence = input.initialRequest.payload.browser.evidence;
+    const initialRequest = initialRequestSnapshot(input);
     let result: GateSessionDocument | undefined;
 
     await this.#client.withSession(async (session) => {
@@ -93,8 +107,22 @@ export class BotBlockerSessionPersistence {
           if (!sameScope(existingById, input.scope)) {
             throw new BotBlockerSessionPersistenceError("scope_mismatch");
           }
-          result = existingById;
-          return;
+          if (
+            isDeepStrictEqual(
+              existingById.initialRequest.request,
+              input.initialRequest,
+            ) &&
+            existingById.ip === input.ip
+          ) {
+            result = existingById;
+            return;
+          }
+          throw new BotBlockerSessionPersistenceError(
+            input.initialRequest.issuedAt <=
+                existingById.initialRequest.request.issuedAt
+              ? "stale_initial_request"
+              : "conflicting_replay",
+          );
         }
 
         let matched: UserIntelligenceDocument | null = null;
@@ -112,10 +140,10 @@ export class BotBlockerSessionPersistence {
             throw new BotBlockerSessionPersistenceError("scope_mismatch");
           }
           matched = bound;
-        } else if (input.fingerprint) {
+        } else if (fingerprint) {
           const fingerprintMatch = await this.#fingerprints.findExactVector(
             input.scope,
-            input.fingerprint,
+            fingerprint,
             session,
           );
           if (fingerprintMatch) {
@@ -131,14 +159,54 @@ export class BotBlockerSessionPersistence {
         const userId = matched?._id ?? userIntelligenceId;
         let fingerprintAccepted = false;
 
-        if (input.fingerprint) {
+        result = {
+          _id: input.gateSessionId,
+          ...input.scope,
+          userIntelligenceId: userId,
+          initialRequest,
+          ...(input.ip ? { ip: input.ip } : {}),
+          state: "active",
+          ...(input.latestDecision ? { latestDecision: input.latestDecision } : {}),
+          ...(input.networkClassification
+            ? { networkClassification: input.networkClassification }
+            : {}),
+          ...(input.ipReputation ? { ipReputation: input.ipReputation } : {}),
+          lastAppliedSequence: -1,
+          startedAt: input.now,
+          lastObservedAt: input.now,
+          createdAt: input.now,
+          updatedAt: input.now,
+          retentionExpiresAt:
+            botBlockerSessionInputRetentionExpiresAt(input.now),
+        };
+        await this.#gateSessions.insertOne(result, { session });
+
+        const occurredAt = new Date(input.initialRequest.issuedAt);
+        const initialEvent: InitialRequestEventDocument = {
+          _id: createRiskEventId(),
+          ...input.scope,
+          userIntelligenceId: userId,
+          gateSessionId: input.gateSessionId,
+          reportSequence: -1,
+          eventIndex: 0,
+          recordType: "initial_request",
+          initialRequest,
+          occurredAt,
+          createdAt: input.now,
+          updatedAt: input.now,
+          retentionExpiresAt:
+            botBlockerSessionInputRetentionExpiresAt(occurredAt),
+        };
+        await this.#riskEvents.insertOne(initialEvent, { session });
+
+        if (fingerprint) {
           try {
             const write = await this.#fingerprints.writeCurrent(
               {
                 scope: input.scope,
                 userIntelligenceId: userId,
                 gateSessionId: input.gateSessionId,
-                vector: input.fingerprint,
+                vector: fingerprint,
                 observedAt: input.now,
               },
               session,
@@ -156,10 +224,10 @@ export class BotBlockerSessionPersistence {
           }
         }
 
-        const fingerprintProfile = fingerprintAccepted && input.fingerprint
+        const fingerprintProfile = fingerprintAccepted && fingerprint
           ? fingerprintProfileFields(
             matched?.fingerprintVerifySource,
-            input.fingerprint,
+            fingerprint,
             input.verifyHashSecret,
           )
           : {};
@@ -169,7 +237,7 @@ export class BotBlockerSessionPersistence {
             ...input.scope,
             ...fingerprintProfile,
             ipObservations: updateIpObservations([], input.ip, input.now),
-            latestEvidence: input.evidence,
+            latestEvidence: evidence,
             gateSessionCount: 1,
             behaviorReportCount: 0,
             pageViewCount: 0,
@@ -192,7 +260,7 @@ export class BotBlockerSessionPersistence {
                   input.ip,
                   input.now,
                 ),
-                latestEvidence: input.evidence,
+                latestEvidence: evidence,
                 lastObservedAt: input.now,
                 updatedAt: input.now,
                 retentionExpiresAt: botBlockerRetentionExpiresAt(input.now),
@@ -204,25 +272,6 @@ export class BotBlockerSessionPersistence {
           );
         }
 
-        result = {
-          _id: input.gateSessionId,
-          ...input.scope,
-          userIntelligenceId: userId,
-          ...(input.ip ? { ip: input.ip } : {}),
-          state: "active",
-          ...(input.latestDecision ? { latestDecision: input.latestDecision } : {}),
-          ...(input.networkClassification
-            ? { networkClassification: input.networkClassification }
-            : {}),
-          ...(input.ipReputation ? { ipReputation: input.ipReputation } : {}),
-          lastAppliedSequence: -1,
-          startedAt: input.now,
-          lastObservedAt: input.now,
-          createdAt: input.now,
-          updatedAt: input.now,
-          retentionExpiresAt: botBlockerRetentionExpiresAt(input.now),
-        };
-        await this.#gateSessions.insertOne(result, { session });
       });
     });
 
@@ -231,6 +280,48 @@ export class BotBlockerSessionPersistence {
     }
     return result;
   }
+
+  async saveVisitorTokenMetadata(input: {
+    scope: BotBlockerScope;
+    gateSessionId: string;
+    metadata: VisitorTokenMetadataDocument;
+    now: Date;
+  }): Promise<void> {
+    if (input.metadata.expiresAt <= input.now) {
+      throw new BotBlockerSessionPersistenceError("stale_initial_request");
+    }
+    const update = await this.#gateSessions.updateOne(
+      { _id: input.gateSessionId, ...input.scope },
+      {
+        $set: {
+          visitorToken: input.metadata,
+          updatedAt: input.now,
+        },
+      },
+    );
+    if (update.matchedCount !== 1) {
+      throw new BotBlockerSessionPersistenceError("session_not_found");
+    }
+  }
+}
+
+function initialRequestSnapshot(
+  input: Parameters<BotBlockerSessionPersistence["openGateSession"]>[0],
+): InitialSessionRequestSnapshotDocument {
+  return {
+    request: input.initialRequest,
+    risk: {
+      ...(input.ipBlacklisted !== undefined
+        ? { ipBlacklisted: input.ipBlacklisted }
+        : {}),
+      ...(input.latestDecision ? { latestDecision: input.latestDecision } : {}),
+      ...(input.networkClassification
+        ? { networkClassification: input.networkClassification }
+        : {}),
+      ...(input.ipReputation ? { ipReputation: input.ipReputation } : {}),
+    },
+    serverObservedAt: input.now,
+  };
 }
 
 function fingerprintProfileFields(

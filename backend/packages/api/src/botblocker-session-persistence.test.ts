@@ -2,13 +2,21 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { isDeepStrictEqual } from "node:util";
 
-import type { BrowserEvidence, FingerprintVector } from "@powerotp/contracts";
+import type {
+  BrowserEvidence,
+  FingerprintVector,
+  RapidAuthRequest,
+} from "@powerotp/contracts";
 import type { Db, MongoClient } from "mongodb";
 
 import type { FingerprintDataDocument } from "./botblocker-fingerprint-persistence.js";
 import type {
+  DurableRiskEventDocument,
   GateSessionDocument,
   UserIntelligenceDocument,
+} from "./botblocker-intelligence-persistence.js";
+import {
+  BOTBLOCKER_SESSION_INPUT_RETENTION_SECONDS,
 } from "./botblocker-intelligence-persistence.js";
 import {
   BotBlockerSessionPersistence,
@@ -120,8 +128,10 @@ function fixture(options: {
   intelligence?: UserIntelligenceDocument[];
   fingerprints?: FingerprintDataDocument[];
   failGateInsert?: boolean;
+  failRiskInsert?: boolean;
 } = {}) {
   const gateSessions: GateSessionDocument[] = [];
+  const riskEvents: DurableRiskEventDocument[] = [];
   const intelligence = structuredClone(options.intelligence ?? []);
   const fingerprints = structuredClone(options.fingerprints ?? []);
   const collection = (name: string) => {
@@ -129,6 +139,8 @@ function fixture(options: {
       ? gateSessions
       : name === "userIntelligence"
       ? intelligence
+      : name === "riskEvents"
+      ? riskEvents
       : fingerprints;
     return {
       findOne: async (
@@ -147,6 +159,9 @@ function fixture(options: {
       insertOne: async (document: never) => {
         if (name === "gateSessions" && options.failGateInsert) {
           throw new Error("injected gate insert failure");
+        }
+        if (name === "riskEvents" && options.failRiskInsert) {
+          throw new Error("injected risk insert failure");
         }
         (rows as unknown[]).push(document);
       },
@@ -193,6 +208,7 @@ function fixture(options: {
           gateSessions,
           intelligence,
           fingerprints,
+          riskEvents,
         });
         try {
           await transaction();
@@ -200,6 +216,7 @@ function fixture(options: {
           gateSessions.splice(0, gateSessions.length, ...snapshot.gateSessions);
           intelligence.splice(0, intelligence.length, ...snapshot.intelligence);
           fingerprints.splice(0, fingerprints.length, ...snapshot.fingerprints);
+          riskEvents.splice(0, riskEvents.length, ...snapshot.riskEvents);
           throw error;
         }
       },
@@ -210,6 +227,7 @@ function fixture(options: {
     gateSessions,
     intelligence,
     fingerprints,
+    riskEvents,
   };
 }
 
@@ -263,16 +281,60 @@ function storedFingerprint(
   };
 }
 
+function rapidRequest(
+  gateSessionId: string,
+  fingerprint: FingerprintVector,
+  issuedAt: number,
+): RapidAuthRequest {
+  return {
+    protocolVersion: 1,
+    siteId: scope.siteId,
+    gateSessionId,
+    audience: "https://customer.example",
+    nonce: "nonce_initial_request_123456",
+    issuedAt,
+    payload: {
+      gateSessionId,
+      request: {
+        siteId: scope.siteId,
+        clientIp: "203.0.113.5",
+        method: "GET",
+        path: "/",
+      },
+      browser: {
+        protocolVersion: 1,
+        evidence,
+        fingerprint,
+        proofs: {},
+      },
+    },
+  };
+}
+
 function openInput(overrides: Record<string, unknown> = {}) {
+  const gateSessionId =
+    (overrides.gateSessionId as string | undefined) ??
+      "bgs_session_m_123456";
+  const observedAt = (overrides.now as Date | undefined) ?? now;
+  const fingerprint =
+    (overrides.fingerprint as FingerprintVector | undefined) ?? vector();
+  const {
+    fingerprint: _fingerprint,
+    ...remainingOverrides
+  } = overrides;
   return {
     scope,
-    gateSessionId: "bgs_session_m_123456",
-    fingerprint: vector(),
+    gateSessionId,
+    initialRequest: rapidRequest(
+      gateSessionId,
+      fingerprint,
+      observedAt.getTime(),
+    ),
     verifyHashSecret: "verify-hash-secret-at-least-32-characters",
     ip: "203.0.113.5",
-    evidence,
-    now,
-    ...overrides,
+    ipBlacklisted: false,
+    now: observedAt,
+    ...remainingOverrides,
   };
 }
 
@@ -288,6 +350,8 @@ describe("BotBlockerSessionPersistence fingerprint selection", () => {
     assert.equal(session.userIntelligenceId, existing._id);
     assert.equal(state.intelligence.length, 1);
     assert.equal(state.intelligence[0]!.gateSessionCount, 2);
+    assert.equal(state.riskEvents.length, 1);
+    assert.equal(state.riskEvents[0]!.recordType, "initial_request");
   });
 
   it("never selects on IP-only or non-exact fingerprint evidence", async () => {
@@ -384,6 +448,7 @@ describe("BotBlockerSessionPersistence fingerprint selection", () => {
     const replay = await state.persistence.openGateSession(openInput());
     assert.equal(replay._id, first._id);
     assert.equal(state.gateSessions.length, 1);
+    assert.equal(state.riskEvents.length, 1);
     assert.equal(state.intelligence[0]!.gateSessionCount, 1);
 
     await assert.rejects(
@@ -403,8 +468,93 @@ describe("BotBlockerSessionPersistence fingerprint selection", () => {
       /injected gate insert failure/,
     );
     assert.deepEqual(state.gateSessions, []);
+    assert.deepEqual(state.riskEvents, []);
     assert.deepEqual(state.intelligence, []);
     assert.deepEqual(state.fingerprints, []);
+  });
+
+  it("rolls back the session before any profile or fingerprint write when the initial event fails", async () => {
+    const state = fixture({ failRiskInsert: true });
+    await assert.rejects(
+      state.persistence.openGateSession(openInput()),
+      /injected risk insert failure/,
+    );
+    assert.deepEqual(state.gateSessions, []);
+    assert.deepEqual(state.riskEvents, []);
+    assert.deepEqual(state.intelligence, []);
+    assert.deepEqual(state.fingerprints, []);
+  });
+
+  it("stores the same complete bounded initial request on the session and first event for 90 days", async () => {
+    const state = fixture();
+    const session = await state.persistence.openGateSession(openInput());
+    const event = state.riskEvents[0]!;
+
+    assert.deepEqual(session.initialRequest, event.initialRequest);
+    assert.equal(event.recordType, "initial_request");
+    assert.equal(event.reportSequence, -1);
+    assert.equal(event.eventIndex, 0);
+    assert.equal(
+      session.retentionExpiresAt.getTime() - now.getTime(),
+      BOTBLOCKER_SESSION_INPUT_RETENTION_SECONDS * 1_000,
+    );
+    assert.equal(
+      event.retentionExpiresAt.getTime() - event.occurredAt.getTime(),
+      BOTBLOCKER_SESSION_INPUT_RETENTION_SECONDS * 1_000,
+    );
+    assert.deepEqual(
+      session.initialRequest.request.payload.browser.fingerprint,
+      vector(),
+    );
+    assert.deepEqual(session.initialRequest.request.payload.browser.proofs, {});
+    assert.equal(session.initialRequest.risk.ipBlacklisted, false);
+  });
+
+  it("rejects stale and conflicting reuse of an initialized gate session", async () => {
+    const state = fixture();
+    await state.persistence.openGateSession(openInput());
+
+    await assert.rejects(
+      state.persistence.openGateSession(openInput({
+        fingerprint: vector("Linux"),
+        now: new Date(now.getTime() - 1),
+      })),
+      (error: unknown) =>
+        error instanceof BotBlockerSessionPersistenceError &&
+        error.code === "stale_initial_request",
+    );
+    await assert.rejects(
+      state.persistence.openGateSession(openInput({
+        fingerprint: vector("Linux"),
+        now: new Date(now.getTime() + 1),
+      })),
+      (error: unknown) =>
+        error instanceof BotBlockerSessionPersistenceError &&
+        error.code === "conflicting_replay",
+    );
+    assert.equal(state.gateSessions.length, 1);
+    assert.equal(state.riskEvents.length, 1);
+    assert.equal(state.intelligence.length, 1);
+    assert.equal(state.fingerprints.length, 1);
+  });
+
+  it("stores only safe visitor-token metadata after the session exists", async () => {
+    const state = fixture();
+    await state.persistence.openGateSession(openInput());
+    await state.persistence.saveVisitorTokenMetadata({
+      scope,
+      gateSessionId: "bgs_session_m_123456",
+      metadata: {
+        tokenId: "bvt_token_123456789",
+        expiresAt: new Date(now.getTime() + 30 * 60_000),
+        nonceDigest: "a".repeat(64),
+        tokenDigest: "b".repeat(64),
+      },
+      now,
+    });
+
+    assert.equal(state.gateSessions[0]!.visitorToken?.tokenId, "bvt_token_123456789");
+    assert.equal(JSON.stringify(state.gateSessions[0]).includes("visitorBearer"), false);
   });
 });
 

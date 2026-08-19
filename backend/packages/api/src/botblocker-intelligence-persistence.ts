@@ -6,6 +6,7 @@ import type {
   BrowserEvidence,
   FingerprintVerifyLookup,
   FingerprintVerifySource,
+  RapidAuthRequest,
   ReportSequence,
   RiskEvent,
   VerificationType,
@@ -15,6 +16,7 @@ import type { Db, Filter } from "mongodb";
 import { createId } from "./security.js";
 
 export const BOTBLOCKER_RETENTION_SECONDS = 548 * 24 * 60 * 60;
+export const BOTBLOCKER_SESSION_INPUT_RETENTION_SECONDS = 90 * 24 * 60 * 60;
 export const BOTBLOCKER_MATCH_LOOKBACK_SECONDS = 30 * 24 * 60 * 60;
 
 export const createGateSessionId = () => createId("bgs");
@@ -53,9 +55,29 @@ export interface GateSessionIpReputation {
   score: number;
 }
 
+export interface InitialSessionRequestSnapshotDocument {
+  request: RapidAuthRequest;
+  risk: {
+    ipBlacklisted?: boolean;
+    latestDecision?: BotBlockerDecisionOutcome;
+    networkClassification?: GateSessionNetworkClassification;
+    ipReputation?: GateSessionIpReputation;
+  };
+  serverObservedAt: Date;
+}
+
+export interface VisitorTokenMetadataDocument {
+  tokenId: string;
+  expiresAt: Date;
+  nonceDigest: string;
+  tokenDigest: string;
+}
+
 export interface GateSessionDocument extends BotBlockerScope {
   _id: string;
   userIntelligenceId: string;
+  initialRequest: InitialSessionRequestSnapshotDocument;
+  visitorToken?: VisitorTokenMetadataDocument;
   /** Trusted request IP is stored raw for site-owner reporting and
    * security correlation. It is never identity authority. */
   ip?: string;
@@ -115,6 +137,13 @@ interface RiskEventDocumentBase extends BotBlockerScope {
   retentionExpiresAt: Date;
 }
 
+export interface InitialRequestEventDocument extends RiskEventDocumentBase {
+  recordType: "initial_request";
+  reportSequence: -1;
+  eventIndex: 0;
+  initialRequest: InitialSessionRequestSnapshotDocument;
+}
+
 export interface BehaviorReportEventDocument extends RiskEventDocumentBase {
   recordType: "behavior_report";
   eventIndex: 0;
@@ -130,6 +159,7 @@ export interface RiskSignalEventDocument extends RiskEventDocumentBase {
 }
 
 export type DurableRiskEventDocument =
+  | InitialRequestEventDocument
   | BehaviorReportEventDocument
   | RiskSignalEventDocument;
 
@@ -152,6 +182,12 @@ export interface BotBlockerChallengeDocument extends BotBlockerScope {
 
 export function botBlockerRetentionExpiresAt(anchor: Date): Date {
   return new Date(anchor.getTime() + BOTBLOCKER_RETENTION_SECONDS * 1_000);
+}
+
+export function botBlockerSessionInputRetentionExpiresAt(anchor: Date): Date {
+  return new Date(
+    anchor.getTime() + BOTBLOCKER_SESSION_INPUT_RETENTION_SECONDS * 1_000,
+  );
 }
 
 export function botBlockerMatchCutoff(now: Date): Date {
@@ -294,7 +330,8 @@ export class BotBlockerIntelligencePersistence {
           lastAppliedSequence: sequence,
           lastObservedAt: observedAt,
           updatedAt: observedAt,
-          retentionExpiresAt: botBlockerRetentionExpiresAt(observedAt),
+          retentionExpiresAt:
+            botBlockerSessionInputRetentionExpiresAt(observedAt),
         },
       },
       { returnDocument: "after" },

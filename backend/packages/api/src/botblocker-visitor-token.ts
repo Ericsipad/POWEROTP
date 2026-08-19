@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { z } from "zod";
 
 import type { ProductionConfig } from "./config.js";
@@ -13,6 +15,7 @@ export const BOTBLOCKER_VISITOR_TOKEN_LIFETIME_MS = 30 * 60 * 1_000;
 const BotBlockerVisitorSessionClaimsSchema = z
   .object({
     version: z.literal(1),
+    tokenId: z.string().min(16).max(128),
     projectId: z.string().min(16).max(128),
     siteId: z.string().min(16).max(64),
     gateSessionId: z.string().min(16).max(128),
@@ -47,17 +50,34 @@ export class BotBlockerVisitorTokenService {
       audience: string;
     },
     now = Date.now(),
-  ): { token: string; claims: BotBlockerVisitorSessionClaims } {
+  ): {
+    token: string;
+    claims: BotBlockerVisitorSessionClaims;
+    metadata: {
+      tokenId: string;
+      expiresAt: Date;
+      nonceDigest: string;
+      tokenDigest: string;
+    };
+  } {
     const claims = BotBlockerVisitorSessionClaimsSchema.parse({
       version: 1,
+      tokenId: `bvt_${createSecret(18)}`,
       ...scope,
       nonce: createSecret(16),
       issuedAt: now,
       expiresAt: now + BOTBLOCKER_VISITOR_TOKEN_LIFETIME_MS,
     });
+    const token = signPayload(claims, this.#requireSecret());
     return {
-      token: signPayload(claims, this.#requireSecret()),
+      token,
       claims,
+      metadata: {
+        tokenId: claims.tokenId,
+        expiresAt: new Date(claims.expiresAt),
+        nonceDigest: digest(claims.nonce),
+        tokenDigest: digest(token),
+      },
     };
   }
 
@@ -104,6 +124,10 @@ export class BotBlockerVisitorTokenService {
     }
     return this.#secret;
   }
+}
+
+function digest(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
 }
 
 function authenticationError(): BotBlockerRuntimeError {

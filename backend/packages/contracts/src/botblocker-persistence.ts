@@ -12,6 +12,7 @@ import {
   TrustedProxyIpSchema,
 } from "./botblocker.js";
 import { VerificationTypeSchema } from "./verification.js";
+import { RapidAuthRequestSchema } from "./botblocker-api-runtime.js";
 import {
   FINGERPRINT_COLLECTOR_VERSION,
   FINGERPRINT_VECTOR_VERSION,
@@ -34,6 +35,9 @@ const RetainedRecordSchema = z.object({
 export const ServerFingerprintHashSchema = z
   .string()
   .regex(/^[a-f0-9]{64}$/, "Fingerprint hash must be lowercase SHA-256 hex");
+const Sha256DigestSchema = z
+  .string()
+  .regex(/^[a-f0-9]{64}$/, "Digest must be lowercase SHA-256 hex");
 
 export const FINGERPRINT_VERIFY_LOOKUP_RECIPE_VERSION = 1;
 
@@ -150,7 +154,7 @@ export const IpObservationSchema = z
  * chain (Phase 16 step 7), taken once at gate-session creation. Purely
  * informational network input — no final weighted/thresholded decision is
  * derived from it here (Phase 17 scope). */
-const GateSessionNetworkClassificationSchema = z
+export const GateSessionNetworkClassificationSchema = z
   .object({
     asn: z.number().int().positive(),
     asnOrg: z.string().min(1).max(256),
@@ -162,16 +166,42 @@ const GateSessionNetworkClassificationSchema = z
 
 /** Session-level snapshot of an awaited external vendor lookup, taken only
  * when the resolved ASN type required it. */
-const GateSessionIpReputationSchema = z
+export const GateSessionIpReputationSchema = z
   .object({
     vendor: z.string().min(1).max(128),
     score: z.number(),
   })
   .strict();
 
+export const InitialSessionRequestSnapshotSchema = z
+  .object({
+    request: RapidAuthRequestSchema,
+    risk: z
+      .object({
+        ipBlacklisted: z.boolean().optional(),
+        latestDecision: BotBlockerDecisionOutcomeSchema.optional(),
+        networkClassification: GateSessionNetworkClassificationSchema.optional(),
+        ipReputation: GateSessionIpReputationSchema.optional(),
+      })
+      .strict(),
+    serverObservedAt: z.string().datetime(),
+  })
+  .strict();
+
+export const VisitorTokenMetadataSchema = z
+  .object({
+    tokenId: OpaqueIdSchema,
+    expiresAt: z.string().datetime(),
+    nonceDigest: Sha256DigestSchema,
+    tokenDigest: Sha256DigestSchema,
+  })
+  .strict();
+
 export const GateSessionRecordSchema = ScopedRecordSchema.extend({
   gateSessionId: OpaqueIdSchema,
   userIntelligenceId: OpaqueIdSchema,
+  initialRequest: InitialSessionRequestSnapshotSchema,
+  visitorToken: VisitorTokenMetadataSchema.optional(),
   ip: TrustedProxyIpSchema.optional(),
   state: z.enum(["active", "ended"]),
   latestDecision: BotBlockerDecisionOutcomeSchema.optional(),
@@ -190,6 +220,16 @@ export const GateSessionRecordSchema = ScopedRecordSchema.extend({
         code: "custom",
         message: "Ended gate sessions require endedAt",
         path: ["endedAt"],
+      });
+    }
+    if (
+      record.initialRequest.request.siteId !== record.siteId ||
+      record.initialRequest.request.gateSessionId !== record.gateSessionId
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "Initial request must match its scoped gate session",
+        path: ["initialRequest", "request"],
       });
     }
     if (
@@ -235,11 +275,38 @@ const RiskEventRecordBaseSchema = ScopedRecordSchema.extend({
   riskEventId: OpaqueIdSchema,
   userIntelligenceId: OpaqueIdSchema,
   gateSessionId: OpaqueIdSchema,
-  reportSequence: z.number().int().nonnegative(),
+  reportSequence: z.number().int().min(-1),
   eventIndex: z.number().int().nonnegative(),
   occurredAt: z.string().datetime(),
 })
   .extend(RetainedRecordSchema.shape);
+
+export const InitialRequestEventRecordSchema = RiskEventRecordBaseSchema.extend({
+  recordType: z.literal("initial_request"),
+  reportSequence: z.literal(-1),
+  eventIndex: z.literal(0),
+  initialRequest: InitialSessionRequestSnapshotSchema,
+})
+  .strict()
+  .superRefine((record, context) => {
+    if (
+      record.initialRequest.request.siteId !== record.siteId ||
+      record.initialRequest.request.gateSessionId !== record.gateSessionId
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "Initial request must match its scoped risk event",
+        path: ["initialRequest", "request"],
+      });
+    }
+    if (Date.parse(record.retentionExpiresAt) <= Date.parse(record.occurredAt)) {
+      context.addIssue({
+        code: "custom",
+        message: "retentionExpiresAt must follow occurredAt",
+        path: ["retentionExpiresAt"],
+      });
+    }
+  });
 
 export const BehaviorReportEventRecordSchema = RiskEventRecordBaseSchema.extend({
   recordType: z.literal("behavior_report"),
@@ -314,6 +381,7 @@ export const RiskSignalEventRecordSchema = RiskEventRecordBaseSchema.extend({
   });
 
 export const DurableRiskEventRecordSchema = z.discriminatedUnion("recordType", [
+  InitialRequestEventRecordSchema,
   BehaviorReportEventRecordSchema,
   RiskSignalEventRecordSchema,
 ]);
@@ -361,6 +429,10 @@ export const BotBlockerChallengeRecordSchema = ScopedRecordSchema.extend({
   });
 
 export type GateSessionRecord = z.infer<typeof GateSessionRecordSchema>;
+export type InitialSessionRequestSnapshot = z.infer<
+  typeof InitialSessionRequestSnapshotSchema
+>;
+export type VisitorTokenMetadata = z.infer<typeof VisitorTokenMetadataSchema>;
 export type UserIntelligenceRecord = z.infer<typeof UserIntelligenceRecordSchema>;
 export type FingerprintDataRecord = z.infer<typeof FingerprintDataRecordSchema>;
 export type FingerprintVerifySource = z.infer<

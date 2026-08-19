@@ -5,6 +5,7 @@ import type {
   BehaviorReport,
   BrowserEvidence,
   FingerprintVector,
+  RapidAuthRequest,
   RiskEventBatch,
 } from "@powerotp/contracts";
 
@@ -102,6 +103,35 @@ function riskBatch(sequence: number): RiskEventBatch {
   };
 }
 
+function rapidRequest(
+  gateSessionId = "bgs_session_123456789",
+  clientIp = "203.0.113.5",
+): RapidAuthRequest {
+  return {
+    protocolVersion: 1,
+    siteId: owner.siteId,
+    gateSessionId,
+    audience,
+    nonce: "nonce_initial_request_123456",
+    issuedAt: now.getTime(),
+    payload: {
+      gateSessionId,
+      request: {
+        siteId: owner.siteId,
+        clientIp,
+        method: "GET",
+        path: "/checkout",
+      },
+      browser: {
+        protocolVersion: 1,
+        evidence: evidence(),
+        fingerprint: fingerprint(),
+        proofs: {},
+      },
+    },
+  };
+}
+
 class MemoryIngestionStore {
   readonly sessions = new Map<string, GateSessionDocument>();
   readonly behaviorReports = new Map<string, BehaviorReport>();
@@ -117,10 +147,10 @@ class MemoryIngestionStore {
   openGateSession(input: {
     scope: BotBlockerScope;
     gateSessionId: string;
-    fingerprint?: FingerprintVector;
+    initialRequest: RapidAuthRequest;
     verifyHashSecret?: string;
     ip?: string;
-    evidence: BrowserEvidence;
+    ipBlacklisted?: boolean;
     now: Date;
   }) {
     const existing = this.sessions.get(input.gateSessionId);
@@ -133,6 +163,15 @@ class MemoryIngestionStore {
       _id: input.gateSessionId,
       ...input.scope,
       userIntelligenceId: `bui_${input.gateSessionId}`,
+      initialRequest: {
+        request: input.initialRequest,
+        risk: {
+          ...(input.ipBlacklisted !== undefined
+            ? { ipBlacklisted: input.ipBlacklisted }
+            : {}),
+        },
+        serverObservedAt: input.now,
+      },
       ...(input.ip ? { ip: input.ip } : {}),
       state: "active",
       lastAppliedSequence: -1,
@@ -140,10 +179,22 @@ class MemoryIngestionStore {
       lastObservedAt: input.now,
       createdAt: input.now,
       updatedAt: input.now,
-      retentionExpiresAt: new Date(input.now.getTime() + 548 * 86_400_000),
+      retentionExpiresAt: new Date(input.now.getTime() + 90 * 86_400_000),
     };
     this.sessions.set(input.gateSessionId, session);
     return Promise.resolve(session);
+  }
+
+  saveVisitorTokenMetadata(input: {
+    gateSessionId: string;
+    metadata: NonNullable<GateSessionDocument["visitorToken"]>;
+  }) {
+    const session = this.sessions.get(input.gateSessionId);
+    if (!session) {
+      throw new BotBlockerIngestionPersistenceError("session_not_found");
+    }
+    session.visitorToken = input.metadata;
+    return Promise.resolve();
   }
 
   ingestBehaviorReport(
@@ -199,6 +250,11 @@ describe("BotBlockerIngestionService", () => {
   it("ingests duplicate browser reports idempotently and rejects stale reports", async () => {
     const store = new MemoryIngestionStore();
     const service = createService(store);
+    await service.startSession({
+      scope: owner,
+      gateSessionId: report(1).sequence.gateSessionId,
+      initialRequest: rapidRequest(),
+    });
 
     assert.equal(
       await service.ingestBrowserAssessment(owner, report(1), audience),
@@ -221,7 +277,11 @@ describe("BotBlockerIngestionService", () => {
   it("ingests risk-event batches idempotently in the same ordered session stream", async () => {
     const store = new MemoryIngestionStore();
     const service = createService(store);
-    await service.ingestBrowserAssessment(owner, report(0), audience);
+    await service.startSession({
+      scope: owner,
+      gateSessionId: report(0).sequence.gateSessionId,
+      initialRequest: rapidRequest(),
+    });
 
     assert.equal(await service.ingestRiskEvents(owner, riskBatch(1)), "accepted");
     assert.equal(await service.ingestRiskEvents(owner, riskBatch(1)), "duplicate");
@@ -234,19 +294,24 @@ describe("BotBlockerIngestionService", () => {
     await service.startSession({
       scope: owner,
       gateSessionId: "bgs_hash_one_123456",
-      evidence: evidence(),
-      fingerprint: fingerprint(),
-      trustedClientIp: "2001:0DB8:0:0::1",
+      initialRequest: rapidRequest(
+        "bgs_hash_one_123456",
+        "2001:0DB8:0:0::1",
+      ),
     });
     await service.startSession({
       scope: owner,
       gateSessionId: "bgs_hash_two_123456",
-      evidence: evidence(),
-      fingerprint: fingerprint(),
-      trustedClientIp: "2001:db8::1",
+      initialRequest: rapidRequest(
+        "bgs_hash_two_123456",
+        "2001:db8::1",
+      ),
     });
 
-    assert.deepEqual(store.opened[0]!.fingerprint, fingerprint());
+    assert.deepEqual(
+      store.opened[0]!.initialRequest.payload.browser.fingerprint,
+      fingerprint(),
+    );
     assert.equal(store.opened[0]!.ip, "2001:db8::1");
     assert.equal(
       store.opened[0]!.verifyHashSecret,
@@ -280,7 +345,11 @@ describe("BotBlockerIngestionService", () => {
   it("does not resolve or create another project's visitor session", async () => {
     const store = new MemoryIngestionStore();
     const service = createService(store);
-    await service.ingestBrowserAssessment(owner, report(0), audience);
+    await service.startSession({
+      scope: owner,
+      gateSessionId: report(0).sequence.gateSessionId,
+      initialRequest: rapidRequest(),
+    });
 
     await assert.rejects(
       service.ingestBrowserAssessment(otherProject, report(1), audience),
@@ -302,10 +371,12 @@ describe("BotBlockerIngestionService", () => {
     await service.startSession({
       scope: owner,
       gateSessionId: "bgs_no_secret_123456",
-      evidence: evidence(),
-      fingerprint: fingerprint(),
+      initialRequest: rapidRequest("bgs_no_secret_123456"),
     });
-    assert.deepEqual(store.opened[0]!.fingerprint, fingerprint());
+    assert.deepEqual(
+      store.opened[0]!.initialRequest.payload.browser.fingerprint,
+      fingerprint(),
+    );
     assert.equal(store.opened[0]!.verifyHashSecret, undefined);
   });
 });
