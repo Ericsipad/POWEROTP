@@ -3548,19 +3548,18 @@ into customer-facing browser bundles regardless of what those bundles actually r
 do not reliably tree-shake `export *` re-export chains) — is fixed by physically splitting the
 module graph rather than relying on tree-shaking.
 
-**New `@powerotp/contracts/browser` subpath.** Added `backend/packages/contracts/src/index.browser.ts`,
-a second barrel re-exporting only the closed set of files with zero backend-only structure:
-`botblocker.ts` (wire protocol, browser evidence, behavior report, decision envelope),
-`botblocker-browser.ts` (browser proof evidence, advisory snapshot), `botblocker-clearance.ts`
-(site-clearance wire shapes), `botblocker-proofs.ts` (Passport/PaidTokenPass/risk-event proof
-shapes), `botblocker-signing.ts` (Ed25519 signature wire shapes and canonicalization — never
-private key material), and `fingerprint.ts`/`fingerprint-components.ts` (FingerprintJS vector
-contracts). This exact set was derived by enumerating every symbol gate-core and
-`gate-node/browser.ts` actually import from `@powerotp/contracts` and tracing each to its defining
-file — confirmed by grep, not assumed. `package.json` gained a matching `"./browser"` export
-condition (`types`/`import`), mirroring the existing `@powerotp/gate-node`'s own `"./browser"`
-subpath pattern already in this monorepo. The root `.` export (`index.ts`) is completely unchanged;
-every existing backend/server-side consumer keeps working exactly as before.
+**New `@powerotp/contracts/browser` subpath.** Added
+`backend/packages/contracts/src/index.browser.ts`, an explicit-symbol entry point exposing only the
+runtime values and types used by gate-core and `gate-node/browser.ts`. It deliberately does not use
+`export *`: several required source files mix browser protocol contracts with server-only adapter
+contracts (for example, `botblocker.ts` also defines `SiteCredentialSchema`,
+`BotBlockerWebhookIdSchema`, `RequestContextSchema`, and `TrustedProxyIpSchema`), so another wildcard
+barrel would expose an unnecessarily broad API and continue relying on tree-shaking. The exact
+symbol set was derived by enumerating every import in the browser-reachable consumers and tracing
+each to its defining file. `package.json` gained a matching `"./browser"` export condition
+(`types`/`import`), mirroring the existing `@powerotp/gate-node` `"./browser"` subpath pattern. The
+root `.` export (`index.ts`) is unchanged; existing backend/server-side consumers retain their
+current import path and API.
 
 **Consumers switched to the browser-safe subpath.** All eleven `@powerotp/contracts`-importing files
 in `libraries/gate-core/src` (`controller.ts`, `decision.ts`, `fingerprint-collector.ts`,
@@ -3578,19 +3577,22 @@ sees the boundary before adding a field.
 
 **Verified with a real bundle, not just a name-surface check.** Rebuilt the `gate-next` fixture's
 actual Next.js production client bundle and grepped every compiled `.js` chunk under
-`fixture/.next/static/` for `GateSessionRecordSchema`, `UserIntelligenceRecordSchema`,
-`FingerprintDataRecordSchema`, `PolicyReleaseRecordSchema`, and `OperatorIpBlacklistMutationSchema` —
-zero matches, confirmed before writing any test. Added a permanent regression test asserting exactly
+`fixture/.next/static/` for mixed-module server adapter names (`SiteCredentialSchema`,
+`BotBlockerWebhookIdSchema`, `RequestContextSchema`, `TrustedProxyIpSchema`) and backend persistence/
+admin names (`GateSessionRecordSchema`, `UserIntelligenceRecordSchema`,
+`FingerprintDataRecordSchema`, `PolicyReleaseRecordSchema`,
+`OperatorIpBlacklistMutationSchema`) — zero matches. Added a permanent regression test asserting
 that to `libraries/gate-next/src/react.test.tsx` ("Next production client bundles contain no
 backend-only persistence or admin schema"), alongside the pre-existing credential-leak test. Also
-added `backend/packages/contracts/src/index.browser.test.ts`, a faster unit-level guard asserting a
-list of backend-only-file-unique names (`GateSessionRecordSchema`,
+added `backend/packages/contracts/src/index.browser.test.ts`, a faster unit-level guard asserting
+the browser entry has an exact closed runtime export surface and representative forbidden names
+(`SiteCredentialSchema`, `BotBlockerWebhookIdSchema`, `RequestContextSchema`,
+`TrustedProxyIpSchema`, `GateSessionRecordSchema`,
 `UserIntelligenceRecordSchema`, `FingerprintDataRecordSchema`, `DurableRiskEventRecordSchema`,
 `BotBlockerChallengeRecordSchema`, `PolicyReleaseRecordSchema`, `OperatorIpBlacklistMutationSchema`,
 `OperatorAsnClassificationMutationSchema`, `CustomerVisitorSchema`,
 `BotBlockerSiteConfigurationSchema`, `CustomerRegistrationSchema`, `UpdateProjectSchema`) are present
-on the root export but absent from `./browser`'s export surface, plus a second test that the
-browser-reachable widget contracts it needs are still present there.
+on the root export but absent from `./browser`.
 
 **Focused verification.** Rebuilt and tested every directly affected workspace once each:
 `@powerotp/contracts` build passed, suite passed **187/187** across 47 suites (was 185/185 before
@@ -3599,9 +3601,9 @@ this fix's own two new tests); `@powerotp/gate-core` build passed, suite passed 
 (including the real `next build fixture` production compile), suite passed **28/28** (was 27/27
 before this fix's new bundle-content test); `@powerotp/gate-express` build passed, suite passed
 **22/22**. `tsc -p tsconfig.typecheck.json` (`lint`) passed for `@powerotp/contracts`,
-`@powerotp/gate-core`, and `@powerotp/gate-node`. No full-repository `npm run verify` was run — every
-directly touched or dependent workspace was verified individually instead, and the root `index.ts`
-barrel plus every non-browser consumer were left untouched, so no other workspace could regress.
+`@powerotp/gate-core`, and `@powerotp/gate-node`. No full-repository `npm run verify` was run; every
+directly touched or dependent workspace was verified individually, while the root `index.ts` barrel
+and non-browser consumer imports remained unchanged.
 
 **Explicitly not shipped.** This fix touches only the contracts export boundary and its direct
 browser-reachable consumers. No Phase 17 runtime work (profile scoring, callbacks, reducer), site-

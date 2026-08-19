@@ -81,6 +81,10 @@ test("Next production client bundles contain no backend-only persistence or admi
   const bundle = (await Promise.all(files.map((file) => readFile(file, "utf8")))).join("\n");
   for (
     const backendOnlyName of [
+      "SiteCredentialSchema",
+      "BotBlockerWebhookIdSchema",
+      "RequestContextSchema",
+      "TrustedProxyIpSchema",
       "GateSessionRecordSchema",
       "UserIntelligenceRecordSchema",
       "FingerprintDataRecordSchema",

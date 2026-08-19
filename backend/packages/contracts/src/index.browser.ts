@@ -16,28 +16,55 @@
  * `docs/POWEROTP_BOTBLOCKER_AS_BUILT.md` for the incident that first
  * surfaced this and the resolution this file is part of.
  *
- * This barrel re-exports only the closed set of files that contain zero
- * backend-only structure: the BotBlocker wire protocol, browser-evidence,
- * decision, and behavior-report contracts (`botblocker.ts`); the browser
- * proof-evidence and advisory-snapshot contracts (`botblocker-browser.ts`);
- * the unsigned/signed site-clearance wire shapes (`botblocker-clearance.ts`);
- * the Passport/PaidTokenPass/risk-event proof shapes
- * (`botblocker-proofs.ts`); the Ed25519 signature/artifact wire shapes and
- * canonicalization helper, never private key material
- * (`botblocker-signing.ts`); and the FingerprintJS vector/component contracts
- * (`fingerprint.ts`, `fingerprint-components.ts`).
+ * This entry point intentionally uses explicit symbol exports. Some source
+ * files mix browser protocol contracts with server-only contracts (for
+ * example `botblocker.ts` also defines `SiteCredentialSchema`), so replacing
+ * the root barrel with another `export *` barrel would still expose an
+ * unnecessarily broad public API and keep relying on tree-shaking.
  *
  * Before adding a new export here, confirm the source file contains no
  * MongoDB document schema, HMAC secret, admin/control-plane contract, or
  * other server-only structure — and add it to
- * `libraries/gate-node/src/browser.test.ts` or
- * `backend/packages/contracts/src/index.browser.test.ts`'s guard list if it
- * is a name a future backend-only file might plausibly reuse.
+ * `backend/packages/contracts/src/index.browser.test.ts`'s required/forbidden
+ * export lists.
  */
-export * from "./botblocker.js";
-export * from "./botblocker-browser.js";
-export * from "./botblocker-clearance.js";
-export * from "./botblocker-proofs.js";
-export * from "./botblocker-signing.js";
-export * from "./fingerprint.js";
-export * from "./fingerprint-components.js";
+export {
+  BEHAVIOR_REPORT_INITIAL_DELAY_MS,
+  BEHAVIOR_REPORT_RECURRING_INTERVAL_MS,
+  BehaviorReportSchema,
+  BOTBLOCKER_PROTOCOL_VERSION,
+  BROWSER_ENVIRONMENT_EVIDENCE_VERSION,
+  BrowserEnvironmentEvidenceSchema,
+  BrowserEvidenceSchema,
+  DecisionRevisionEnvelopeSchema,
+  DecisionTimeoutMsSchema,
+  POINTER_HEATMAP_GRID_SIZE,
+  browserAutomationIndicators,
+  isStaleSequence,
+  type BehaviorReport,
+  type BotBlockerDecisionOutcome,
+  type BrowserAutomationIndicator,
+  type BrowserEvidence,
+  type ClickObservation,
+  type DecisionRevisionEnvelope,
+  type PartialBehaviorReportReason,
+  type ReportSequence,
+} from "./botblocker.js";
+export {
+  GateRecommendationSnapshotSchema,
+  InitialBrowserProofEvidenceSchema,
+  OtpLaunchMetadataSchema,
+  type GateRecommendationSnapshot,
+  type InitialBrowserProofEvidence,
+} from "./botblocker-browser.js";
+export {
+  FINGERPRINT_COLLECTOR_VERSION,
+  FINGERPRINT_VECTOR_VERSION,
+  FingerprintVectorSchema,
+  type FingerprintUnavailableStatus,
+  type FingerprintVector,
+} from "./fingerprint.js";
+export {
+  FingerprintComponentValueSchemas,
+  fingerprintComponentNames,
+} from "./fingerprint-components.js";
