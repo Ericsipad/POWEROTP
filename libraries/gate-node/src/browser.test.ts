@@ -48,7 +48,7 @@ test("browser bridge derives sensor sequence from trusted bootstrap and applies 
       const candidate = body(init).candidate;
       return json({ verified: true, decision: candidate });
     }
-    if (path === "/_powerotp/browser-assessment") {
+    if (path === "/_powerotp/report") {
       reports.push(JSON.parse(String(init?.body)));
       return json(decisionResponse(decision(5, "allow")));
     }

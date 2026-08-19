@@ -174,7 +174,7 @@ test("customer handlers continue before pending or failing first-contact service
     const { origin, server } = await start(
       {
         decisionTimeoutMs: 2_000,
-        services: { requestDecision },
+        services: { submitReport: requestDecision },
       },
       (app) => app.use(stateJsonHandler),
     );
@@ -227,7 +227,7 @@ test("JSON and multipart uploads pass through without body consumption", async (
 test("streaming and compressed responses are not buffered or rewritten", async () => {
   const { origin } = await start(
     {
-      services: { requestDecision: () => new Promise<never>(() => undefined) },
+      services: { submitReport: () => new Promise<never>(() => undefined) },
     },
     (app) => {
       app.get("/stream", (_request, response) => {

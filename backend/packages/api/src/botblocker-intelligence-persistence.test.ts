@@ -73,7 +73,6 @@ function dataDb(): Db {
       ...ownerScope,
       gateSessionId: "bgs_shared_session",
       reportSequence: 1,
-      eventIndex: 0,
     }],
   } satisfies Record<string, Record<string, unknown>[]>;
 
@@ -189,7 +188,6 @@ describe("BotBlocker intelligence persistence", () => {
       (index) =>
         index.collection === "riskEvents" &&
         index.keys.reportSequence === 1 &&
-        index.keys.eventIndex === 1 &&
         index.options?.unique === true,
     ));
     assert.ok(captured.some(

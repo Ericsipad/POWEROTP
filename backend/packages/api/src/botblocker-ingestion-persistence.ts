@@ -1,20 +1,16 @@
 import { isDeepStrictEqual } from "node:util";
 
-import type {
-  BehaviorReport,
-  RiskEventBatch,
-} from "@powerotp/contracts";
+import type { CanonicalReportRequest } from "@powerotp/contracts";
 import type { ClientSession, Db, MongoClient } from "mongodb";
 
 import {
   botBlockerRetentionExpiresAt,
   botBlockerSessionInputRetentionExpiresAt,
   createRiskEventId,
-  type BehaviorReportEventDocument,
   type BotBlockerScope,
+  type CanonicalReportServerEvidence,
   type DurableRiskEventDocument,
   type GateSessionDocument,
-  type RiskSignalEventDocument,
   type UserIntelligenceDocument,
 } from "./botblocker-intelligence-persistence.js";
 import {
@@ -100,44 +96,29 @@ export class BotBlockerIngestionPersistence {
     return this.#sessions.saveVisitorTokenMetadata(input);
   }
 
-  async ingestBehaviorReport(
+  async ingestReport(
     scope: BotBlockerScope,
-    report: BehaviorReport,
-    pageUrl: string,
+    report: CanonicalReportRequest,
+    serverEvidence: CanonicalReportServerEvidence,
+    pageUrl: string | undefined,
     now: Date,
   ): Promise<BotBlockerIngestionResult> {
-    const gateSessionId = report.sequence.gateSessionId;
-    const reportSequence = report.sequence.sequence;
-    const existing = await this.#riskEvents.findOne({
-      ...scope,
-      gateSessionId,
-      reportSequence,
-      eventIndex: 0,
-    });
+    const { gateSessionId, reportSequence } = report;
+    const key = { ...scope, gateSessionId, reportSequence };
+    const existing = await this.#riskEvents.findOne(key);
     if (existing) {
-      return existing.recordType === "behavior_report" &&
-          existing.pageUrl === pageUrl &&
-          isDeepStrictEqual(existing.report, report)
+      return sameReport(existing, report, pageUrl)
         ? "duplicate"
         : "stale";
     }
 
     let outcome: BotBlockerIngestionResult = "stale";
+    let userIntelligenceId: string | undefined;
     await this.#client.withSession(async (session) => {
       await session.withTransaction(async () => {
-        const replay = await this.#riskEvents.findOne(
-          {
-            ...scope,
-            gateSessionId,
-            reportSequence,
-            eventIndex: 0,
-          },
-          { session },
-        );
+        const replay = await this.#riskEvents.findOne(key, { session });
         if (replay) {
-          outcome = replay.recordType === "behavior_report" &&
-              replay.pageUrl === pageUrl &&
-              isDeepStrictEqual(replay.report, report)
+          outcome = sameReport(replay, report, pageUrl)
             ? "duplicate"
             : "stale";
           return;
@@ -150,180 +131,67 @@ export class BotBlockerIngestionPersistence {
           session,
         );
         if (!gateSession) return;
+        userIntelligenceId = gateSession.userIntelligenceId;
 
-        const occurredAt = new Date(report.sequence.issuedAt);
-        const document: BehaviorReportEventDocument = {
+        const document: DurableRiskEventDocument = {
           _id: createRiskEventId(),
           ...scope,
-          userIntelligenceId: gateSession.userIntelligenceId,
+          userIntelligenceId,
           gateSessionId,
           reportSequence,
-          eventIndex: 0,
-          recordType: "behavior_report",
-          pageUrl,
+          recordType: "canonical_report",
           report,
-          occurredAt,
+          serverEvidence,
+          ...(pageUrl ? { pageUrl } : {}),
+          occurredAt: new Date(report.issuedAt),
           createdAt: now,
           updatedAt: now,
-          retentionExpiresAt:
-            botBlockerSessionInputRetentionExpiresAt(occurredAt),
+          retentionExpiresAt: botBlockerSessionInputRetentionExpiresAt(
+            new Date(report.issuedAt),
+          ),
         };
         await this.#riskEvents.insertOne(document, { session });
+
+        const behavior = report.payload.behaviorReport;
         await this.#userIntelligence.updateOne(
-          { _id: gateSession.userIntelligenceId, ...scope },
+          { _id: userIntelligenceId, ...scope },
           {
             $set: {
-              latestEvidence: report.evidence,
+              ...(behavior ? { latestEvidence: behavior.evidence } : {}),
               lastObservedAt: now,
               updatedAt: now,
               retentionExpiresAt: botBlockerRetentionExpiresAt(now),
             },
-            $inc: {
-              behaviorReportCount: 1,
-              ...(report.evidence.pageView
-                ? {
-                    pageViewCount: 1,
-                    totalPageDurationMs: report.evidence.pageView.durationMs,
-                    totalActiveDurationMs:
-                      report.evidence.pageView.activeDurationMs,
-                  }
-                : {}),
-            },
+            ...(behavior
+              ? {
+                  $inc: {
+                    behaviorReportCount: 1,
+                    ...(behavior.evidence.pageView
+                      ? {
+                          pageViewCount: 1,
+                          totalPageDurationMs:
+                            behavior.evidence.pageView.durationMs,
+                          totalActiveDurationMs:
+                            behavior.evidence.pageView.activeDurationMs,
+                        }
+                      : {}),
+                  },
+                }
+              : {}),
           },
           { session },
         );
         outcome = "accepted";
       });
     });
-    if ((outcome as BotBlockerIngestionResult) === "accepted") {
-      const gateSession = await this.#gateSessions.findOne({
-        _id: gateSessionId,
-        ...scope,
-      });
-      if (gateSession) {
-        const score = await this.scoreProfile?.(
-          scope,
-          gateSession.userIntelligenceId,
-        );
-        if (score !== undefined) {
-          await this.notifyDataReady?.(scope, gateSessionId);
-        }
-      }
-    }
-    return outcome;
-  }
 
-  async ingestRiskEvents(
-    scope: BotBlockerScope,
-    batch: RiskEventBatch,
-    now: Date,
-  ): Promise<BotBlockerIngestionResult> {
-    const gateSessionId = batch.sequence.gateSessionId;
-    const reportSequence = batch.sequence.sequence;
-    const existing = await Promise.all(
-      batch.events.map((_, index) =>
-        this.#riskEvents.findOne({
-          ...scope,
-          gateSessionId,
-          reportSequence,
-          eventIndex: index + 1,
-        })
-      ),
-    );
-    if (existing.some(Boolean)) {
-      return existing.every((document, index) =>
-        document?.recordType === "risk_signal" &&
-        isDeepStrictEqual(document.sequence, batch.sequence) &&
-        isDeepStrictEqual(document.event, batch.events[index])
-      )
-        ? "duplicate"
-        : "stale";
-    }
-
-    let outcome: BotBlockerIngestionResult = "stale";
-    await this.#client.withSession(async (session) => {
-      await session.withTransaction(async () => {
-        const replays = await Promise.all(
-          batch.events.map((_, index) =>
-            this.#riskEvents.findOne(
-              {
-                ...scope,
-                gateSessionId,
-                reportSequence,
-                eventIndex: index + 1,
-              },
-              { session },
-            )
-          ),
-        );
-        if (replays.some(Boolean)) {
-          outcome = replays.every((document, index) =>
-            document?.recordType === "risk_signal" &&
-            isDeepStrictEqual(document.sequence, batch.sequence) &&
-            isDeepStrictEqual(document.event, batch.events[index])
-          )
-            ? "duplicate"
-            : "stale";
-          return;
-        }
-        const gateSession = await this.#advanceSequence(
-          scope,
-          gateSessionId,
-          reportSequence,
-          now,
-          session,
-        );
-        if (!gateSession) return;
-
-        const documents: RiskSignalEventDocument[] = batch.events.map(
-          (event, index) => {
-            const occurredAt = new Date(event.occurredAt);
-            return {
-              _id: createRiskEventId(),
-              ...scope,
-              userIntelligenceId: gateSession.userIntelligenceId,
-              gateSessionId,
-              reportSequence,
-              eventIndex: index + 1,
-              recordType: "risk_signal",
-              sequence: batch.sequence,
-              event,
-              occurredAt,
-              createdAt: now,
-              updatedAt: now,
-              retentionExpiresAt:
-                botBlockerSessionInputRetentionExpiresAt(occurredAt),
-            };
-          },
-        );
-        await this.#riskEvents.insertMany(documents, { session });
-        await this.#userIntelligence.updateOne(
-          { _id: gateSession.userIntelligenceId, ...scope },
-          {
-            $set: {
-              lastObservedAt: now,
-              updatedAt: now,
-              retentionExpiresAt: botBlockerRetentionExpiresAt(now),
-            },
-          },
-          { session },
-        );
-        outcome = "accepted";
-      });
-    });
-    if ((outcome as BotBlockerIngestionResult) === "accepted") {
-      const gateSession = await this.#gateSessions.findOne({
-        _id: gateSessionId,
-        ...scope,
-      });
-      if (gateSession) {
-        const score = await this.scoreProfile?.(
-          scope,
-          gateSession.userIntelligenceId,
-        );
-        if (score !== undefined) {
-          await this.notifyDataReady?.(scope, gateSessionId);
-        }
+    if (
+      (outcome as BotBlockerIngestionResult) === "accepted" &&
+      userIntelligenceId
+    ) {
+      const score = await this.scoreProfile?.(scope, userIntelligenceId);
+      if (score !== undefined) {
+        await this.notifyDataReady?.(scope, gateSessionId);
       }
     }
     return outcome;
@@ -353,4 +221,14 @@ export class BotBlockerIngestionPersistence {
       { returnDocument: "after", session },
     );
   }
+}
+
+function sameReport(
+  existing: DurableRiskEventDocument,
+  report: CanonicalReportRequest,
+  pageUrl: string | undefined,
+): boolean {
+  return existing.recordType === "canonical_report" &&
+    isDeepStrictEqual(existing.report, report) &&
+    existing.pageUrl === pageUrl;
 }

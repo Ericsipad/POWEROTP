@@ -20,6 +20,7 @@ import { HttpInputError, readEmptyBody, readJsonBody, sendJson } from "./http.js
 import {
   beginDecision,
   bootstrapProtocolVersion,
+  createBehaviorReportRequest,
   normalizeChallenge,
   safeDecisionResult,
   scopedVisitorAuthorization,
@@ -185,7 +186,7 @@ export async function handleBridge(
       sendJson(response, 200, launch.data);
       return true;
     }
-    if (path === "/_powerotp/browser-assessment" && request.method === "POST") {
+    if (path === "/_powerotp/report" && request.method === "POST") {
       const parsed = BehaviorReportSchema.safeParse(
         await readJsonBody(request, options.limits.maxBodyBytes),
       );
@@ -204,7 +205,18 @@ export async function handleBridge(
         return true;
       }
       const result = await Promise.resolve()
-        .then(() => options.services.assessBrowser(parsed.data, authorization, options.session))
+        .then(() =>
+          options.services.submitReport(
+            createBehaviorReportRequest({
+              siteId: options.siteId,
+              audience: options.audience,
+              report: parsed.data,
+            }),
+            authorization,
+            options.session,
+          )
+        )
+        .then(laterReportResult)
         .catch(() => UNAVAILABLE);
       const offline = BotBlockerOfflineResponseSchema.safeParse(result);
       if (offline.success && !retainsActiveOtp(options.session)) {
@@ -365,6 +377,8 @@ async function decision(options: BridgeOptions): Promise<DecisionServiceResult> 
     return UNAVAILABLE;
   }
   return beginDecision({
+    siteId: options.siteId,
+    audience: options.audience,
     context: options.session.requestContext,
     initialBrowser: options.session.initialBrowser,
     siteCredential: options.siteCredential,
@@ -372,7 +386,21 @@ async function decision(options: BridgeOptions): Promise<DecisionServiceResult> 
     session: options.session,
     services: options.services,
     save: () => Promise.resolve(options.store.set(options.session)),
+    now: options.now,
   });
+}
+
+function laterReportResult(
+  result: Awaited<ReturnType<GateNodeServices["submitReport"]>>,
+): DecisionServiceResult {
+  if (result.status === "ready") return UNAVAILABLE;
+  if (result.status !== "decision") return result;
+  return {
+    status: "decision",
+    candidate: result.candidate,
+    ...(result.clearance !== undefined ? { clearance: result.clearance } : {}),
+    ...(result.challenge ? { challenge: result.challenge } : {}),
+  };
 }
 
 export async function issueClearance(

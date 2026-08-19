@@ -29,6 +29,11 @@ export function getBotBlockerArchitectureOverview() {
       "@powerotp/gate-node is the single server authority behind all three wrappers " +
       "(raw Node HTTP, Express, Next.js). Express and Next.js delegate to it rather than " +
       "reimplementing verification, session, or decision logic.",
+    reportTransport:
+      "The shared authority sends the first contact and every later update through the same " +
+      "POST /v1/botblocker/reports/{webhookId} contract. The first report uses the server-only " +
+      "site credential and receives the scoped visitor token; later reports use only that " +
+      "server-held token.",
     otpOpener:
       "gate.openOtp() takes no arguments — no OTP type, method, policy, or content. POWEROTP " +
       "resolves the authenticated site/session decision server-side and returns only short-lived " +

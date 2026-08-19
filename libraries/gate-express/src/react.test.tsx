@@ -113,7 +113,7 @@ test("React root starts the trusted bridge sensor and applies decision revisions
         decision: JSON.parse(String(init?.body)).candidate,
       });
     }
-    if (path === "/_powerotp/browser-assessment") {
+    if (path === "/_powerotp/report") {
       reports.push(JSON.parse(String(init?.body)));
       return json({ status: "decision", candidate: decision(7) });
     }

@@ -31,7 +31,7 @@ test("signed clearance is local, bound, and cannot override active OTP", async (
   const adapter = createPowerOtpNext(baseOptions({
     sessionStore: store,
     services: {
-      requestDecision() {
+      submitReport() {
         decisionCalls += 1;
         return Promise.resolve(unavailable());
       },
@@ -88,7 +88,7 @@ test("signed clearance is local, bound, and cannot override active OTP", async (
 test("late allow issues clearance only after decision and clearance verification", async () => {
   const adapter = createPowerOtpNext(baseOptions({
     services: {
-      requestDecision: async (_context, session) => {
+      submitReport: async (_report, _authorization, session) => {
         const now = Date.now();
         return {
           status: "decision",
@@ -140,7 +140,7 @@ test("timeout publishes fail-open while pending work can publish a late allow", 
   const adapter = createPowerOtpNext(baseOptions({
     decisionTimeoutMs: 50,
     services: {
-      requestDecision(_request, session) {
+      submitReport(_report, _authorization, session) {
         decisionSession = session;
         return pending;
       },
@@ -189,10 +189,17 @@ test("first contact uses the credential and later calls use only the server-held
   let laterToken: string | undefined;
   const adapter = createPowerOtpNext(baseOptions({
     services: {
-      requestDecision(request, session) {
+      submitReport(report, authorization, session) {
+        if (!("siteCredential" in authorization)) {
+          laterToken = authorization.visitorToken;
+          return Promise.resolve({
+            ...unavailable(),
+            leakedToken: authorization.visitorToken,
+          });
+        }
         requestCalls += 1;
-        firstCredential = request.siteCredential;
-        firstPath = request.context.path;
+        firstCredential = authorization.siteCredential;
+        firstPath = report.payload.request?.path;
         return Promise.resolve({
           status: "decision",
           visitorToken,
@@ -200,13 +207,6 @@ test("first contact uses the credential and later calls use only the server-held
         });
       },
       verifyDecision: async (candidate) => ({ verified: true, decision: candidate }),
-      assessBrowser: async (_report, authorization) => {
-        laterToken = authorization.visitorToken;
-        return {
-          ...unavailable(),
-          leakedToken: authorization.visitorToken,
-        };
-      },
     },
   }));
   const initial = await adapter.proxy(request("/private?secret=discarded"), event([]));
@@ -225,7 +225,7 @@ test("first contact uses the credential and later calls use only the server-held
     candidate: deliveredBody.candidate,
   }));
   const assessment = await adapter.route(
-    bridgeRequest("/_powerotp/browser-assessment", gateCookie, {
+    bridgeRequest("/_powerotp/report", gateCookie, {
       protocolVersion: BOTBLOCKER_PROTOCOL_VERSION,
       trigger: "initial",
       sequence: {
@@ -260,7 +260,7 @@ test("late OTP persists across polling failure until authoritative acknowledgeme
   });
   const adapter = createPowerOtpNext(baseOptions({
     services: {
-      requestDecision(_context, session) {
+      submitReport(_report, _authorization, session) {
         decisionSession = session;
         return pending;
       },

@@ -9,7 +9,7 @@ import {
   BotBlockerSessionDataResponseSchema,
   type BotBlockerErrorCode,
   type BotBlockerRuntimeRequestEnvelope,
-  type RapidAuthRequest,
+  type CanonicalReportRequest,
 } from "@powerotp/contracts";
 import { NextResponse, type NextRequest } from "next/server";
 import type { ZodType } from "zod";
@@ -44,10 +44,10 @@ export async function unavailableRuntimeMutation<
   );
 }
 
-export async function rapidAuthMutation(
+export async function reportMutation(
   request: NextRequest,
   webhookId: string,
-  schema: ZodType<RapidAuthRequest>,
+  schema: ZodType<CanonicalReportRequest>,
   hooks: {
     endpointSecret?: string;
     loadContext?: () => Promise<ServerContext>;
@@ -68,52 +68,50 @@ export async function rapidAuthMutation(
   try {
     await enforceRateLimit(
       context.dataStores.rateLimitStore,
-      `rl:botblocker:rapid-auth:ip:${clientIp(request) ?? "unknown"}`,
+      `rl:botblocker:reports:ip:${clientIp(request) ?? "unknown"}`,
       120,
       60,
     );
     const rawBody = await request.json();
     const parsed = schema.safeParse(rawBody);
     if (!parsed.success) return botBlockerError("invalid_request", 400);
-    const body: RapidAuthRequest = parsed.data;
+    const body: CanonicalReportRequest = parsed.data;
+    const initial = body.reportSequence === -1;
     const site = await context.botBlockerRuntimeSecurity.authorizeMutation({
       authorizationHeader:
         request.headers.get("authorization") ?? undefined,
       requestOrigin: request.nextUrl.origin,
       idempotencyKey:
         request.headers.get("idempotency-key") ?? undefined,
-      operation: "rapid-auth",
-      authentication: "site_credential",
+      operation: "reports",
+      authentication: initial ? "site_credential" : "visitor_token",
       runtimeSite,
       body,
       rawBody,
     });
     await enforceRateLimit(
       context.dataStores.rateLimitStore,
-      `rl:botblocker:rapid-auth:site:${site.siteId}`,
+      `rl:botblocker:reports:site:${site.siteId}`,
       600,
       60,
     );
-    const requestIp = body.payload.request.clientIp;
-    const intelligence = await context.botBlockerNetworkIntelligence.resolve(
-      requestIp,
-      new Date(),
-    );
-    await context.botBlockerIngestion.startSession({
-      scope: {
-        customerId: site.customerId,
-        projectId: site.projectId,
-        siteId: site.siteId,
-      },
-      gateSessionId: body.gateSessionId,
-      initialRequest: body,
-      ...(requestIp ? { ipBlacklisted: intelligence.blacklisted } : {}),
-      ...(intelligence.blacklisted ? { latestDecision: "otp" } : {}),
-      ...(intelligence.networkClassification
+    const requestIp = body.payload.request?.clientIp;
+    const intelligence = requestIp
+      ? await context.botBlockerNetworkIntelligence.resolve(requestIp, new Date())
+      : undefined;
+    await context.botBlockerIngestion.ingestReport(site, body, {
+      ...(intelligence ? { ipBlacklisted: intelligence.blacklisted } : {}),
+      ...(intelligence?.blacklisted ? { latestDecision: "otp" } : {}),
+      ...(intelligence?.networkClassification
         ? { networkClassification: intelligence.networkClassification }
         : {}),
-      ...(intelligence.ipReputation ? { ipReputation: intelligence.ipReputation } : {}),
+      ...(intelligence?.ipReputation
+        ? { ipReputation: intelligence.ipReputation }
+        : {}),
     });
+    if (!initial) {
+      return botBlockerUnavailable("not_implemented", false);
+    }
     const issued = context.botBlockerVisitorTokens.issue({
       projectId: site.projectId,
       siteId: site.siteId,
@@ -133,7 +131,7 @@ export async function rapidAuthMutation(
       status: "ready",
       visitorToken: issued.token,
       expiresAt: issued.claims.expiresAt,
-      decision: intelligence.blacklisted
+      decision: intelligence?.blacklisted
         ? { status: "ready", outcome: "otp" }
         : { status: "unavailable", reason: "not_implemented", retryable: false },
     });

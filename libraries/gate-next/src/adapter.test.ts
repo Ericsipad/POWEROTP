@@ -49,7 +49,7 @@ test("native proxy matcher covers application routes and excludes owned routes",
 test("application pages and APIs continue immediately while pending work is retained", async () => {
   const pending = new Promise<never>(() => undefined);
   const adapter = createPowerOtpNext(baseOptions({
-    services: { requestDecision: () => pending },
+    services: { submitReport: () => pending },
   }));
 
   for (const path of ["/account", "/api/private"]) {
@@ -129,7 +129,7 @@ test("dependency rejection and synchronous throws remain optimistic", async () =
     },
   ]) {
     const adapter = createPowerOtpNext(baseOptions({
-      services: { requestDecision },
+      services: { submitReport: requestDecision },
     }));
     const response = await adapter.proxy(request("/private"), event([]));
     assert.equal(response.headers.get("x-middleware-next"), "1");

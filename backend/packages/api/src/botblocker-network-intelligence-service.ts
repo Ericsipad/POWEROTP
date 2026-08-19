@@ -28,8 +28,8 @@ type TypeScoreLookup = Pick<BotBlockerAsnTypeScorePersistence, "listAllScores">;
 type ReputationLookup = Pick<BotBlockerIpReputationService, "getReputation">;
 
 /**
- * Composes the fast-immediate branch's two-step precedence for
- * `rapidAuthMutation` (Phase 16 network-intelligence design, execution step
+ * Composes the canonical first-report branch's two-step precedence
+ * (Phase 16 network-intelligence design, execution step
  * 7 — see the plan's "Runtime integration" mermaid sequence diagram):
  *
  * 1. Dedicated IP-blacklist exact-match lookup. A hit short-circuits here —

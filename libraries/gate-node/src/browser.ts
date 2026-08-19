@@ -131,7 +131,7 @@ export async function createGateBrowserCoordinator(
     sendReport: async (report: BehaviorReport) => {
       const response = await postJson<unknown>(
         fetcher,
-        "/_powerotp/browser-assessment",
+        "/_powerotp/report",
         report,
       );
       if (!isDecisionResponse(response)) return undefined;

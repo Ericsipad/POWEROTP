@@ -1,6 +1,7 @@
 # BotBlocker Phase 17A — Unified risk report and reducer design
 
-**Status: approved design; runtime implementation not started (2026-08-19).**
+**Status: implementation in progress; canonical contract/transport slice complete
+(2026-08-19).**
 This document is the field-by-field authority for Phase 17A implementation-split item 7.
 It supersedes the earlier assumption that initial requests, behavior reports, and risk-signal
 batches should remain separate scoring inputs.
@@ -221,9 +222,9 @@ not fabricate a score or enqueue an update based on uncommitted state.
 
 Execute in separate fresh implementation sessions:
 
-1. **Canonical contract and transport.** Add the unified report contract/route and update the
-   shared Node authority plus inherited Express/Next and MCP templates. Remove the superseded
-   report routes/contracts/branches after consumers move; do not retain duplicate ingestion.
+1. **Status: complete (2026-08-19). Canonical contract and transport.** Added the unified report
+   contract/route, updated the shared Node authority plus inherited Express/Next and MCP templates,
+   and removed the superseded report routes/contracts/branches.
 2. **Risk-event configuration and row scoring.** Add the closed V1 registry, operator
    configuration route/admin rows, restricted evaluation, immutable row score, and field-level
    tests. Seed no configuration.

@@ -1,12 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import type { BehaviorReport, RiskEventBatch } from "@powerotp/contracts";
+import type { CanonicalReportRequest } from "@powerotp/contracts";
 import type { Db, MongoClient } from "mongodb";
 
-import {
-  BotBlockerIngestionPersistence,
-} from "./botblocker-ingestion-persistence.js";
+import { BotBlockerIngestionPersistence } from "./botblocker-ingestion-persistence.js";
 import {
   BOTBLOCKER_SESSION_INPUT_RETENTION_SECONDS,
   type DurableRiskEventDocument,
@@ -15,66 +13,61 @@ import {
 
 const now = new Date("2026-08-16T04:00:00.000Z");
 const scope = {
-  customerId: "usr_owner",
+  customerId: "usr_owner_123456",
   projectId: "prj_owner_123456789",
   siteId: "bbs_owner_123456789",
 };
 const otherScope = {
-  customerId: "usr_owner",
+  customerId: "usr_owner_123456",
   projectId: "prj_other_123456789",
   siteId: "bbs_other_123456789",
 };
 const pageUrl = "https://customer.example/account";
 
-function behaviorReport(sequence: number): BehaviorReport {
-  return {
-    protocolVersion: 1,
-    trigger: sequence === 0 ? "initial" : "recurring",
-    sequence: {
-      gateSessionId: "bgs_session_123456789",
-      sequence,
-      issuedAt: now.getTime() - 1_000,
-    },
-    evidence: {
-      routePath: "/account",
-      clicks: [{ category: "link", powerOtpId: "profile" }],
-      mouseDirectness: { averageDirectnessRatio: 0.5, sampleCount: 1 },
-      scroll: { smoothnessScore: 0.9, highSpeedEventCount: 0 },
-      honeypotActivations: [],
-      environment: {
-        evidenceVersion: 1,
-        sensorVersion: "1.0.0",
-        automationIndicators: [],
-      },
-      pageView: {
-        pageId: "account",
-        pageName: "Account",
-        durationMs: 30_000,
-        activeDurationMs: 28_000,
-        documentWidth: 1_200,
-        documentHeight: 2_400,
-        pointerHeatmap: {
-          gridSize: 32,
-          bins: [{ column: 4, row: 8, sampleCount: 12, dwellMs: 1_000 }],
-        },
-      },
-    },
+function report(sequence: number): CanonicalReportRequest {
+  const order = {
+    gateSessionId: "bgs_session_123456789",
+    sequence,
+    issuedAt: now.getTime() - 1_000,
   };
-}
-
-function riskBatch(sequence: number): RiskEventBatch {
   return {
     protocolVersion: 1,
     siteId: scope.siteId,
-    sequence: {
-      gateSessionId: "bgs_session_123456789",
-      sequence,
-      issuedAt: now.getTime(),
+    gateSessionId: order.gateSessionId,
+    audience: "https://customer.example",
+    reportSequence: sequence,
+    nonce: `report_nonce_${sequence}_123456789`,
+    issuedAt: order.issuedAt,
+    payload: {
+      behaviorReport: {
+        protocolVersion: 1,
+        trigger: sequence === 0 ? "initial" : "recurring",
+        sequence: order,
+        evidence: {
+          routePath: "/account",
+          clicks: [{ category: "link", powerOtpId: "profile" }],
+          mouseDirectness: { averageDirectnessRatio: 0.5, sampleCount: 1 },
+          scroll: { smoothnessScore: 0.9, highSpeedEventCount: 0 },
+          honeypotActivations: [],
+          pageView: {
+            pageId: "account",
+            pageName: "Account",
+            durationMs: 30_000,
+            activeDurationMs: 28_000,
+            documentWidth: 1_200,
+            documentHeight: 2_400,
+            pointerHeatmap: {
+              gridSize: 32,
+              bins: [{ column: 4, row: 8, sampleCount: 12, dwellMs: 1_000 }],
+            },
+          },
+        },
+      },
+      riskSignals: [{
+        kind: "automation_indicator",
+        occurredAt: now.getTime() - 500,
+      }],
     },
-    events: [{
-      kind: "automation_indicator",
-      occurredAt: now.getTime() - 500,
-    }],
   };
 }
 
@@ -83,29 +76,13 @@ function fixture(scorePersisted = true) {
     _id: "bgs_session_123456789",
     ...scope,
     userIntelligenceId: "bui_owner_123456789",
-    initialRequest: {
-      request: {
-        protocolVersion: 1,
-        siteId: scope.siteId,
-        gateSessionId: "bgs_session_123456789",
-        audience: "https://customer.example",
-        nonce: "nonce_initial_request_123456",
-        issuedAt: now.getTime(),
-        payload: {
-          gateSessionId: "bgs_session_123456789",
-          request: {
-            siteId: scope.siteId,
-            method: "GET",
-            path: "/account",
-          },
-          browser: {
-            protocolVersion: 1,
-            evidence: behaviorReport(0).evidence,
-            proofs: {},
-          },
-        },
+    initialReport: {
+      report: {
+        ...report(0),
+        reportSequence: -1,
+        payload: {},
       },
-      risk: {},
+      serverEvidence: {},
       serverObservedAt: now,
     },
     state: "active",
@@ -149,12 +126,13 @@ function fixture(scorePersisted = true) {
           insertOne: async (document: DurableRiskEventDocument) => {
             riskEvents.push(document);
           },
-          insertMany: async (documents: DurableRiskEventDocument[]) => {
-            riskEvents.push(...documents);
-          },
         };
       }
       return {
+        findOne: async () => ({
+          currentScore: { status: "available", score: 42 },
+          updatedAt: now,
+        }),
         updateOne: async (
           _filter: Record<string, unknown>,
           update: { $inc?: Partial<typeof aggregate> },
@@ -194,16 +172,16 @@ function fixture(scorePersisted = true) {
 }
 
 describe("BotBlockerIngestionPersistence", () => {
-  it("persists one sanitized behavior report and treats its replay idempotently", async () => {
+  it("persists one canonical row and treats exact replay idempotently", async () => {
     const state = fixture();
-    const report = behaviorReport(0);
+    const value = report(0);
 
     assert.equal(
-      await state.persistence.ingestBehaviorReport(scope, report, pageUrl, now),
+      await state.persistence.ingestReport(scope, value, {}, pageUrl, now),
       "accepted",
     );
     assert.equal(
-      await state.persistence.ingestBehaviorReport(scope, report, pageUrl, now),
+      await state.persistence.ingestReport(scope, value, {}, pageUrl, now),
       "duplicate",
     );
     assert.equal(state.riskEvents.length, 1);
@@ -216,85 +194,44 @@ describe("BotBlockerIngestionPersistence", () => {
       totalActiveDurationMs: 28_000,
     });
     const stored = state.riskEvents[0]!;
-    assert.equal(stored.recordType, "behavior_report");
+    assert.equal(stored.recordType, "canonical_report");
     assert.equal(stored.pageUrl, pageUrl);
-    assert.deepEqual(stored.report, report);
-    assert.equal(stored.report.evidence.pageView?.activeDurationMs, 28_000);
+    assert.deepEqual(stored.report, value);
+    assert.equal(stored.report.payload.riskSignals?.length, 1);
     assert.equal(
       stored.retentionExpiresAt.getTime() - stored.occurredAt.getTime(),
       BOTBLOCKER_SESSION_INPUT_RETENTION_SECONDS * 1_000,
     );
-    assert.equal(JSON.stringify(stored).includes("pointerCoordinates"), false);
-    assert.equal(JSON.stringify(stored).includes("fingerprintHash"), false);
   });
 
-  it("rejects stale and cross-project behavior reports atomically", async () => {
+  it("rejects changed replay, stale order, and cross-project reports atomically", async () => {
     const state = fixture();
     assert.equal(
-      await state.persistence.ingestBehaviorReport(
-        scope,
-        behaviorReport(2),
-        pageUrl,
-        now,
-      ),
+      await state.persistence.ingestReport(scope, report(2), {}, pageUrl, now),
       "accepted",
     );
     assert.equal(
-      await state.persistence.ingestBehaviorReport(
-        scope,
-        behaviorReport(1),
-        pageUrl,
-        now,
-      ),
+      await state.persistence.ingestReport(scope, report(1), {}, pageUrl, now),
       "stale",
     );
     assert.equal(
-      await state.persistence.ingestBehaviorReport(
+      await state.persistence.ingestReport(
         otherScope,
-        behaviorReport(3),
+        report(3),
+        {},
         pageUrl,
         now,
       ),
       "stale",
     );
     assert.equal(state.riskEvents.length, 1);
-    assert.deepEqual(state.scoringCalls, ["bui_owner_123456789"]);
-    assert.deepEqual(state.callbackCalls, ["bgs_session_123456789"]);
     assert.equal(state.gateSessions[0]!.lastAppliedSequence, 2);
   });
 
-  it("persists ordered risk events once with retention anchored to occurrence", async () => {
-    const state = fixture();
-    const batch = riskBatch(1);
-
-    assert.equal(
-      await state.persistence.ingestRiskEvents(scope, batch, now),
-      "accepted",
-    );
-    assert.equal(
-      await state.persistence.ingestRiskEvents(scope, batch, now),
-      "duplicate",
-    );
-    assert.equal(state.riskEvents.length, 1);
-    assert.deepEqual(state.callbackCalls, ["bgs_session_123456789"]);
-    const stored = state.riskEvents[0]!;
-    assert.equal(stored.recordType, "risk_signal");
-    assert.equal(stored.eventIndex, 1);
-    assert.equal(
-      stored.retentionExpiresAt.getTime() - stored.occurredAt.getTime(),
-      BOTBLOCKER_SESSION_INPUT_RETENTION_SECONDS * 1_000,
-    );
-  });
-
-  it("does not notify when scoring did not persist current state", async () => {
+  it("does not notify when post-commit scoring did not replace current state", async () => {
     const state = fixture(false);
     assert.equal(
-      await state.persistence.ingestBehaviorReport(
-        scope,
-        behaviorReport(0),
-        pageUrl,
-        now,
-      ),
+      await state.persistence.ingestReport(scope, report(0), {}, pageUrl, now),
       "accepted",
     );
     assert.deepEqual(state.scoringCalls, ["bui_owner_123456789"]);

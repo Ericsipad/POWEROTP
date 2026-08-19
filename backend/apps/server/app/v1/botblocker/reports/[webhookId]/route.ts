@@ -1,7 +1,7 @@
-import { RapidAuthRequestSchema } from "@powerotp/contracts";
+import { CanonicalReportRequestSchema } from "@powerotp/contracts";
 
 import { apiRoute } from "@/lib/api-route";
-import { rapidAuthMutation } from "@/lib/botblocker-http";
+import { reportMutation } from "@/lib/botblocker-http";
 
 interface RouteParams {
   params: Promise<{ webhookId: string }>;
@@ -9,5 +9,5 @@ interface RouteParams {
 
 export const POST = apiRoute<RouteParams>(async (request, { params }) => {
   const { webhookId } = await params;
-  return rapidAuthMutation(request, webhookId, RapidAuthRequestSchema);
+  return reportMutation(request, webhookId, CanonicalReportRequestSchema);
 });

@@ -1,9 +1,7 @@
 import { z } from "zod";
 
 import {
-  BotBlockerProtocolVersionSchema,
   HoneypotActivationSchema,
-  ReportSequenceSchema,
   SiteIdSchema,
 } from "./botblocker.js";
 
@@ -86,8 +84,8 @@ export const riskEventKinds = [
 export const RiskEventKindSchema = z.enum(riskEventKinds);
 
 /**
- * One sanitized risk-event observation submitted toward
- * `POST /v1/botblocker/risk-events` (Phase 8 adds the actual route).
+ * One sanitized risk-signal observation submitted within the canonical
+ * `POST /v1/botblocker/reports/{webhookId}` body.
  * Deliberately carries no score/weight/decision field — those are computed
  * centrally (Phase 17), never submitted by the browser/adapter that is
  * being evaluated. `honeypot` reuses `botblocker.ts`'s
@@ -111,18 +109,8 @@ export const RiskEventSchema = z
     }
   });
 
-export const RiskEventBatchSchema = z
-  .object({
-    protocolVersion: BotBlockerProtocolVersionSchema,
-    siteId: SiteIdSchema,
-    sequence: ReportSequenceSchema,
-    events: z.array(RiskEventSchema).min(1).max(200),
-  })
-  .strict();
-
 export type PassportAssertion = z.infer<typeof PassportAssertionSchema>;
 export type PaidTokenPassScope = z.infer<typeof PaidTokenPassScopeSchema>;
 export type PaidTokenPassAssertion = z.infer<typeof PaidTokenPassAssertionSchema>;
 export type RiskEventKind = z.infer<typeof RiskEventKindSchema>;
 export type RiskEvent = z.infer<typeof RiskEventSchema>;
-export type RiskEventBatch = z.infer<typeof RiskEventBatchSchema>;

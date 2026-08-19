@@ -34,9 +34,7 @@ const FRESH_LOOKUP_TTL_MS = 24 * 60 * 60 * 1000;
  * is invalid, no vendor is configured
  * (`BOTBLOCKER_IP_REPUTATION_VENDOR_*` unset), or the vendor call itself
  * fails — so a not-yet-credentialed or momentarily-unavailable vendor
- * never stalls or breaks the response the future `rapidAuthMutation`
- * wiring (step 7, not this session) builds around this. Not called from
- * any route in this session.
+ * never stalls or breaks the canonical first-report response.
  */
 export class BotBlockerIpReputationService {
   readonly #vendor: IpReputationVendorClient | undefined;

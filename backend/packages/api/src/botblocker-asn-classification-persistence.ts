@@ -14,9 +14,8 @@ import type { Collection, Db, Filter } from "mongodb";
  * fabricated type. A later "AI research pass" (not built by this phase)
  * writes real classifications through `upsertClassification` below. This
  * is not a manual override list (the design plan's corrections section
- * rejected that) — it is the join key the fast-immediate branch's
- * ranges -> classification -> type-score chain uses (a later step wires
- * that chain; nothing here is called from `rapidAuthMutation` yet).
+ * rejected that) — it is the join key the canonical first-report branch's
+ * ranges -> classification -> type-score chain uses.
  */
 export interface AsnClassificationDocument {
   _id: number;

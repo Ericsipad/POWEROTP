@@ -365,9 +365,10 @@ admin audit, lookup, and signed snapshots. Allowlist maps to `allow`; blacklist 
 
 ### Phase 17 — Proprietary scoring
 
-**Implementation status:** in progress. Phase 17 execution steps 1–6 are complete. The unified
-risk-report/reducer design for step 7 was approved on 2026-08-19; its three runtime implementation
-slices and the later external-vendor profile integration remain.
+**Implementation status:** in progress. Phase 17 execution steps 1–6 and step 7's canonical
+report/transport slice are complete. The unified risk-report/reducer design for step 7 was
+approved on 2026-08-19; its row-scoring and profile-average runtime slices plus the later
+external-vendor profile integration remain.
 The approved design is saved in
 [`POWEROTP_BOTBLOCKER_PHASE17_PROPRIETARY_SCORING_PLAN.md`](POWEROTP_BOTBLOCKER_PHASE17_PROPRIETARY_SCORING_PLAN.md);
 the approved gate-session synchronization subplan is saved in

@@ -6,16 +6,18 @@ import {
 import {
   PassportAssertionSchema,
   PaidTokenPassAssertionSchema,
-  RiskEventBatchSchema,
+  RiskEventSchema,
 } from "./botblocker-proofs.js";
 import {
   BehaviorReportSchema,
   BotBlockerProtocolVersionSchema,
+  BrowserEvidenceSchema,
   RequestContextSchema,
   SiteCredentialSchema,
   SiteIdSchema,
 } from "./botblocker.js";
 import { InitialBrowserProofEvidenceSchema } from "./botblocker-browser.js";
+import { FingerprintVectorSchema } from "./fingerprint.js";
 
 const OpaqueIdSchema = z.string().min(16).max(128);
 const AudienceSchema = z.string().min(1).max(2_048);
@@ -60,67 +62,52 @@ function runtimeRequest<T extends z.ZodType>(
     .strict();
 }
 
-export const RapidAuthPayloadSchema = z
+/**
+ * One closed report body for first contact and every later update. Each
+ * evidence category is optional and omitted when unavailable; authentication
+ * is selected from `reportSequence` by the HTTP boundary, not by caller data.
+ */
+export const CanonicalReportPayloadSchema = z
   .object({
-    gateSessionId: OpaqueIdSchema,
-    request: RequestContextSchema,
-    browser: InitialBrowserProofEvidenceSchema,
+    request: RequestContextSchema.optional(),
+    browserEvidence: BrowserEvidenceSchema.optional(),
+    fingerprint: FingerprintVectorSchema.optional(),
+    proofs: InitialBrowserProofEvidenceSchema.shape.proofs.optional(),
+    behaviorReport: BehaviorReportSchema.optional(),
+    riskSignals: z.array(RiskEventSchema).min(1).max(200).optional(),
   })
   .strict();
-export const RapidAuthRequestSchema = runtimeRequest(RapidAuthPayloadSchema).superRefine(
+export const CanonicalReportRequestSchema = runtimeRequest(
+  CanonicalReportPayloadSchema,
+)
+  .extend({
+    reportSequence: z.number().int().min(-1),
+  })
+  .strict()
+  .superRefine(
   (request, context) => {
-    if (request.payload.request.siteId !== request.siteId) {
+    if (
+      request.payload.request &&
+      request.payload.request.siteId !== request.siteId
+    ) {
       context.addIssue({
         code: "custom",
         message: "Request context siteId must match the authenticated envelope",
         path: ["payload", "request", "siteId"],
       });
     }
+    const behavior = request.payload.behaviorReport;
     if (
-      request.payload.gateSessionId !== request.gateSessionId ||
-      request.payload.browser.protocolVersion !== request.protocolVersion
+      behavior &&
+      (behavior.protocolVersion !== request.protocolVersion ||
+        behavior.sequence.gateSessionId !== request.gateSessionId ||
+        behavior.sequence.sequence !== request.reportSequence ||
+        behavior.sequence.issuedAt !== request.issuedAt)
     ) {
       context.addIssue({
         code: "custom",
-        message: "Initial session scope must match the authenticated envelope",
-        path: ["payload"],
-      });
-    }
-  },
-);
-
-export const BrowserAssessmentPayloadSchema = z
-  .object({ report: BehaviorReportSchema })
-  .strict();
-export const BrowserAssessmentRequestSchema = runtimeRequest(
-  BrowserAssessmentPayloadSchema,
-).superRefine((request, context) => {
-  if (
-    request.payload.report.protocolVersion !== request.protocolVersion ||
-    request.payload.report.sequence.gateSessionId !== request.gateSessionId
-  ) {
-    context.addIssue({
-      code: "custom",
-      message: "Behavior report protocolVersion must match the authenticated envelope",
-      path: ["payload", "report", "protocolVersion"],
-    });
-  }
-});
-
-export const RiskEventsPayloadSchema = z
-  .object({ batch: RiskEventBatchSchema })
-  .strict();
-export const RiskEventsRequestSchema = runtimeRequest(RiskEventsPayloadSchema).superRefine(
-  (request, context) => {
-    if (
-      request.payload.batch.siteId !== request.siteId ||
-      request.payload.batch.protocolVersion !== request.protocolVersion ||
-      request.payload.batch.sequence.gateSessionId !== request.gateSessionId
-    ) {
-      context.addIssue({
-        code: "custom",
-        message: "Risk-event batch scope must match the authenticated envelope",
-        path: ["payload", "batch"],
+        message: "Behavior report order and scope must match the canonical envelope",
+        path: ["payload", "behaviorReport"],
       });
     }
   },
@@ -230,9 +217,8 @@ export const BotBlockerCredentialRotationResponseSchema = z
 export type BotBlockerRuntimeRequestEnvelope = z.infer<
   typeof BotBlockerRuntimeRequestEnvelopeSchema
 >;
-export type RapidAuthRequest = z.infer<typeof RapidAuthRequestSchema>;
-export type BrowserAssessmentRequest = z.infer<typeof BrowserAssessmentRequestSchema>;
-export type RiskEventsRequest = z.infer<typeof RiskEventsRequestSchema>;
+export type CanonicalReportPayload = z.infer<typeof CanonicalReportPayloadSchema>;
+export type CanonicalReportRequest = z.infer<typeof CanonicalReportRequestSchema>;
 export type CreateChallengeRequest = z.infer<typeof CreateChallengeRequestSchema>;
 export type ReadChallengeRequest = z.infer<typeof ReadChallengeRequestSchema>;
 export type CompleteChallengeRequest = z.infer<typeof CompleteChallengeRequestSchema>;

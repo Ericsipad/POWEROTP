@@ -159,7 +159,7 @@ test("late allow is delivered and issues clearance only after both verifications
   let currentSession: Readonly<GateSession> | undefined;
   const { origin } = await start({
     services: {
-      requestDecision(_context, session) {
+      submitReport(_report, _authorization, session) {
         currentSession = session;
         return pending;
       },
@@ -191,7 +191,7 @@ test("late OTP remains authoritative through polling failure and acknowledgement
   let pollFails = true;
   const { origin } = await start({
     services: {
-      requestDecision: async (_context, session) => ({
+      submitReport: async (_report, _authorization, session) => ({
         status: "decision",
         visitorToken,
         candidate: decision("otp", session),

@@ -2,11 +2,9 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import type {
-  BehaviorReport,
   BrowserEvidence,
+  CanonicalReportRequest,
   FingerprintVector,
-  RapidAuthRequest,
-  RiskEventBatch,
 } from "@powerotp/contracts";
 
 import { BotBlockerRuntimeError } from "./botblocker-errors.js";
@@ -17,6 +15,7 @@ import {
 import { BotBlockerIngestionService } from "./botblocker-ingestion-service.js";
 import type {
   BotBlockerScope,
+  CanonicalReportServerEvidence,
   GateSessionDocument,
 } from "./botblocker-intelligence-persistence.js";
 
@@ -24,11 +23,11 @@ const now = new Date("2026-08-16T04:00:00.000Z");
 const hashSecret = "intelligence-hash-secret-at-least-32-characters";
 const audience = "https://owner.example";
 const owner = {
-  customerId: "usr_owner",
+  customerId: "usr_owner_123456",
   projectId: "prj_owner_123456789",
   siteId: "bbs_owner_123456789",
   enabled: true,
-  allowedOrigins: ["https://owner.example"],
+  allowedOrigins: [audience],
 };
 const otherProject = {
   ...owner,
@@ -43,23 +42,6 @@ function evidence(): BrowserEvidence {
     mouseDirectness: { averageDirectnessRatio: 0.75, sampleCount: 2 },
     scroll: { smoothnessScore: 0.8, highSpeedEventCount: 1 },
     honeypotActivations: [],
-    environment: {
-      evidenceVersion: 1,
-      sensorVersion: "1.0.0",
-      automationIndicators: [],
-    },
-    pageView: {
-      pageId: "checkout",
-      pageName: "Checkout",
-      durationMs: 5_000,
-      activeDurationMs: 4_900,
-      documentWidth: 1_440,
-      documentHeight: 3_200,
-      pointerHeatmap: {
-        gridSize: 32,
-        bins: [{ column: 10, row: 20, sampleCount: 8, dwellMs: 600 }],
-      },
-    },
   };
 }
 
@@ -67,76 +49,73 @@ function fingerprint(): FingerprintVector {
   return {
     fingerprintVersion: 1,
     collectorVersion: "5.2.0",
-    components: {
-      platform: { status: "available", value: "Win32" },
-    },
+    components: { platform: { status: "available", value: "Win32" } },
   };
 }
 
-function report(sequence: number): BehaviorReport {
-  return {
-    protocolVersion: 1,
-    trigger: sequence === 0 ? "initial" : "recurring",
-    sequence: {
-      gateSessionId: "bgs_session_123456789",
-      sequence,
-      issuedAt: now.getTime(),
-    },
-    evidence: evidence(),
-  };
-}
-
-function riskBatch(sequence: number): RiskEventBatch {
-  return {
-    protocolVersion: 1,
-    siteId: owner.siteId,
-    sequence: {
-      gateSessionId: "bgs_session_123456789",
-      sequence,
-      issuedAt: now.getTime(),
-    },
-    events: [{
-      kind: "honeypot_activation",
-      occurredAt: now.getTime(),
-      honeypot: { honeypotId: "decoy-link" },
-    }],
-  };
-}
-
-function rapidRequest(
+function initialReport(
   gateSessionId = "bgs_session_123456789",
   clientIp = "203.0.113.5",
-): RapidAuthRequest {
+): CanonicalReportRequest {
   return {
     protocolVersion: 1,
     siteId: owner.siteId,
     gateSessionId,
     audience,
+    reportSequence: -1,
     nonce: "nonce_initial_request_123456",
     issuedAt: now.getTime(),
     payload: {
-      gateSessionId,
       request: {
         siteId: owner.siteId,
         clientIp,
         method: "GET",
         path: "/checkout",
       },
-      browser: {
+      browserEvidence: evidence(),
+      fingerprint: fingerprint(),
+      proofs: {},
+    },
+  };
+}
+
+function laterReport(
+  sequence: number,
+  gateSessionId = "bgs_session_123456789",
+): CanonicalReportRequest {
+  const reportSequence = {
+    gateSessionId,
+    sequence,
+    issuedAt: now.getTime(),
+  };
+  return {
+    protocolVersion: 1,
+    siteId: owner.siteId,
+    gateSessionId,
+    audience,
+    reportSequence: sequence,
+    nonce: `nonce_later_report_${sequence}_123456`,
+    issuedAt: now.getTime(),
+    payload: {
+      behaviorReport: {
         protocolVersion: 1,
+        trigger: sequence === 0 ? "initial" : "recurring",
+        sequence: reportSequence,
         evidence: evidence(),
-        fingerprint: fingerprint(),
-        proofs: {},
       },
+      riskSignals: [{
+        kind: "honeypot_activation",
+        occurredAt: now.getTime(),
+        honeypot: { honeypotId: "decoy-link" },
+      }],
     },
   };
 }
 
 class MemoryIngestionStore {
   readonly sessions = new Map<string, GateSessionDocument>();
-  readonly behaviorReports = new Map<string, BehaviorReport>();
-  readonly pageUrls: string[] = [];
-  readonly riskEvents = new Map<string, RiskEventBatch>();
+  readonly reports = new Map<string, CanonicalReportRequest>();
+  readonly pageUrls: (string | undefined)[] = [];
   opened: Parameters<MemoryIngestionStore["openGateSession"]>[0][] = [];
 
   findGateSession(scope: BotBlockerScope, gateSessionId: string) {
@@ -152,9 +131,6 @@ class MemoryIngestionStore {
     return session
       ? {
           currentScore: { status: "available" as const, score: 42 },
-          ...(session.latestDecision
-            ? { decision: session.latestDecision }
-            : {}),
           updatedAt: session.updatedAt,
         }
       : undefined;
@@ -163,7 +139,7 @@ class MemoryIngestionStore {
   openGateSession(input: {
     scope: BotBlockerScope;
     gateSessionId: string;
-    initialRequest: RapidAuthRequest;
+    initialReport: CanonicalReportRequest;
     verifyHashSecret?: string;
     ip?: string;
     ipBlacklisted?: boolean;
@@ -179,9 +155,9 @@ class MemoryIngestionStore {
       _id: input.gateSessionId,
       ...input.scope,
       userIntelligenceId: `bui_${input.gateSessionId}`,
-      initialRequest: {
-        request: input.initialRequest,
-        risk: {
+      initialReport: {
+        report: input.initialReport,
+        serverEvidence: {
           ...(input.ipBlacklisted !== undefined
             ? { ipBlacklisted: input.ipBlacklisted }
             : {}),
@@ -213,15 +189,16 @@ class MemoryIngestionStore {
     return Promise.resolve();
   }
 
-  ingestBehaviorReport(
+  ingestReport(
     scope: BotBlockerScope,
-    value: BehaviorReport,
-    pageUrl: string,
+    value: CanonicalReportRequest,
+    _serverEvidence: CanonicalReportServerEvidence,
+    pageUrl: string | undefined,
   ): Promise<BotBlockerIngestionResult> {
-    const session = this.sessions.get(value.sequence.gateSessionId);
+    const session = this.sessions.get(value.gateSessionId);
     if (!session || !sameScope(session, scope)) return Promise.resolve("stale");
-    const key = `${value.sequence.gateSessionId}:${value.sequence.sequence}`;
-    const existing = this.behaviorReports.get(key);
+    const key = `${value.gateSessionId}:${value.reportSequence}`;
+    const existing = this.reports.get(key);
     if (existing) {
       return Promise.resolve(
         JSON.stringify(existing) === JSON.stringify(value)
@@ -229,198 +206,98 @@ class MemoryIngestionStore {
           : "stale",
       );
     }
-    if (value.sequence.sequence <= session.lastAppliedSequence) {
+    if (value.reportSequence <= session.lastAppliedSequence) {
       return Promise.resolve("stale");
     }
-    session.lastAppliedSequence = value.sequence.sequence;
-    this.behaviorReports.set(key, value);
+    session.lastAppliedSequence = value.reportSequence;
+    this.reports.set(key, value);
     this.pageUrls.push(pageUrl);
-    return Promise.resolve("accepted");
-  }
-
-  ingestRiskEvents(
-    scope: BotBlockerScope,
-    value: RiskEventBatch,
-  ): Promise<BotBlockerIngestionResult> {
-    const session = this.sessions.get(value.sequence.gateSessionId);
-    if (!session || !sameScope(session, scope)) return Promise.resolve("stale");
-    const key = `${value.sequence.gateSessionId}:${value.sequence.sequence}`;
-    const existing = this.riskEvents.get(key);
-    if (existing) {
-      return Promise.resolve(
-        JSON.stringify(existing) === JSON.stringify(value)
-          ? "duplicate"
-          : "stale",
-      );
-    }
-    if (value.sequence.sequence <= session.lastAppliedSequence) {
-      return Promise.resolve("stale");
-    }
-    session.lastAppliedSequence = value.sequence.sequence;
-    this.riskEvents.set(key, value);
     return Promise.resolve("accepted");
   }
 }
 
 describe("BotBlockerIngestionService", () => {
-  it("returns bounded authoritative session data for the scoped profile", async () => {
+  it("opens the initial canonical report idempotently with raw fingerprint and IP", async () => {
     const store = new MemoryIngestionStore();
     const service = createService(store);
-    const request = rapidRequest();
-    await service.startSession({
-      scope: owner,
-      gateSessionId: request.gateSessionId,
-      initialRequest: request,
-    });
+    const report = initialReport(
+      "bgs_hash_one_123456",
+      "2001:0DB8:0:0::1",
+    );
+
+    assert.equal(await service.ingestReport(owner, report), "accepted");
+    assert.equal(await service.ingestReport(owner, report), "duplicate");
+    assert.equal(store.sessions.size, 1);
     assert.deepEqual(
-      await service.getCurrentSessionData(
-        owner,
-        request.gateSessionId,
-        "bbd_1234567890123456",
-      ),
-      {
-        apiVersion: "2026-08-04",
-        eventId: "bbd_1234567890123456",
-        projectId: owner.projectId,
-        siteId: owner.siteId,
-        gateSessionId: request.gateSessionId,
-        currentScore: { status: "available", score: 42 },
-        updatedAt: now.toISOString(),
-      },
-    );
-  });
-
-  it("ingests duplicate browser reports idempotently and rejects stale reports", async () => {
-    const store = new MemoryIngestionStore();
-    const service = createService(store);
-    await service.startSession({
-      scope: owner,
-      gateSessionId: report(1).sequence.gateSessionId,
-      initialRequest: rapidRequest(),
-    });
-
-    assert.equal(
-      await service.ingestBrowserAssessment(owner, report(1), audience),
-      "accepted",
-    );
-    assert.equal(
-      await service.ingestBrowserAssessment(owner, report(1), audience),
-      "duplicate",
-    );
-    assert.equal(store.behaviorReports.size, 1);
-    assert.deepEqual(store.pageUrls, ["https://owner.example/checkout"]);
-    await assert.rejects(
-      service.ingestBrowserAssessment(owner, report(0), audience),
-      (error: unknown) =>
-        error instanceof BotBlockerRuntimeError &&
-        error.code === "stale_sequence",
-    );
-  });
-
-  it("ingests risk-event batches idempotently in the same ordered session stream", async () => {
-    const store = new MemoryIngestionStore();
-    const service = createService(store);
-    await service.startSession({
-      scope: owner,
-      gateSessionId: report(0).sequence.gateSessionId,
-      initialRequest: rapidRequest(),
-    });
-
-    assert.equal(await service.ingestRiskEvents(owner, riskBatch(1)), "accepted");
-    assert.equal(await service.ingestRiskEvents(owner, riskBatch(1)), "duplicate");
-    assert.equal(store.riskEvents.size, 1);
-  });
-
-  it("forwards the validated raw fingerprint and normalized raw IP", async () => {
-    const store = new MemoryIngestionStore();
-    const service = createService(store);
-    await service.startSession({
-      scope: owner,
-      gateSessionId: "bgs_hash_one_123456",
-      initialRequest: rapidRequest(
-        "bgs_hash_one_123456",
-        "2001:0DB8:0:0::1",
-      ),
-    });
-    await service.startSession({
-      scope: owner,
-      gateSessionId: "bgs_hash_two_123456",
-      initialRequest: rapidRequest(
-        "bgs_hash_two_123456",
-        "2001:db8::1",
-      ),
-    });
-
-    assert.deepEqual(
-      store.opened[0]!.initialRequest.payload.browser.fingerprint,
+      store.opened[0]!.initialReport.payload.fingerprint,
       fingerprint(),
     );
     assert.equal(store.opened[0]!.ip, "2001:db8::1");
+    assert.equal(store.opened[0]!.verifyHashSecret, hashSecret);
+  });
+
+  it("ingests one ordered row containing behavior and risk signals", async () => {
+    const store = new MemoryIngestionStore();
+    const service = createService(store);
+    await service.ingestReport(owner, initialReport());
+
+    assert.equal(await service.ingestReport(owner, laterReport(0)), "accepted");
+    assert.equal(await service.ingestReport(owner, laterReport(0)), "duplicate");
+    assert.equal(store.reports.size, 1);
+    assert.equal(store.reports.values().next().value?.payload.riskSignals?.length, 1);
+    assert.deepEqual(store.pageUrls, ["https://owner.example/checkout"]);
+  });
+
+  it("rejects stale, cross-scope, and prohibited input without re-opening the session", async () => {
+    const store = new MemoryIngestionStore();
+    const service = createService(store);
+    await service.ingestReport(owner, initialReport());
+    await service.ingestReport(owner, laterReport(2));
+
+    await assert.rejects(
+      service.ingestReport(owner, laterReport(1)),
+      isRuntimeError("stale_sequence"),
+    );
+    await assert.rejects(
+      service.ingestReport(otherProject, laterReport(3)),
+      isRuntimeError("invalid_request"),
+    );
     assert.equal(
-      store.opened[0]!.verifyHashSecret,
-      hashSecret,
+      await service.ingestReport(owner, {
+        ...laterReport(3),
+        payload: {
+          browserEvidence: evidence(),
+          fingerprint: fingerprint(),
+          proofs: {},
+        },
+      }),
+      "accepted",
     );
-    assert.equal(store.opened[0]!.ip, store.opened[1]!.ip);
+    assert.equal(store.opened.length, 1);
+    await assert.rejects(
+      service.ingestReport(owner, {
+        ...laterReport(3),
+        payload: {
+          behaviorReport: {
+            ...laterReport(3).payload.behaviorReport!,
+            evidence: {
+              ...evidence(),
+              fingerprintHash: "browser-supplied",
+            },
+          },
+        },
+      } as CanonicalReportRequest),
+      isRuntimeError("invalid_request"),
+    );
   });
 
-  it("rejects prohibited raw fields before persistence", async () => {
+  it("accepts a report with no evidence without fabricating fields", async () => {
     const store = new MemoryIngestionStore();
     const service = createService(store);
-    const unsafe = {
-      ...report(0),
-      evidence: {
-        ...evidence(),
-        fingerprintHash: "browser-supplied",
-        pointerCoordinates: [[1, 2]],
-      },
-    } as unknown as BehaviorReport;
-
-    await assert.rejects(
-      service.ingestBrowserAssessment(owner, unsafe, audience),
-      (error: unknown) =>
-        error instanceof BotBlockerRuntimeError &&
-        error.code === "invalid_request",
-    );
-    assert.equal(store.sessions.size, 0);
-    assert.equal(store.behaviorReports.size, 0);
-  });
-
-  it("does not resolve or create another project's visitor session", async () => {
-    const store = new MemoryIngestionStore();
-    const service = createService(store);
-    await service.startSession({
-      scope: owner,
-      gateSessionId: report(0).sequence.gateSessionId,
-      initialRequest: rapidRequest(),
-    });
-
-    await assert.rejects(
-      service.ingestBrowserAssessment(otherProject, report(1), audience),
-      (error: unknown) =>
-        error instanceof BotBlockerRuntimeError &&
-        error.code === "invalid_request" &&
-        error.statusCode === 404,
-    );
-    assert.equal(store.sessions.size, 1);
-  });
-
-  it("does not discard raw session data when the verify key is absent", async () => {
-    const store = new MemoryIngestionStore();
-    const service = new BotBlockerIngestionService(
-      store,
-      {},
-      () => now,
-    );
-    await service.startSession({
-      scope: owner,
-      gateSessionId: "bgs_no_secret_123456",
-      initialRequest: rapidRequest("bgs_no_secret_123456"),
-    });
-    assert.deepEqual(
-      store.opened[0]!.initialRequest.payload.browser.fingerprint,
-      fingerprint(),
-    );
-    assert.equal(store.opened[0]!.verifyHashSecret, undefined);
+    const report = { ...initialReport(), payload: {} };
+    assert.equal(await service.ingestReport(owner, report), "accepted");
+    assert.deepEqual(store.opened[0]!.initialReport.payload, {});
+    assert.equal(store.opened[0]!.ip, undefined);
   });
 });
 
@@ -439,4 +316,9 @@ function sameScope(
   return session.customerId === scope.customerId &&
     session.projectId === scope.projectId &&
     session.siteId === scope.siteId;
+}
+
+function isRuntimeError(code: string) {
+  return (error: unknown) =>
+    error instanceof BotBlockerRuntimeError && error.code === code;
 }

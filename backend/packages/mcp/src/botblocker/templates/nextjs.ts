@@ -16,6 +16,10 @@ import { createPublicKey } from "node:crypto";
 import { createPowerOtpNext } from "@powerotp/gate-next";
 
 /**
+ * The shared adapter sends first contact and later updates through
+ * POST /v1/botblocker/reports/{webhookId}; only first contact uses the
+ * site credential, and later reports use the returned server-held token.
+ *
  * POWEROTP_SITE_ID/POWEROTP_WEBHOOK_ID identify your endpoint. Generate
  * the credential from POST /v1/projects/{projectId}/botblocker/
  * rotate-site-credential.

@@ -2,9 +2,9 @@ import { isDeepStrictEqual } from "node:util";
 
 import type {
   BotBlockerDecisionOutcome,
+  CanonicalReportRequest,
   FingerprintVector,
   FingerprintVerifySource,
-  RapidAuthRequest,
 } from "@powerotp/contracts";
 import type { ClientSession, Db, MongoClient } from "mongodb";
 
@@ -28,8 +28,7 @@ import {
   type GateSessionDocument,
   type GateSessionIpReputation,
   type GateSessionNetworkClassification,
-  type InitialRequestEventDocument,
-  type InitialSessionRequestSnapshotDocument,
+  type CanonicalReportSnapshotDocument,
   type IpEvidence,
   type UserIntelligenceDocument,
   type VisitorTokenMetadataDocument,
@@ -85,7 +84,7 @@ export class BotBlockerSessionPersistence {
   async openGateSession(input: {
     scope: BotBlockerScope;
     gateSessionId: string;
-    initialRequest: RapidAuthRequest;
+    initialReport: CanonicalReportRequest;
     /** Independent server-only HMAC key. It is used only after stable source
      * values have been projected onto the user-intelligence row. */
     verifyHashSecret?: string;
@@ -104,9 +103,10 @@ export class BotBlockerSessionPersistence {
     now: Date;
   }): Promise<GateSessionDocument> {
     const userIntelligenceId = createUserIntelligenceId();
-    const fingerprint = input.initialRequest.payload.browser.fingerprint;
-    const evidence = input.initialRequest.payload.browser.evidence;
-    const initialRequest = initialRequestSnapshot(input);
+    const fingerprint = input.initialReport.payload.fingerprint;
+    const evidence = input.initialReport.payload.browserEvidence ??
+      input.initialReport.payload.behaviorReport?.evidence;
+    const initialReport = initialReportSnapshot(input);
     let result: GateSessionDocument | undefined;
     let profileUpdated = false;
 
@@ -122,8 +122,8 @@ export class BotBlockerSessionPersistence {
           }
           if (
             isDeepStrictEqual(
-              existingById.initialRequest.request,
-              input.initialRequest,
+              existingById.initialReport.report,
+              input.initialReport,
             ) &&
             existingById.ip === input.ip
           ) {
@@ -131,8 +131,8 @@ export class BotBlockerSessionPersistence {
             return;
           }
           throw new BotBlockerSessionPersistenceError(
-            input.initialRequest.issuedAt <=
-                existingById.initialRequest.request.issuedAt
+            input.initialReport.issuedAt <=
+                existingById.initialReport.report.issuedAt
               ? "stale_initial_request"
               : "conflicting_replay",
           );
@@ -176,7 +176,7 @@ export class BotBlockerSessionPersistence {
           _id: input.gateSessionId,
           ...input.scope,
           userIntelligenceId: userId,
-          initialRequest,
+          initialReport,
           ...(input.ip ? { ip: input.ip } : {}),
           state: "active",
           ...(input.latestDecision ? { latestDecision: input.latestDecision } : {}),
@@ -194,16 +194,19 @@ export class BotBlockerSessionPersistence {
         };
         await this.#gateSessions.insertOne(result, { session });
 
-        const occurredAt = new Date(input.initialRequest.issuedAt);
-        const initialEvent: InitialRequestEventDocument = {
+        const occurredAt = new Date(input.initialReport.issuedAt);
+        const initialEvent: DurableRiskEventDocument = {
           _id: createRiskEventId(),
           ...input.scope,
           userIntelligenceId: userId,
           gateSessionId: input.gateSessionId,
           reportSequence: -1,
-          eventIndex: 0,
-          recordType: "initial_request",
-          initialRequest,
+          recordType: "canonical_report",
+          report: input.initialReport,
+          serverEvidence: initialReport.serverEvidence,
+          ...(reportPageUrl(input.initialReport) ? {
+            pageUrl: reportPageUrl(input.initialReport),
+          } : {}),
           occurredAt,
           createdAt: input.now,
           updatedAt: input.now,
@@ -251,7 +254,7 @@ export class BotBlockerSessionPersistence {
             ...input.scope,
             ...fingerprintProfile,
             ...ipProfile,
-            latestEvidence: evidence,
+            ...(evidence ? { latestEvidence: evidence } : {}),
             gateSessionCount: 1,
             behaviorReportCount: 0,
             pageViewCount: 0,
@@ -269,7 +272,7 @@ export class BotBlockerSessionPersistence {
             { _id: matched._id, ...input.scope },
             {
               $set: {
-                latestEvidence: evidence,
+                ...(evidence ? { latestEvidence: evidence } : {}),
                 lastObservedAt: input.now,
                 updatedAt: input.now,
                 retentionExpiresAt: botBlockerRetentionExpiresAt(input.now),
@@ -370,12 +373,12 @@ export class BotBlockerSessionPersistence {
   }
 }
 
-function initialRequestSnapshot(
+function initialReportSnapshot(
   input: Parameters<BotBlockerSessionPersistence["openGateSession"]>[0],
-): InitialSessionRequestSnapshotDocument {
+): CanonicalReportSnapshotDocument {
   return {
-    request: input.initialRequest,
-    risk: {
+    report: input.initialReport,
+    serverEvidence: {
       ...(input.ipBlacklisted !== undefined
         ? { ipBlacklisted: input.ipBlacklisted }
         : {}),
@@ -387,6 +390,17 @@ function initialRequestSnapshot(
     },
     serverObservedAt: input.now,
   };
+}
+
+function reportPageUrl(report: CanonicalReportRequest): string | undefined {
+  const routePath = report.payload.behaviorReport?.evidence.routePath ??
+    report.payload.browserEvidence?.routePath;
+  if (!routePath) return undefined;
+  try {
+    return new URL(routePath, new URL(report.audience).origin).toString();
+  } catch {
+    return undefined;
+  }
 }
 
 function fingerprintProfileFields(

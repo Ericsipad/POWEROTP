@@ -300,9 +300,10 @@ work in dependency-ordered fresh sessions:
    typed-unavailable behavior without invented defaults.
 6. **Project callback/pull.** Extend the existing signed project callback and scoped-token pull
    boundary after committed profile/score updates.
-7. **Status: design complete (2026-08-19). Unified report and `riskEvents` scoring.** Implement
-   the dedicated plan in three fresh slices: canonical contract/transport, event configuration
-   and row scoring, then `risk_events_sum` and overall profile-scoring integration.
+7. **Status: implementation in progress (2026-08-19); canonical contract/transport slice
+   complete. Unified report and `riskEvents` scoring.** Complete the dedicated plan's remaining
+   fresh slices for event configuration/row scoring, then `risk_events_sum` and overall
+   profile-scoring integration.
 8. **Deferred external IP profile/scoring integration.** Select and confirm a real vendor first,
    approve its bounded fields, then append approved profile inputs and scoring registration.
 

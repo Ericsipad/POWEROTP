@@ -1,15 +1,12 @@
 import type {
   AsnType,
-  BehaviorReport,
   BotBlockerChallengeState,
   BotBlockerDecisionOutcome,
   BrowserEvidence,
+  CanonicalReportRequest,
   FingerprintVerifyLookup,
   FingerprintVerifySource,
   ProfileScoreStatus,
-  RapidAuthRequest,
-  ReportSequence,
-  RiskEvent,
   UserIntelligenceRecord,
   VerificationType,
 } from "@powerotp/contracts";
@@ -57,9 +54,16 @@ export interface GateSessionIpReputation {
   score: number;
 }
 
-export interface InitialSessionRequestSnapshotDocument {
-  request: RapidAuthRequest;
-  risk: {
+export interface CanonicalReportServerEvidence {
+  ipBlacklisted?: boolean;
+  latestDecision?: BotBlockerDecisionOutcome;
+  networkClassification?: GateSessionNetworkClassification;
+  ipReputation?: GateSessionIpReputation;
+}
+
+export interface CanonicalReportSnapshotDocument {
+  report: CanonicalReportRequest;
+  serverEvidence: {
     ipBlacklisted?: boolean;
     latestDecision?: BotBlockerDecisionOutcome;
     networkClassification?: GateSessionNetworkClassification;
@@ -78,7 +82,7 @@ export interface VisitorTokenMetadataDocument {
 export interface GateSessionDocument extends BotBlockerScope {
   _id: string;
   userIntelligenceId: string;
-  initialRequest: InitialSessionRequestSnapshotDocument;
+  initialReport: CanonicalReportSnapshotDocument;
   tokenMetadata?: VisitorTokenMetadataDocument;
   /** Trusted request IP is stored raw for site-owner reporting and
    * security correlation. It is never identity authority. */
@@ -169,43 +173,21 @@ export interface UserIntelligenceDocument extends BotBlockerScope,
   retentionExpiresAt: Date;
 }
 
-interface RiskEventDocumentBase extends BotBlockerScope {
+export interface DurableRiskEventDocument extends BotBlockerScope {
   _id: string;
   userIntelligenceId: string;
   gateSessionId: string;
   reportSequence: number;
-  eventIndex: number;
+  recordType: "canonical_report";
+  report: CanonicalReportRequest;
+  serverEvidence: CanonicalReportServerEvidence;
+  /** Derived from the authenticated audience plus sanitized route path. */
+  pageUrl?: string;
   occurredAt: Date;
   createdAt: Date;
   updatedAt: Date;
   retentionExpiresAt: Date;
 }
-
-export interface InitialRequestEventDocument extends RiskEventDocumentBase {
-  recordType: "initial_request";
-  reportSequence: -1;
-  eventIndex: 0;
-  initialRequest: InitialSessionRequestSnapshotDocument;
-}
-
-export interface BehaviorReportEventDocument extends RiskEventDocumentBase {
-  recordType: "behavior_report";
-  eventIndex: 0;
-  /** Derived from the authenticated request audience plus sanitized path. */
-  pageUrl: string;
-  report: BehaviorReport;
-}
-
-export interface RiskSignalEventDocument extends RiskEventDocumentBase {
-  recordType: "risk_signal";
-  sequence: ReportSequence;
-  event: RiskEvent;
-}
-
-export type DurableRiskEventDocument =
-  | InitialRequestEventDocument
-  | BehaviorReportEventDocument
-  | RiskSignalEventDocument;
 
 export interface BotBlockerChallengeDocument extends BotBlockerScope {
   _id: string;
@@ -322,7 +304,6 @@ export async function ensureBotBlockerIntelligenceIndexes(db: Db): Promise<void>
         siteId: 1,
         gateSessionId: 1,
         reportSequence: 1,
-        eventIndex: 1,
       },
       { unique: true },
     ),
@@ -477,7 +458,6 @@ export class BotBlockerIntelligencePersistence {
     };
     return this.#riskEvents.find(filter).sort({
       reportSequence: 1,
-      eventIndex: 1,
     }).toArray();
   }
 

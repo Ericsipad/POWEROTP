@@ -7,7 +7,6 @@ import {
   type PassportAssertion,
   PassportAssertionSchema,
   type RiskEvent,
-  RiskEventBatchSchema,
   RiskEventSchema,
 } from "./botblocker-proofs.js";
 
@@ -147,31 +146,5 @@ describe("RiskEventSchema", () => {
 
       assert.equal(RiskEventSchema.safeParse(withDecision).success, false);
     });
-  });
-});
-
-describe("RiskEventBatchSchema", () => {
-  it("accepts a valid batch of one event", () => {
-    assert.equal(
-      RiskEventBatchSchema.safeParse({
-        protocolVersion: 1,
-        siteId: "site_0123456789abcdef",
-        sequence: { gateSessionId: "gate_session_0123456789", sequence: 0, issuedAt: Date.now() },
-        events: [validRiskEvent()],
-      }).success,
-      true,
-    );
-  });
-
-  it("rejects an empty events array", () => {
-    assert.equal(
-      RiskEventBatchSchema.safeParse({
-        protocolVersion: 1,
-        siteId: "site_0123456789abcdef",
-        sequence: { gateSessionId: "gate_session_0123456789", sequence: 0, issuedAt: Date.now() },
-        events: [],
-      }).success,
-      false,
-    );
   });
 });

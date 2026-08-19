@@ -64,7 +64,7 @@ function request(overrides: Record<string, unknown> = {}) {
     authorizationHeader: "Bearer potp_bb_test",
     requestOrigin: "https://verify.powerotp.com",
     idempotencyKey: "idem_1234567890123456",
-    operation: "rapid-auth",
+    operation: "reports",
     authentication: "site_credential" as const,
     runtimeSite,
     body,

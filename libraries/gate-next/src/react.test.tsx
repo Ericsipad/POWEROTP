@@ -85,6 +85,7 @@ test("Next production client bundles contain no backend-only persistence or admi
       "BotBlockerWebhookIdSchema",
       "RequestContextSchema",
       "TrustedProxyIpSchema",
+      "CanonicalReportRequestSchema",
       "GateSessionRecordSchema",
       "UserIntelligenceRecordSchema",
       "FingerprintDataRecordSchema",
@@ -112,7 +113,7 @@ test("root gate persists through App Router-style history navigation and sequenc
     if (path === "/_powerotp/decision/verify") {
       return json({ verified: true, decision: JSON.parse(String(init?.body)).candidate });
     }
-    if (path === "/_powerotp/browser-assessment") {
+    if (path === "/_powerotp/report") {
       reports.push(JSON.parse(String(init?.body)));
       return json({ status: "decision", candidate: decision("allow", 7) });
     }

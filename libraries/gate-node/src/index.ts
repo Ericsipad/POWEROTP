@@ -26,9 +26,9 @@ export type {
   GateNodeServices,
   GateSession,
   GateSessionStore,
-  InitialDecisionRequest,
   InitialDecisionResult,
   InitialDecisionServiceResult,
+  ReportAuthorization,
   ScopedVisitorAuthorization,
   TrustedProxyConfig,
 } from "./types.js";

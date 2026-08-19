@@ -16,6 +16,7 @@ const forbiddenNames = [
   "BotBlockerWebhookIdSchema",
   "RequestContextSchema",
   "TrustedProxyIpSchema",
+  "CanonicalReportRequestSchema",
   // botblocker-persistence.ts
   "GateSessionRecordSchema",
   "UserIntelligenceRecordSchema",

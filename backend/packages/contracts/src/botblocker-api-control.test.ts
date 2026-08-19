@@ -335,7 +335,7 @@ describe("operator contracts", () => {
       edgeEndpoints: [
         {
           region: "digitalocean",
-          url: "https://verify.powerotp.com/v1/botblocker/rapid-auth",
+          url: "https://verify.powerotp.com/v1/botblocker/reports",
         },
       ],
       sensorVersion: "sensor-v1",

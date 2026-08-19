@@ -3765,3 +3765,71 @@ full-repository verification was run.
 Passport, minute-29 visitor-token refresh, unrelated bearer replacement, OTP orchestration,
 billing, Phase 26 edge publication, or Phase 27 global verify Worker. No `.env` file, migration,
 seed, deployment, or customer traffic was changed. No commit or push was performed.
+
+## 2026-08-18 — BotBlocker Phase 17A item 7 slice 1: canonical report contract and transport
+
+**Status: canonical report/transport slice complete.** Replaced the separate RapidAuth,
+browser-assessment, and risk-event batch request contracts with one closed
+`CanonicalReportRequestSchema`. The same schema carries first contact at sequence `-1` and every
+later monotonic update at sequence `0+`. Its request context, browser behavior evidence,
+fingerprint vector, candidate proofs, behavior report, and bounded risk-signal list are all
+independently optional and omitted when unavailable. Nested behavior order must match the
+canonical envelope, unknown fields remain rejected, and caller-authored score, weight, decision,
+or signature authority remains impossible.
+
+**One scoped route and authentication boundary.** Added
+`POST /v1/botblocker/reports/{webhookId}` and removed the superseded
+`rapid-auth`, `browser-assessment`, and `risk-events` route handlers. The self-validating
+project/site webhook path still resolves before shared services or body/authentication work. A
+sequence `-1` first report requires the server-only site credential and returns the existing
+30-minute project/site/session/audience-bound visitor token; every later sequence requires that
+scoped server-held token. Request freshness, nonce replay, idempotency, audience, and scope checks
+continue through the existing runtime-security service under the single `reports` operation.
+
+**One immutable row per accepted report.** `riskEvents` now stores one
+`recordType: "canonical_report"` document per accepted report sequence. Each row retains the
+complete validated canonical report, exact customer/project/site/session/profile binding,
+server-derived blacklist/network/reputation evidence when available, optional authenticated
+origin plus sanitized route URL, observation/retention timestamps, and one opaque event ID.
+Risk-signal lists remain embedded in that one row rather than expanding into multiple documents.
+The unique scoped session/sequence index, transactional sequence advance and row/profile update,
+90-day report retention, 548-day profile refresh, changed-replay/stale/cross-scope rejection, and
+post-commit profile scoring plus data-ready callback order remain intact. Exact replay returns the
+existing row without advancing sequence, rescoring, or notifying again.
+
+**Initial synchronization and later evidence.** First-report persistence still creates the
+gate-session header, first immutable row, exact-bound or new `userIntelligence` profile, current
+raw `fingerprintData`, selected latest-successful profile fields, user-row-derived verify lookup,
+and exact-IP evidence in one transaction before safe visitor-token metadata is saved. Later
+fingerprint input may remain raw on its immutable report row but cannot replace
+`fingerprintData` or profile fingerprint fields; the shipped middleware normally omits it after
+receiving the visitor token. Missing request, browser, fingerprint, proof, behavior, risk, IP,
+ASN, blacklist, or vendor evidence is never fabricated.
+
+**Shared adapter and generated integration transport.** `@powerotp/gate-node` now exposes one
+`submitReport` service boundary. It builds the canonical first report with site-credential
+authorization, converts later browser sensor reports to the same canonical request, and forwards
+them with only the scoped visitor token. The local browser bridge is now
+`/_powerotp/report`; Express and Next inherit it through the Node authority with no duplicate
+transport logic. Browser imports remain limited to `@powerotp/contracts/browser`, and the Next
+production-bundle guard now explicitly excludes the backend-only canonical report schema. Public
+MCP Node/Express/Next templates and architecture content describe the unified report route and
+credential/token separation.
+
+**Verification.** Node `v22.18.0` was used. Full build, lint/typecheck, and package tests passed
+for `@powerotp/contracts`, `@powerotp/api`, `@powerotp/gate-node`, `@powerotp/gate-express`,
+`@powerotp/gate-next`, and `@powerotp/mcp`. The gate-next build included its real Next production
+bundle and the backend server build generated only the canonical report route. The
+`@powerotp/backend` production build, typecheck, and focused 15-test/7-suite server suite passed,
+including the canonical route-inventory guard. Final root `npm run verify` passed across all
+workspaces. During focused verification, the first API build exposed one TypeScript closure
+narrowing error, the first Express build exposed one removed compatibility export, and the first
+backend typecheck encountered stale generated Next route types; each was corrected or regenerated
+before the corresponding complete workspace check passed.
+
+**Explicitly not shipped.** This slice adds no risk-event scoring configuration or row score,
+`userIntelligence.risk_events_sum`, Phase 18 customer sensitivity/OTP policy, external IP-vendor
+integration, site-return cookie, minute-29 token refresh, Passport, OTP orchestration, billing,
+edge publication, or global verify Worker. It adds no formula, weight, threshold, default, fake
+data, migration, seed, deployment, or traffic activation. No `.env` file was read or changed.
+No commit or push was performed.

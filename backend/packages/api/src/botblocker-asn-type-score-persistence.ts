@@ -9,9 +9,8 @@ import type { Collection, Db } from "mongodb";
  * `0`/neutral and `requiresApiLookup` starts `false` for every type until
  * an admin sets them, never a fabricated "real" risk number. Per the
  * user: "admin page will have a number entry for each ASN type that will
- * dynamically adjust scoring." A later step reads this from the
- * fast-immediate branch's ranges -> classification -> type-score chain;
- * nothing here is called from `rapidAuthMutation` yet.
+ * dynamically adjust scoring." The canonical first-report path reads this
+ * through the ranges -> classification -> type-score chain.
  */
 export interface AsnTypeScoreDocument {
   _id: AsnType;

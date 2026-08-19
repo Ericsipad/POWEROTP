@@ -195,6 +195,8 @@ export function createPowerOtpRequestListener(options: GateNodeOptions): Request
         (session.offlineUntil ?? 0) <= now()
       ) {
         void beginDecision({
+          siteId,
+          audience: options.audience,
           context: session.requestContext,
           initialBrowser: session.initialBrowser,
           siteCredential: options.siteCredential,
@@ -202,6 +204,7 @@ export function createPowerOtpRequestListener(options: GateNodeOptions): Request
           session,
           services,
           save: () => Promise.resolve(store.set(session)),
+          now,
         });
       }
       const clearance = verifyClearanceCookie({

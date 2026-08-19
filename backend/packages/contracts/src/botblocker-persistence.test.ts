@@ -7,12 +7,10 @@ import type {
   UserIntelligenceRecord,
 } from "./botblocker-persistence.js";
 import {
-  BehaviorReportEventRecordSchema,
   BotBlockerChallengeRecordSchema,
+  CanonicalRiskEventRecordSchema,
   FingerprintDataRecordSchema,
   GateSessionRecordSchema,
-  InitialRequestEventRecordSchema,
-  RiskSignalEventRecordSchema,
   UserIntelligenceRecordSchema,
 } from "./botblocker-persistence.js";
 
@@ -32,30 +30,27 @@ const evidence = {
   scroll: { smoothnessScore: 0.8, highSpeedEventCount: 1 },
   honeypotActivations: [],
 };
-const initialRequest = {
-  request: {
+const initialReport = {
+  report: {
     protocolVersion: 1 as const,
     siteId: scope.siteId,
     gateSessionId: "bgs_session_123456",
     audience: "https://customer.example",
     nonce: "nonce_initial_123456789",
     issuedAt: Date.parse(now),
+    reportSequence: -1,
     payload: {
-      gateSessionId: "bgs_session_123456",
       request: {
         siteId: scope.siteId,
         clientIp: ip,
         method: "GET" as const,
         path: "/products",
       },
-      browser: {
-        protocolVersion: 1 as const,
-        evidence,
-        proofs: {},
-      },
+      browserEvidence: evidence,
+      proofs: {},
     },
   },
-  risk: { ipBlacklisted: false },
+  serverEvidence: { ipBlacklisted: false },
   serverObservedAt: now,
 };
 
@@ -63,7 +58,7 @@ const gateSession = {
   ...scope,
   gateSessionId: "bgs_session_123456",
   userIntelligenceId: "bui_visitor_123456",
-  initialRequest,
+  initialReport,
   ip,
   state: "active" as const,
   lastAppliedSequence: -1,
@@ -167,15 +162,11 @@ describe("Phase 6 BotBlocker persistence contracts", () => {
       ...gateSession,
       gateSessionId: "bgs_session_654321",
       userIntelligenceId: "bui_visitor_654321",
-      initialRequest: {
-        ...initialRequest,
-        request: {
-          ...initialRequest.request,
+      initialReport: {
+        ...initialReport,
+        report: {
+          ...initialReport.report,
           gateSessionId: "bgs_session_654321",
-          payload: {
-            ...initialRequest.request.payload,
-            gateSessionId: "bgs_session_654321",
-          },
         },
       },
     });
@@ -336,42 +327,58 @@ describe("Phase 6 BotBlocker persistence contracts", () => {
     );
   });
 
-  it("binds behavior reports to the same gate session and sequence", () => {
+  it("binds all canonical evidence to one immutable report row", () => {
     const record = {
       ...scope,
       riskEventId: "bre_event_12345678",
       userIntelligenceId: "bui_visitor_123456",
       gateSessionId: "bgs_session_123456",
       reportSequence: 0,
-      eventIndex: 0 as const,
-      recordType: "behavior_report" as const,
+      recordType: "canonical_report" as const,
       pageUrl: "https://customer.example/products",
       occurredAt: now,
       createdAt: now,
       updatedAt: now,
       retentionExpiresAt: later,
+      serverEvidence: {},
       report: {
         protocolVersion: 1 as const,
-        sequence: {
-          gateSessionId: "bgs_session_123456",
-          sequence: 0,
-          issuedAt: Date.parse(now),
+        siteId: scope.siteId,
+        gateSessionId: "bgs_session_123456",
+        audience: "https://customer.example",
+        reportSequence: 0,
+        nonce: "nonce_report_123456789",
+        issuedAt: Date.parse(now),
+        payload: {
+          behaviorReport: {
+            protocolVersion: 1 as const,
+            sequence: {
+              gateSessionId: "bgs_session_123456",
+              sequence: 0,
+              issuedAt: Date.parse(now),
+            },
+            trigger: "initial" as const,
+            evidence,
+          },
+          riskSignals: [{
+            kind: "honeypot_activation" as const,
+            occurredAt: Date.parse(now),
+            honeypot: { honeypotId: "summary-decoy" },
+          }],
         },
-        trigger: "initial" as const,
-        evidence,
       },
     };
 
-    assert.equal(BehaviorReportEventRecordSchema.safeParse(record).success, true);
+    assert.equal(CanonicalRiskEventRecordSchema.safeParse(record).success, true);
     assert.equal(
-      BehaviorReportEventRecordSchema.safeParse({
+      CanonicalRiskEventRecordSchema.safeParse({
         ...record,
         reportSequence: 1,
       }).success,
       false,
     );
     assert.equal(
-      BehaviorReportEventRecordSchema.safeParse({
+      CanonicalRiskEventRecordSchema.safeParse({
         ...record,
         pageUrl: "https://customer.example/products?secret=value",
       }).success,
@@ -379,24 +386,25 @@ describe("Phase 6 BotBlocker persistence contracts", () => {
     );
   });
 
-  it("binds the complete initial request to the first immutable risk event", () => {
+  it("binds the complete first canonical report to its immutable row", () => {
     const record = {
       ...scope,
       riskEventId: "bre_initial_12345678",
       userIntelligenceId: gateSession.userIntelligenceId,
       gateSessionId: gateSession.gateSessionId,
       reportSequence: -1 as const,
-      eventIndex: 0 as const,
-      recordType: "initial_request" as const,
-      initialRequest,
+      recordType: "canonical_report" as const,
+      report: initialReport.report,
+      serverEvidence: initialReport.serverEvidence,
+      pageUrl: "https://customer.example/products",
       occurredAt: now,
       createdAt: now,
       updatedAt: now,
       retentionExpiresAt: later,
     };
-    assert.equal(InitialRequestEventRecordSchema.safeParse(record).success, true);
+    assert.equal(CanonicalRiskEventRecordSchema.safeParse(record).success, true);
     assert.equal(
-      InitialRequestEventRecordSchema.safeParse({
+      CanonicalRiskEventRecordSchema.safeParse({
         ...record,
         gateSessionId: "bgs_other_session_123",
       }).success,
@@ -410,38 +418,6 @@ describe("Phase 6 BotBlocker persistence contracts", () => {
         ...gateSession,
         retentionExpiresAt: gateSession.lastObservedAt,
       }).success,
-      false,
-    );
-  });
-
-  it("binds sanitized risk signals to an event index and report sequence", () => {
-    const record = {
-      ...scope,
-      riskEventId: "bre_event_87654321",
-      userIntelligenceId: "bui_visitor_123456",
-      gateSessionId: "bgs_session_123456",
-      reportSequence: 2,
-      eventIndex: 1,
-      recordType: "risk_signal" as const,
-      occurredAt: now,
-      createdAt: now,
-      updatedAt: now,
-      retentionExpiresAt: later,
-      sequence: {
-        gateSessionId: "bgs_session_123456",
-        sequence: 2,
-        issuedAt: Date.parse(now),
-      },
-      event: {
-        kind: "honeypot_activation" as const,
-        occurredAt: Date.parse(now),
-        honeypot: { honeypotId: "summary-decoy" },
-      },
-    };
-
-    assert.equal(RiskSignalEventRecordSchema.safeParse(record).success, true);
-    assert.equal(
-      RiskSignalEventRecordSchema.safeParse({ ...record, eventIndex: 0 }).success,
       false,
     );
   });

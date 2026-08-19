@@ -65,9 +65,8 @@ function fixture() {
     listRiskEvents: async () => [
       {
         _id: "bre_1234567890123456",
-        recordType: "risk_signal" as const,
+        recordType: "canonical_report" as const,
         reportSequence: 1,
-        eventIndex: 1,
         occurredAt: now,
       },
     ],

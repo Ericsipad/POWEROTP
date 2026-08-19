@@ -10,17 +10,14 @@ import { z } from "zod";
 
 import { AsnTypeSchema } from "./botblocker-api-control.js";
 import { BotBlockerChallengeStateSchema } from "./botblocker-challenge.js";
-import { RiskEventSchema } from "./botblocker-proofs.js";
 import {
-  BehaviorReportSchema,
   BotBlockerDecisionOutcomeSchema,
   BrowserEvidenceSchema,
-  ReportSequenceSchema,
   SiteIdSchema,
   TrustedProxyIpSchema,
 } from "./botblocker.js";
 import { VerificationTypeSchema } from "./verification.js";
-import { RapidAuthRequestSchema } from "./botblocker-api-runtime.js";
+import { CanonicalReportRequestSchema } from "./botblocker-api-runtime.js";
 import {
   FINGERPRINT_COLLECTOR_VERSION,
   FINGERPRINT_VECTOR_VERSION,
@@ -205,17 +202,19 @@ export const GateSessionIpReputationSchema = z
   })
   .strict();
 
-export const InitialSessionRequestSnapshotSchema = z
+export const CanonicalReportServerEvidenceSchema = z
   .object({
-    request: RapidAuthRequestSchema,
-    risk: z
-      .object({
-        ipBlacklisted: z.boolean().optional(),
-        latestDecision: BotBlockerDecisionOutcomeSchema.optional(),
-        networkClassification: GateSessionNetworkClassificationSchema.optional(),
-        ipReputation: GateSessionIpReputationSchema.optional(),
-      })
-      .strict(),
+    ipBlacklisted: z.boolean().optional(),
+    latestDecision: BotBlockerDecisionOutcomeSchema.optional(),
+    networkClassification: GateSessionNetworkClassificationSchema.optional(),
+    ipReputation: GateSessionIpReputationSchema.optional(),
+  })
+  .strict();
+
+export const CanonicalReportSnapshotSchema = z
+  .object({
+    report: CanonicalReportRequestSchema,
+    serverEvidence: CanonicalReportServerEvidenceSchema,
     serverObservedAt: z.string().datetime(),
   })
   .strict();
@@ -232,7 +231,7 @@ export const VisitorTokenMetadataSchema = z
 export const GateSessionRecordSchema = ScopedRecordSchema.extend({
   gateSessionId: OpaqueIdSchema,
   userIntelligenceId: OpaqueIdSchema,
-  initialRequest: InitialSessionRequestSnapshotSchema,
+  initialReport: CanonicalReportSnapshotSchema,
   tokenMetadata: VisitorTokenMetadataSchema.optional(),
   ip: TrustedProxyIpSchema.optional(),
   state: z.enum(["active", "ended"]),
@@ -255,13 +254,14 @@ export const GateSessionRecordSchema = ScopedRecordSchema.extend({
       });
     }
     if (
-      record.initialRequest.request.siteId !== record.siteId ||
-      record.initialRequest.request.gateSessionId !== record.gateSessionId
+      record.initialReport.report.siteId !== record.siteId ||
+      record.initialReport.report.gateSessionId !== record.gateSessionId ||
+      record.initialReport.report.reportSequence !== -1
     ) {
       context.addIssue({
         code: "custom",
-        message: "Initial request must match its scoped gate session",
-        path: ["initialRequest", "request"],
+        message: "Initial report must match its scoped gate session",
+        path: ["initialReport", "report"],
       });
     }
     if (
@@ -319,73 +319,50 @@ const RiskEventRecordBaseSchema = ScopedRecordSchema.extend({
   userIntelligenceId: OpaqueIdSchema,
   gateSessionId: OpaqueIdSchema,
   reportSequence: z.number().int().min(-1),
-  eventIndex: z.number().int().nonnegative(),
   occurredAt: z.string().datetime(),
 })
   .extend(RetainedRecordSchema.shape);
 
-export const InitialRequestEventRecordSchema = RiskEventRecordBaseSchema.extend({
-  recordType: z.literal("initial_request"),
-  reportSequence: z.literal(-1),
-  eventIndex: z.literal(0),
-  initialRequest: InitialSessionRequestSnapshotSchema,
+export const CanonicalRiskEventRecordSchema = RiskEventRecordBaseSchema.extend({
+  recordType: z.literal("canonical_report"),
+  report: CanonicalReportRequestSchema,
+  serverEvidence: CanonicalReportServerEvidenceSchema,
+  pageUrl: z.string().url().max(2_048).optional(),
 })
   .strict()
   .superRefine((record, context) => {
     if (
-      record.initialRequest.request.siteId !== record.siteId ||
-      record.initialRequest.request.gateSessionId !== record.gateSessionId
+      record.report.siteId !== record.siteId ||
+      record.report.gateSessionId !== record.gateSessionId ||
+      record.report.reportSequence !== record.reportSequence
     ) {
       context.addIssue({
         code: "custom",
-        message: "Initial request must match its scoped risk event",
-        path: ["initialRequest", "request"],
+        message: "Canonical report must match its scoped risk event",
+        path: ["report"],
       });
     }
-    if (Date.parse(record.retentionExpiresAt) <= Date.parse(record.occurredAt)) {
-      context.addIssue({
-        code: "custom",
-        message: "retentionExpiresAt must follow occurredAt",
-        path: ["retentionExpiresAt"],
-      });
-    }
-  });
-
-export const BehaviorReportEventRecordSchema = RiskEventRecordBaseSchema.extend({
-  recordType: z.literal("behavior_report"),
-  eventIndex: z.literal(0),
-  pageUrl: z.string().url().max(2_048),
-  report: BehaviorReportSchema,
-})
-  .strict()
-  .superRefine((record, context) => {
-    if (
-      record.report.sequence.gateSessionId !== record.gateSessionId ||
-      record.report.sequence.sequence !== record.reportSequence
-    ) {
-      context.addIssue({
-        code: "custom",
-        message: "Behavior report sequence must match its scoped persistence record",
-        path: ["report", "sequence"],
-      });
-    }
-    try {
-      const pageUrl = new URL(record.pageUrl);
-      if (
-        pageUrl.username ||
-        pageUrl.password ||
-        pageUrl.search ||
-        pageUrl.hash ||
-        pageUrl.pathname !== record.report.evidence.routePath
-      ) {
-        context.addIssue({
-          code: "custom",
-          message: "pageUrl must be the authenticated origin plus sanitized report path",
-          path: ["pageUrl"],
-        });
+    const routePath = record.report.payload.behaviorReport?.evidence.routePath ??
+      record.report.payload.browserEvidence?.routePath;
+    if (record.pageUrl && routePath) {
+      try {
+        const pageUrl = new URL(record.pageUrl);
+        if (
+          pageUrl.username ||
+          pageUrl.password ||
+          pageUrl.search ||
+          pageUrl.hash ||
+          pageUrl.pathname !== routePath
+        ) {
+          context.addIssue({
+            code: "custom",
+            message: "pageUrl must be the authenticated origin plus sanitized report path",
+            path: ["pageUrl"],
+          });
+        }
+      } catch {
+        // The URL schema above reports malformed values.
       }
-    } catch {
-      // The URL schema above reports malformed values.
     }
     if (Date.parse(record.retentionExpiresAt) <= Date.parse(record.occurredAt)) {
       context.addIssue({
@@ -396,38 +373,7 @@ export const BehaviorReportEventRecordSchema = RiskEventRecordBaseSchema.extend(
     }
   });
 
-export const RiskSignalEventRecordSchema = RiskEventRecordBaseSchema.extend({
-  recordType: z.literal("risk_signal"),
-  eventIndex: z.number().int().positive(),
-  sequence: ReportSequenceSchema,
-  event: RiskEventSchema,
-})
-  .strict()
-  .superRefine((record, context) => {
-    if (
-      record.sequence.gateSessionId !== record.gateSessionId ||
-      record.sequence.sequence !== record.reportSequence
-    ) {
-      context.addIssue({
-        code: "custom",
-        message: "Risk-event sequence must match its scoped persistence record",
-        path: ["sequence"],
-      });
-    }
-    if (Date.parse(record.retentionExpiresAt) <= Date.parse(record.occurredAt)) {
-      context.addIssue({
-        code: "custom",
-        message: "retentionExpiresAt must follow occurredAt",
-        path: ["retentionExpiresAt"],
-      });
-    }
-  });
-
-export const DurableRiskEventRecordSchema = z.discriminatedUnion("recordType", [
-  InitialRequestEventRecordSchema,
-  BehaviorReportEventRecordSchema,
-  RiskSignalEventRecordSchema,
-]);
+export const DurableRiskEventRecordSchema = CanonicalRiskEventRecordSchema;
 
 export const BotBlockerChallengeRecordSchema = ScopedRecordSchema.extend({
   challengeId: OpaqueIdSchema,
@@ -472,8 +418,8 @@ export const BotBlockerChallengeRecordSchema = ScopedRecordSchema.extend({
   });
 
 export type GateSessionRecord = z.infer<typeof GateSessionRecordSchema>;
-export type InitialSessionRequestSnapshot = z.infer<
-  typeof InitialSessionRequestSnapshotSchema
+export type CanonicalReportSnapshot = z.infer<
+  typeof CanonicalReportSnapshotSchema
 >;
 export type VisitorTokenMetadata = z.infer<typeof VisitorTokenMetadataSchema>;
 export type UserIntelligenceRecord = z.infer<typeof UserIntelligenceRecordSchema>;

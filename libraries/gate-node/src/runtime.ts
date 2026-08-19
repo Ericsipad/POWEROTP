@@ -1,7 +1,12 @@
+import { randomBytes } from "node:crypto";
+
 import {
   BOTBLOCKER_PROTOCOL_VERSION,
   BotBlockerOfflineResponseSchema,
   BotBlockerUnavailableResponseSchema,
+  CanonicalReportRequestSchema,
+  type BehaviorReport,
+  type CanonicalReportRequest,
   type BotBlockerUnavailableResponse,
   type DecisionRevisionEnvelope,
   type InitialBrowserProofEvidence,
@@ -35,10 +40,9 @@ export function createServices(
   supplied: Partial<GateNodeServices> | undefined,
 ): GateNodeServices {
   return {
-    requestDecision: supplied?.requestDecision ?? (async () => UNAVAILABLE),
+    submitReport: supplied?.submitReport ?? (async () => UNAVAILABLE),
     verifyDecision:
       supplied?.verifyDecision ?? (async () => ({ verified: false, reason: "unavailable" })),
-    assessBrowser: supplied?.assessBrowser ?? (async () => UNAVAILABLE),
     launchChallenge: supplied?.launchChallenge ?? (async () => UNAVAILABLE),
     pollChallenge: supplied?.pollChallenge ?? (async () => UNAVAILABLE),
     pullSessionData: supplied?.pullSessionData ?? (async () => UNAVAILABLE),
@@ -46,6 +50,8 @@ export function createServices(
 }
 
 export function beginDecision(options: {
+  siteId: string;
+  audience: string;
   context: RequestContext;
   initialBrowser: InitialBrowserProofEvidence;
   siteCredential: string;
@@ -53,6 +59,7 @@ export function beginDecision(options: {
   session: GateSession;
   services: GateNodeServices;
   save(): Promise<void>;
+  now?: () => number;
 }): Promise<DecisionServiceResult> {
   if (options.session.pendingDecision) return options.session.pendingDecision;
   if (options.session.recommendation?.lifecycle !== "offline") {
@@ -70,12 +77,9 @@ export function beginDecision(options: {
   }, options.decisionTimeoutMs);
   const pending = Promise.resolve()
     .then(() =>
-      options.services.requestDecision(
-        {
-          siteCredential: options.siteCredential,
-          context: options.context,
-          browser: options.initialBrowser,
-        },
+      options.services.submitReport(
+        createInitialReport(options),
+        { siteCredential: options.siteCredential },
         options.session,
       ),
     )
@@ -102,7 +106,10 @@ export function beginDecision(options: {
         return result.decision;
       }
       if (result.status === "decision") {
-        if (!isScopedVisitorToken(result.visitorToken)) {
+        const visitorToken = "visitorToken" in result
+          ? result.visitorToken
+          : undefined;
+        if (!isScopedVisitorToken(visitorToken)) {
           if (!retainsActiveOtp(options.session)) {
             options.session.recommendation = unavailableSnapshot(options.session.lastApplied);
           }
@@ -110,7 +117,7 @@ export function beginDecision(options: {
           return UNAVAILABLE;
         }
         const challenge = result.challenge ? normalizeChallenge(result.challenge) : undefined;
-        options.session.visitorToken = result.visitorToken;
+        options.session.visitorToken = visitorToken;
         options.session.offlineUntil = undefined;
         options.session.latestDecision = result.candidate;
         options.session.latestClearance = result.clearance;
@@ -159,6 +166,23 @@ export function scopedVisitorAuthorization(session: GateSession) {
   return session.visitorToken
     ? { visitorToken: session.visitorToken }
     : undefined;
+}
+
+export function createBehaviorReportRequest(options: {
+  siteId: string;
+  audience: string;
+  report: BehaviorReport;
+}): CanonicalReportRequest {
+  return CanonicalReportRequestSchema.parse({
+    protocolVersion: BOTBLOCKER_PROTOCOL_VERSION,
+    siteId: options.siteId,
+    gateSessionId: options.report.sequence.gateSessionId,
+    audience: options.audience,
+    reportSequence: options.report.sequence.sequence,
+    nonce: reportNonce(),
+    issuedAt: options.report.sequence.issuedAt,
+    payload: { behaviorReport: options.report },
+  });
 }
 
 export async function verifyDecisionForSession(options: {
@@ -242,4 +266,31 @@ function isScopedVisitorToken(value: unknown): value is string {
     value.length <= 4_096 &&
     /^[\x21-\x7e]+$/.test(value)
   );
+}
+
+function createInitialReport(
+  options: Parameters<typeof beginDecision>[0],
+): CanonicalReportRequest {
+  const issuedAt = Math.max(1, Math.floor((options.now ?? Date.now)()));
+  return CanonicalReportRequestSchema.parse({
+    protocolVersion: BOTBLOCKER_PROTOCOL_VERSION,
+    siteId: options.siteId,
+    gateSessionId: options.session.id,
+    audience: options.audience,
+    reportSequence: -1,
+    nonce: reportNonce(),
+    issuedAt,
+    payload: {
+      request: options.context,
+      browserEvidence: options.initialBrowser.evidence,
+      ...(options.initialBrowser.fingerprint
+        ? { fingerprint: options.initialBrowser.fingerprint }
+        : {}),
+      proofs: options.initialBrowser.proofs,
+    },
+  });
+}
+
+function reportNonce(): string {
+  return randomBytes(24).toString("base64url");
 }

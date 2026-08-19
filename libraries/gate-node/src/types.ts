@@ -1,11 +1,11 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 
 import type {
-  BehaviorReport,
   BotBlockerDataReadyCallbackEvent,
   BotBlockerOfflineResponse,
   BotBlockerSessionDataResponse,
   BotBlockerUnavailableResponse,
+  CanonicalReportRequest,
   DecisionRevisionEnvelope,
   GateRecommendationSnapshot,
   InitialBrowserProofEvidence,
@@ -90,30 +90,24 @@ export type InitialDecisionServiceResult =
   | BotBlockerUnavailableResponse
   | BotBlockerOfflineResponse;
 
-export interface InitialDecisionRequest {
-  siteCredential: string;
-  context: RequestContext;
-  browser: InitialBrowserProofEvidence;
-}
-
 export interface ScopedVisitorAuthorization {
   visitorToken: string;
 }
 
+export type ReportAuthorization =
+  | { siteCredential: string }
+  | ScopedVisitorAuthorization;
+
 export interface GateNodeServices {
-  requestDecision(
-    request: InitialDecisionRequest,
+  submitReport(
+    report: CanonicalReportRequest,
+    authorization: ReportAuthorization,
     session: Readonly<GateSession>,
-  ): Promise<InitialDecisionServiceResult>;
+  ): Promise<InitialDecisionServiceResult | DecisionServiceResult>;
   verifyDecision(
     candidate: unknown,
     session: Readonly<GateSession>,
   ): Promise<DecisionVerification>;
-  assessBrowser(
-    report: BehaviorReport,
-    authorization: ScopedVisitorAuthorization,
-    session: Readonly<GateSession>,
-  ): Promise<DecisionServiceResult>;
   launchChallenge(
     authorization: ScopedVisitorAuthorization,
     session: Readonly<GateSession>,

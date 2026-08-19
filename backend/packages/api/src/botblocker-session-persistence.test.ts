@@ -4,8 +4,8 @@ import { isDeepStrictEqual } from "node:util";
 
 import type {
   BrowserEvidence,
+  CanonicalReportRequest,
   FingerprintVector,
-  RapidAuthRequest,
 } from "@powerotp/contracts";
 import type { Db, MongoClient } from "mongodb";
 
@@ -321,7 +321,7 @@ function rapidRequest(
   gateSessionId: string,
   fingerprint: FingerprintVector,
   issuedAt: number,
-): RapidAuthRequest {
+): CanonicalReportRequest {
   return {
     protocolVersion: 1,
     siteId: scope.siteId,
@@ -329,20 +329,17 @@ function rapidRequest(
     audience: "https://customer.example",
     nonce: "nonce_initial_request_123456",
     issuedAt,
+    reportSequence: -1,
     payload: {
-      gateSessionId,
       request: {
         siteId: scope.siteId,
         clientIp: "203.0.113.5",
         method: "GET",
         path: "/",
       },
-      browser: {
-        protocolVersion: 1,
-        evidence,
-        fingerprint,
-        proofs: {},
-      },
+      browserEvidence: evidence,
+      fingerprint,
+      proofs: {},
     },
   };
 }
@@ -361,7 +358,7 @@ function openInput(overrides: Record<string, unknown> = {}) {
   return {
     scope,
     gateSessionId,
-    initialRequest: rapidRequest(
+    initialReport: rapidRequest(
       gateSessionId,
       fingerprint,
       observedAt.getTime(),
@@ -387,7 +384,7 @@ describe("BotBlockerSessionPersistence fingerprint selection", () => {
     assert.equal(state.intelligence.length, 1);
     assert.equal(state.intelligence[0]!.gateSessionCount, 2);
     assert.equal(state.riskEvents.length, 1);
-    assert.equal(state.riskEvents[0]!.recordType, "initial_request");
+    assert.equal(state.riskEvents[0]!.recordType, "canonical_report");
   });
 
   it("never selects on IP-only or non-exact fingerprint evidence", async () => {
@@ -546,10 +543,13 @@ describe("BotBlockerSessionPersistence fingerprint selection", () => {
     const session = await state.persistence.openGateSession(openInput());
     const event = state.riskEvents[0]!;
 
-    assert.deepEqual(session.initialRequest, event.initialRequest);
-    assert.equal(event.recordType, "initial_request");
+    assert.deepEqual(session.initialReport.report, event.report);
+    assert.deepEqual(
+      session.initialReport.serverEvidence,
+      event.serverEvidence,
+    );
+    assert.equal(event.recordType, "canonical_report");
     assert.equal(event.reportSequence, -1);
-    assert.equal(event.eventIndex, 0);
     assert.equal(
       session.retentionExpiresAt.getTime() - now.getTime(),
       BOTBLOCKER_SESSION_INPUT_RETENTION_SECONDS * 1_000,
@@ -559,11 +559,11 @@ describe("BotBlockerSessionPersistence fingerprint selection", () => {
       BOTBLOCKER_SESSION_INPUT_RETENTION_SECONDS * 1_000,
     );
     assert.deepEqual(
-      session.initialRequest.request.payload.browser.fingerprint,
+      session.initialReport.report.payload.fingerprint,
       vector(),
     );
-    assert.deepEqual(session.initialRequest.request.payload.browser.proofs, {});
-    assert.equal(session.initialRequest.risk.ipBlacklisted, false);
+    assert.deepEqual(session.initialReport.report.payload.proofs, {});
+    assert.equal(session.initialReport.serverEvidence.ipBlacklisted, false);
   });
 
   it("rejects stale and conflicting reuse of an initialized gate session", async () => {

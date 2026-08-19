@@ -9,9 +9,8 @@ import { encodeIpForRangeLookup } from "./ip-utils.js";
  * correction there is no repository-owned import pipeline — the user
  * loads each CSV into MongoDB manually (e.g. `mongoimport`, or a
  * Cursor-assisted one-off load) to match this shape. This module defines
- * only that shape/indexes plus the synchronous indexed range lookup a
- * later step calls from the fast-immediate branch; nothing here is wired
- * into `rapidAuthMutation` yet.
+ * that shape/indexes plus the synchronous indexed range lookup used by
+ * the canonical first-report network-intelligence branch.
  *
  * Physically separate per address family (not one collection with a
  * `family` filter) so a v4 lookup never touches v6 storage/index/working

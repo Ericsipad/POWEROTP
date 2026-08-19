@@ -5,15 +5,13 @@ import {
   AgentEntitlementRequestSchema,
   BotBlockerCredentialRotationResponseSchema,
   BotBlockerRuntimeRequestEnvelopeSchema,
-  BrowserAssessmentRequestSchema,
+  CanonicalReportRequestSchema,
   CompleteChallengeRequestSchema,
   CreateChallengeRequestSchema,
   PaidTokenPassAssertionRequestSchema,
   PassportAssertionRequestSchema,
   PassportRegistrationRequestSchema,
-  RapidAuthRequestSchema,
   ReadChallengeRequestSchema,
-  RiskEventsRequestSchema,
 } from "./botblocker-api-runtime.js";
 import {
   FINGERPRINT_COLLECTOR_VERSION,
@@ -68,43 +66,98 @@ const paidPass = {
   expiresAt: NOW + 60_000,
 };
 
-describe("Phase 8 runtime route contracts", () => {
-  it("accepts each runtime route payload in the common envelope", () => {
+describe("canonical runtime report contract", () => {
+  it("uses one shape for first contact and later updates", () => {
+    assert.equal(CanonicalReportRequestSchema.safeParse({
+      ...base,
+      reportSequence: -1,
+      payload: {
+        request: { siteId: SITE_ID, method: "GET", path: "/" },
+        browserEvidence: browser.evidence,
+        fingerprint,
+        proofs: browser.proofs,
+      },
+    }).success, true);
+    assert.equal(CanonicalReportRequestSchema.safeParse({
+      ...base,
+      reportSequence: 1,
+      payload: {
+        behaviorReport: {
+          protocolVersion: 1,
+          trigger: "recurring",
+          sequence,
+          evidence,
+        },
+        riskSignals: [{ kind: "velocity_anomaly", occurredAt: NOW }],
+      },
+    }).success, true);
+  });
+
+  it("allows every evidence category to be omitted", () => {
+    assert.equal(CanonicalReportRequestSchema.safeParse({
+      ...base,
+      reportSequence: 2,
+      payload: {},
+    }).success, true);
+  });
+
+  it("requires closed scope, order, freshness, and authentication bindings", () => {
+    for (const field of [
+      "protocolVersion",
+      "siteId",
+      "gateSessionId",
+      "audience",
+      "reportSequence",
+      "nonce",
+      "issuedAt",
+    ] as const) {
+      const request: Record<string, unknown> = {
+        ...base,
+        reportSequence: 1,
+        payload: {},
+      };
+      delete request[field];
+      assert.equal(CanonicalReportRequestSchema.safeParse(request).success, false);
+    }
+  });
+
+  it("rejects mismatched nested scope/order and caller authority", () => {
+    assert.equal(CanonicalReportRequestSchema.safeParse({
+      ...base,
+      reportSequence: 1,
+      payload: {
+        behaviorReport: {
+          protocolVersion: 1,
+          trigger: "recurring",
+          sequence: { ...sequence, sequence: 2 },
+          evidence,
+        },
+      },
+    }).success, false);
+    assert.equal(CanonicalReportRequestSchema.safeParse({
+      ...base,
+      reportSequence: -1,
+      payload: {
+        request: {
+          siteId: "site_other_012345678",
+          method: "GET",
+          path: "/",
+        },
+      },
+    }).success, false);
+    for (const forbidden of ["signature", "score", "weights", "decision"]) {
+      assert.equal(CanonicalReportRequestSchema.safeParse({
+        ...base,
+        reportSequence: 1,
+        payload: { [forbidden]: "caller-value" },
+      }).success, false);
+    }
+  });
+});
+
+describe("other runtime route contracts", () => {
+  it("accepts challenge, Passport, paid-pass, and entitlement envelopes", () => {
     const cases: Array<[unknown, { safeParse(value: unknown): { success: boolean } }]> = [
-      [
-        {
-          ...base,
-          payload: {
-            gateSessionId: GATE_ID,
-            request: { siteId: SITE_ID, method: "GET", path: "/" },
-            browser,
-          },
-        },
-        RapidAuthRequestSchema,
-      ],
-      [
-        {
-          ...base,
-          payload: {
-            report: { protocolVersion: 1, trigger: "initial", sequence, evidence },
-          },
-        },
-        BrowserAssessmentRequestSchema,
-      ],
-      [
-        {
-          ...base,
-          payload: {
-            batch: {
-              protocolVersion: 1,
-              siteId: SITE_ID,
-              sequence,
-              events: [{ kind: "velocity_anomaly", occurredAt: NOW }],
-            },
-          },
-        },
-        RiskEventsRequestSchema,
-      ],
       [{ ...base, payload: { gateSessionId: GATE_ID } }, CreateChallengeRequestSchema],
       [
         { ...base, payload: { challengeId: "challenge_012345678" } },
@@ -146,142 +199,12 @@ describe("Phase 8 runtime route contracts", () => {
     }
   });
 
-  it("requires every common authentication binding", () => {
-    for (const field of [
-      "protocolVersion",
-      "siteId",
-      "gateSessionId",
-      "audience",
-      "nonce",
-      "issuedAt",
-    ] as const) {
-      const request: Record<string, unknown> = { ...base, payload: {} };
-      delete request[field];
-      assert.equal(
-        BotBlockerRuntimeRequestEnvelopeSchema.safeParse(request).success,
-        false,
-      );
-    }
-  });
-
-  it("rejects mismatched nested protocol and site scope", () => {
-    assert.equal(
-      RapidAuthRequestSchema.safeParse({
-        ...base,
-        payload: {
-          gateSessionId: GATE_ID,
-          browser,
-          request: {
-            siteId: "site_other_012345678",
-            method: "GET",
-            path: "/",
-          },
-        },
-      }).success,
-      false,
-    );
-    assert.equal(
-      RiskEventsRequestSchema.safeParse({
-        ...base,
-        payload: {
-          batch: {
-            protocolVersion: 1,
-            siteId: "site_other_012345678",
-            sequence,
-            events: [{ kind: "velocity_anomaly", occurredAt: NOW }],
-          },
-        },
-      }).success,
-      false,
-    );
-    assert.equal(
-      PassportAssertionRequestSchema.safeParse({
-        ...base,
-        payload: { ...passport, audience: "https://attacker.example" },
-      }).success,
-      false,
-    );
-    assert.equal(
-      PaidTokenPassAssertionRequestSchema.safeParse({
-        ...base,
-        payload: { ...paidPass, siteId: "site_other_012345678" },
-      }).success,
-      false,
-    );
-  });
-
-  it("rejects caller authority and unknown fields", () => {
-    for (const forbidden of [
-      "signature",
-      "score",
-      "weights",
-      "ownerId",
-      "success",
-      "unexpected",
-    ]) {
-      assert.equal(
-        CreateChallengeRequestSchema.safeParse({
-          ...base,
-          payload: { gateSessionId: GATE_ID },
-          [forbidden]: forbidden === "success" ? true : "caller-value",
-        }).success,
-        false,
-      );
-      assert.equal(
-        CreateChallengeRequestSchema.safeParse({
-          ...base,
-          payload: {
-            gateSessionId: GATE_ID,
-            [forbidden]: forbidden === "success" ? true : "caller-value",
-          },
-        }).success,
-        false,
-      );
-    }
-  });
-
-  it("transports fingerprint only on initial rapid auth", () => {
-    assert.equal(RapidAuthRequestSchema.safeParse({
+  it("keeps the generic runtime envelope closed", () => {
+    assert.equal(BotBlockerRuntimeRequestEnvelopeSchema.safeParse({
       ...base,
-      payload: {
-        gateSessionId: GATE_ID,
-        request: { siteId: SITE_ID, method: "GET", path: "/" },
-        browser: { ...browser, fingerprint },
-      },
-    }).success, true);
-    assert.equal(BrowserAssessmentRequestSchema.safeParse({
-      ...base,
-      payload: {
-        report: {
-          protocolVersion: 1,
-          trigger: "recurring",
-          sequence,
-          evidence,
-          fingerprint,
-        },
-      },
+      payload: {},
+      score: 100,
     }).success, false);
-  });
-
-  it("rejects invented proof and entitlement success", () => {
-    assert.equal(
-      PassportAssertionRequestSchema.safeParse({
-        ...base,
-        payload: { ...passport, verified: true },
-      }).success,
-      false,
-    );
-    assert.equal(
-      AgentEntitlementRequestSchema.safeParse({
-        ...base,
-        payload: {
-          gateSessionId: GATE_ID,
-          paidTokenPass: paidPass,
-          entitled: true,
-        },
-      }).success,
-      false,
-    );
   });
 });
 
@@ -297,12 +220,9 @@ describe("credential rotation response", () => {
       BotBlockerCredentialRotationResponseSchema.safeParse(response).success,
       true,
     );
-    assert.equal(
-      BotBlockerCredentialRotationResponseSchema.safeParse({
-        ...response,
-        credentialHash: "secret",
-      }).success,
-      false,
-    );
+    assert.equal(BotBlockerCredentialRotationResponseSchema.safeParse({
+      ...response,
+      credentialHash: "secret",
+    }).success, false);
   });
 });

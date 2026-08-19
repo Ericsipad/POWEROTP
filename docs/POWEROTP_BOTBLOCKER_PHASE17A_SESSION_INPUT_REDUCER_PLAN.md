@@ -438,9 +438,10 @@ This design is larger than one implementation session. Execute in fresh sessions
    transient bounded history aggregates, while missing inputs remain excluded.
 6. **Project callback/pull updates.** Notify middleware after committed profile/score changes
    using the existing project callback boundary and scoped visitor-token pull.
-7. **Status: design complete (2026-08-19); implementation split pending. Unified risk report,
-   row scoring, and profile average.** Follow the dedicated plan's three fresh implementation
-   sessions. Do not retain the superseded parallel initial/behavior/risk ingestion paths.
+7. **Status: implementation in progress (2026-08-19); canonical contract/transport slice
+   complete. Unified risk report, row scoring, and profile average.** Follow the dedicated plan's
+   remaining two fresh implementation sessions. The superseded parallel
+   initial/behavior/risk ingestion paths have been removed.
 8. **Deferred external IP profile/scoring integration.** Select a real vendor first, approve its
    bounded profile fields, then append and score them.
 

@@ -91,7 +91,7 @@ test("timeout fails open and leaves the decision pending", async () => {
   const { origin } = await start({
     decisionTimeoutMs: 50,
     services: {
-      requestDecision(_request, session) {
+      submitReport(_report, _authorization, session) {
         currentSession = session;
         return pending;
       },
@@ -158,7 +158,7 @@ test("late OTP replaces fail-open and cannot be overwritten by timeout or cleara
   const { origin } = await start({
     decisionTimeoutMs: 50,
     services: {
-      requestDecision(_request, session) {
+      submitReport(_report, _authorization, session) {
         currentSession = session;
         return pending;
       },
@@ -230,7 +230,7 @@ test("late OTP replaces fail-open and cannot be overwritten by timeout or cleara
 test("locally verifies and issues a hardened signed clearance cookie", async () => {
   const { origin } = await start({
     services: {
-      async requestDecision(_context, session) {
+      async submitReport(_report, _authorization, session) {
         const candidate = decision("allow", session);
         return {
           status: "decision",
@@ -284,7 +284,7 @@ test("locally verifies and issues a hardened signed clearance cookie", async () 
 test("decision bridge validates through the verifier and restores trusted ordering", async () => {
   const { origin } = await start({
     services: {
-      requestDecision: async (_context, session) => ({
+      submitReport: async (_report, _authorization, session) => ({
         status: "decision",
         visitorToken,
         candidate: decision("allow", session),
@@ -325,14 +325,27 @@ test("first contact uses bounded evidence and credential, later calls use only t
   let initialRoute: string | undefined;
   let transportedFingerprint: FingerprintVector | undefined;
   let laterToken: string | undefined;
+  let laterReportSequence: number | undefined;
   const { origin } = await start({
     services: {
-      requestDecision(request, session) {
+      submitReport(report, authorization, session) {
+        if (!("siteCredential" in authorization)) {
+          laterToken = authorization.visitorToken;
+          laterReportSequence = report.reportSequence;
+          assert.equal(report.payload.fingerprint, undefined);
+          return Promise.resolve({
+            status: "unavailable",
+            reason: "not_implemented",
+            retryable: false,
+            leakedToken: authorization.visitorToken,
+          });
+        }
         requestCalls += 1;
-        firstCredential = request.siteCredential;
-        firstPath = request.context.path;
-        initialRoute = request.browser.evidence.routePath;
-        transportedFingerprint = request.browser.fingerprint;
+        assert.equal(report.reportSequence, -1);
+        firstCredential = authorization.siteCredential;
+        firstPath = report.payload.request?.path;
+        initialRoute = report.payload.browserEvidence?.routePath;
+        transportedFingerprint = report.payload.fingerprint;
         return Promise.resolve({
           status: "decision",
           visitorToken,
@@ -340,15 +353,6 @@ test("first contact uses bounded evidence and credential, later calls use only t
         });
       },
       verifyDecision: async (candidate) => ({ verified: true, decision: candidate }),
-      assessBrowser(_report, authorization) {
-        laterToken = authorization.visitorToken;
-        return Promise.resolve({
-          status: "unavailable",
-          reason: "not_implemented",
-          retryable: false,
-          leakedToken: authorization.visitorToken,
-        });
-      },
     },
   });
   const page = await fetch(`${origin}/private?secret=discarded`);
@@ -391,7 +395,7 @@ test("first contact uses bounded evidence and credential, later calls use only t
     headers: bridgeHeaders(cookie, true),
     body: JSON.stringify({ candidate: deliveredBody.candidate }),
   });
-  const report = await fetch(`${origin}/_powerotp/browser-assessment`, {
+  const report = await fetch(`${origin}/_powerotp/report`, {
     method: "POST",
     headers: bridgeHeaders(cookie, true),
     body: JSON.stringify({
@@ -414,6 +418,7 @@ test("first contact uses bounded evidence and credential, later calls use only t
   assert.equal(report.status, 503);
   assert.ok(!(await report.text()).includes(visitorToken));
   assert.equal(laterToken, visitorToken);
+  assert.equal(laterReportSequence, 0);
 
   const repeated = await fetch(`${origin}/_powerotp/decision`, {
     method: "POST",
@@ -429,7 +434,7 @@ test("authoritative verification retains OTP state until browser acknowledgement
   let launchFails = true;
   const { origin } = await start({
     services: {
-      requestDecision: async (_context, session) => ({
+      submitReport: async (_report, _authorization, session) => ({
         status: "decision",
         visitorToken,
         candidate: decision("otp", session),
@@ -586,7 +591,7 @@ test("bridge bodies are bounded and unbacked services are typed unavailable", as
     message: "This service is not available",
     retryable: false,
   });
-  const oversized = await fetch(`${origin}/_powerotp/browser-assessment`, {
+  const oversized = await fetch(`${origin}/_powerotp/report`, {
     method: "POST",
     headers: bridgeHeaders(cookie, true),
     body: JSON.stringify({ padding: "x".repeat(600) }),
@@ -603,7 +608,7 @@ test("bridge bodies are bounded and unbacked services are typed unavailable", as
 test("malformed unavailable responses cannot disclose server credentials", async () => {
   const { origin } = await start({
     services: {
-      requestDecision: async () => ({
+      submitReport: async () => ({
         status: "unavailable",
         reason: "dependency_unavailable",
         retryable: true,
@@ -680,7 +685,7 @@ test("synchronous first-contact failure preserves immediate customer delivery", 
   const { origin } = await start({
     decisionTimeoutMs: 2_000,
     services: {
-      requestDecision() {
+      submitReport() {
         throw new Error("unavailable");
       },
     },
@@ -708,7 +713,7 @@ test("synchronous first-contact failure preserves immediate customer delivery", 
 test("an OTP result can never issue its paired clearance", async () => {
   const { origin } = await start({
     services: {
-      async requestDecision(_context, session) {
+      async submitReport(_report, _authorization, session) {
         return {
           status: "decision",
           visitorToken,

@@ -13,10 +13,8 @@ import { createId } from "./security.js";
  * name (see `ip-reputation-client.ts`) — the user mentioned one informally
  * as "ip.fino," likely a mishearing, so this stays generic/string-typed.
  * `rawResponse` is stored as-received (never re-shaped) so a later session
- * can add real score-merge logic without another schema change. Nothing
- * here is called from `rapidAuthMutation` yet — that wiring is a later
- * step; this module only builds the cache read/write path plus the
- * (currently unwired) awaited lookup in
+ * can add real score-merge logic without another schema change. This
+ * module provides the cache read/write path used by the awaited lookup in
  * `backend/packages/api/src/botblocker-ip-reputation-service.ts`.
  */
 export interface IpApiLookupDocument {
