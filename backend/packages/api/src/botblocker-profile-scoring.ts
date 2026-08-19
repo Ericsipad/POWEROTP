@@ -24,7 +24,7 @@ type IntelligenceStore = Pick<
   BotBlockerIntelligencePersistence,
   "findUserIntelligence" | "replaceCurrentScore"
 >;
-type ScoreInput =
+export type ScoringExpressionInput =
   | number
   | string
   | readonly boolean[]
@@ -46,11 +46,11 @@ export function calculateProfileScore(
   if (aggregate.presentFieldCount === 0) {
     return { status: "unavailable", reason: "no_usable_fields" };
   }
-  const score = evaluateFinalExpression(
+  const score = evaluateScoringFinalExpression(
     stored.configuration.finalExpression,
     aggregate,
   );
-  return isScore(score)
+  return isScoringResult(score)
     ? { status: "available", score }
     : { status: "unavailable", reason: "invalid_final_calculation" };
 }
@@ -96,13 +96,13 @@ function aggregateFieldScores(
     if (!field.enabled) continue;
     const input = resolveScoreInput(profile, field.field);
     if (input === undefined) continue;
-    const result = evaluateFieldExpression(field.expression, input);
-    if (!isScore(result)) continue;
-    const contribution = safeNumber(result * field.weight);
-    const nextWeight = safeNumber(presentWeightSum + field.weight);
+    const result = evaluateScoringFieldExpression(field.expression, input);
+    if (!isScoringResult(result)) continue;
+    const contribution = safeScoringNumber(result * field.weight);
+    const nextWeight = safeScoringNumber(presentWeightSum + field.weight);
     const nextSum = contribution === undefined
       ? undefined
-      : safeNumber(weightedSum + contribution);
+      : safeScoringNumber(weightedSum + contribution);
     if (nextSum === undefined || nextWeight === undefined) continue;
     weightedSum = nextSum;
     presentWeightSum = nextWeight;
@@ -114,7 +114,7 @@ function aggregateFieldScores(
 function resolveScoreInput(
   profile: UserIntelligenceDocument,
   field: ProfileScoreableField,
-): ScoreInput | undefined {
+): ScoringExpressionInput | undefined {
   switch (field) {
     case "osCpu":
       return profile.osCpu;
@@ -157,9 +157,9 @@ function resolveScoreInput(
   }
 }
 
-function evaluateFieldExpression(
+export function evaluateScoringFieldExpression(
   expression: ProfileFieldScoreExpression,
-  input: ScoreInput,
+  input: ScoringExpressionInput,
 ): number | undefined {
   const node = expression as ExpressionNode;
   if (node.op === "input") {
@@ -175,7 +175,7 @@ function evaluateFieldExpression(
   }
   if (node.op === "true_ratio") {
     return Array.isArray(input) && input.length > 0
-      ? safeNumber(input.filter(Boolean).length / input.length)
+      ? safeScoringNumber(input.filter(Boolean).length / input.length)
       : undefined;
   }
   if (node.op === "compare") {
@@ -188,11 +188,11 @@ function evaluateFieldExpression(
       : usableNumber(node.whenFalse);
   }
   return evaluateNumericExpression(node, (child) =>
-    evaluateFieldExpression(child as ProfileFieldScoreExpression, input)
+    evaluateScoringFieldExpression(child as ProfileFieldScoreExpression, input)
   );
 }
 
-function evaluateFinalExpression(
+export function evaluateScoringFinalExpression(
   expression: ProfileScoreFinalExpression,
   values: {
     weightedSum: number;
@@ -205,7 +205,7 @@ function evaluateFinalExpression(
     return usableNumber(values[node.name as keyof typeof values]);
   }
   return evaluateNumericExpression(node, (child) =>
-    evaluateFinalExpression(child as ProfileScoreFinalExpression, values)
+    evaluateScoringFinalExpression(child as ProfileScoreFinalExpression, values)
   );
 }
 
@@ -217,7 +217,7 @@ function evaluateNumericExpression(
   if (node.op === "abs" || node.op === "negate") {
     const value = evaluateChild(node.value);
     if (value === undefined) return undefined;
-    return safeNumber(node.op === "abs" ? Math.abs(value) : -value);
+    return safeScoringNumber(node.op === "abs" ? Math.abs(value) : -value);
   }
   if (!node.left || !node.right) return undefined;
   const left = evaluateChild(node.left);
@@ -225,17 +225,17 @@ function evaluateNumericExpression(
   if (left === undefined || right === undefined) return undefined;
   switch (node.op) {
     case "add":
-      return safeNumber(left + right);
+      return safeScoringNumber(left + right);
     case "subtract":
-      return safeNumber(left - right);
+      return safeScoringNumber(left - right);
     case "multiply":
-      return safeNumber(left * right);
+      return safeScoringNumber(left * right);
     case "divide":
-      return right === 0 ? undefined : safeNumber(left / right);
+      return right === 0 ? undefined : safeScoringNumber(left / right);
     case "min":
-      return safeNumber(Math.min(left, right));
+      return safeScoringNumber(Math.min(left, right));
     case "max":
-      return safeNumber(Math.max(left, right));
+      return safeScoringNumber(Math.max(left, right));
     default:
       return undefined;
   }
@@ -269,7 +269,10 @@ function compare(
   return input >= expected;
 }
 
-function resolveFieldInput(input: ScoreInput, name: string | undefined): unknown {
+function resolveFieldInput(
+  input: ScoringExpressionInput,
+  name: string | undefined,
+): unknown {
   if (name === "value") {
     return typeof input === "number" || typeof input === "string"
       ? input
@@ -293,23 +296,23 @@ function average(values: number[]): number | undefined {
   if (values.length === 0) return undefined;
   let sum = 0;
   for (const value of values) {
-    const next = safeNumber(sum + value);
+    const next = safeScoringNumber(sum + value);
     if (next === undefined) return undefined;
     sum = next;
   }
-  return safeNumber(sum / values.length);
+  return safeScoringNumber(sum / values.length);
 }
 
 function usableNumber(value: unknown): number | undefined {
-  return typeof value === "number" ? safeNumber(value) : undefined;
+  return typeof value === "number" ? safeScoringNumber(value) : undefined;
 }
 
-function safeNumber(value: number): number | undefined {
+export function safeScoringNumber(value: number): number | undefined {
   return Number.isFinite(value) && Math.abs(value) <= Number.MAX_SAFE_INTEGER
     ? value
     : undefined;
 }
 
-function isScore(value: number | undefined): value is number {
+export function isScoringResult(value: number | undefined): value is number {
   return value !== undefined && value >= 0 && value <= 100;
 }

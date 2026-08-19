@@ -11,6 +11,7 @@ import { ensureBotBlockerIpBlacklistIndexes } from "./botblocker-ip-blacklist-pe
 import { ensureBotBlockerNetworkRangeIndexes } from "./botblocker-network-range-persistence.js";
 import { ensureBotBlockerPolicyIndexes } from "./botblocker-policy-persistence.js";
 import { ensureBotBlockerProfileScoringIndexes } from "./botblocker-profile-scoring-persistence.js";
+import { ensureBotBlockerRiskEventScoringIndexes } from "./botblocker-risk-event-scoring-persistence.js";
 import { ensureBotBlockerSiteCredentialIndexes } from "./botblocker-site-credential-persistence.js";
 import { ensureBotBlockerSiteIndexes } from "./botblocker-site-persistence.js";
 import { ensureChallengeIndexes } from "./challenge-persistence.js";
@@ -244,6 +245,9 @@ export async function ensureIndexes(db: Db) {
     ensureIndexStep("botBlockerAsnClassification", () => ensureBotBlockerAsnClassificationIndexes(db)),
     ensureIndexStep("botBlockerAsnTypeScore", () => ensureBotBlockerAsnTypeScoreIndexes(db)),
     ensureIndexStep("botBlockerProfileScoring", () => ensureBotBlockerProfileScoringIndexes(db)),
+    ensureIndexStep("botBlockerRiskEventScoring", () =>
+      ensureBotBlockerRiskEventScoringIndexes(db)
+    ),
     ensureIndexStep("botBlockerPolicy", () => ensureBotBlockerPolicyIndexes(db)),
   ]);
 }

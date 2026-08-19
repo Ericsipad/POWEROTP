@@ -134,6 +134,7 @@ function fixture(options: {
   failRiskInsert?: boolean;
   failIntelligenceWrite?: boolean;
   failScoring?: boolean;
+  failRiskEventScoring?: boolean;
 } = {}) {
   const gateSessions: GateSessionDocument[] = [];
   const riskEvents: DurableRiskEventDocument[] = [];
@@ -144,6 +145,7 @@ function fixture(options: {
     committedProfileVisible: boolean;
   }> = [];
   const callbackCalls: string[] = [];
+  const riskScoringCalls: number[] = [];
   const collection = (name: string) => {
     const rows = name === "gateSessions"
       ? gateSessions
@@ -261,6 +263,13 @@ function fixture(options: {
       async (_scope, gateSessionId) => {
         callbackCalls.push(gateSessionId);
       },
+      async (candidate) => {
+        riskScoringCalls.push(candidate.reportSequence);
+        if (options.failRiskEventScoring) {
+          throw new Error("injected risk-event scoring failure");
+        }
+        return { status: "unavailable", reason: "scoring_unconfigured" };
+      },
     ),
     gateSessions,
     intelligence,
@@ -268,6 +277,7 @@ function fixture(options: {
     riskEvents,
     scoringCalls,
     callbackCalls,
+    riskScoringCalls,
   };
 }
 
@@ -482,6 +492,11 @@ describe("BotBlockerSessionPersistence fingerprint selection", () => {
     assert.equal(replay._id, first._id);
     assert.equal(state.gateSessions.length, 1);
     assert.equal(state.riskEvents.length, 1);
+    assert.deepEqual(state.riskScoringCalls, [-1]);
+    assert.deepEqual(state.riskEvents[0]!.risk_event_score, {
+      status: "unavailable",
+      reason: "scoring_unconfigured",
+    });
     assert.equal(state.intelligence[0]!.gateSessionCount, 1);
     assert.deepEqual(state.scoringCalls, [{
       userIntelligenceId: first.userIntelligenceId,
@@ -527,6 +542,20 @@ describe("BotBlockerSessionPersistence fingerprint selection", () => {
     assert.deepEqual(state.callbackCalls, []);
   });
 
+  it("rolls back the initial session when insert-time row scoring fails", async () => {
+    const state = fixture({ failRiskEventScoring: true });
+    await assert.rejects(
+      state.persistence.openGateSession(openInput()),
+      /injected risk-event scoring failure/,
+    );
+    assert.deepEqual(state.gateSessions, []);
+    assert.deepEqual(state.riskEvents, []);
+    assert.deepEqual(state.intelligence, []);
+    assert.deepEqual(state.fingerprints, []);
+    assert.deepEqual(state.scoringCalls, []);
+    assert.deepEqual(state.callbackCalls, []);
+  });
+
   it("does not notify when post-commit scoring fails", async () => {
     const state = fixture({ failScoring: true });
     await assert.rejects(
@@ -544,6 +573,10 @@ describe("BotBlockerSessionPersistence fingerprint selection", () => {
     const event = state.riskEvents[0]!;
 
     assert.deepEqual(session.initialReport.report, event.report);
+    assert.deepEqual(event.risk_event_score, {
+      status: "unavailable",
+      reason: "scoring_unconfigured",
+    });
     assert.deepEqual(
       session.initialReport.serverEvidence,
       event.serverEvidence,

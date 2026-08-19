@@ -7,6 +7,7 @@ import type {
   FingerprintVerifyLookup,
   FingerprintVerifySource,
   ProfileScoreStatus,
+  RiskEventScoreStatus,
   UserIntelligenceRecord,
   VerificationType,
 } from "@powerotp/contracts";
@@ -181,6 +182,7 @@ export interface DurableRiskEventDocument extends BotBlockerScope {
   recordType: "canonical_report";
   report: CanonicalReportRequest;
   serverEvidence: CanonicalReportServerEvidence;
+  risk_event_score: RiskEventScoreStatus;
   /** Derived from the authenticated audience plus sanitized route path. */
   pageUrl?: string;
   occurredAt: Date;

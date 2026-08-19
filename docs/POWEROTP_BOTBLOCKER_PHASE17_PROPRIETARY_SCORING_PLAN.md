@@ -1,7 +1,7 @@
 # BotBlocker Phase 17 — Proprietary scoring design plan
 
-**Status: implementation in progress; unified risk-report/reducer design approved
-(2026-08-19).** This document is the durable, repo-tracked result of
+**Status: implementation in progress; unified report transport and risk-event
+configuration/row scoring complete (2026-08-19).** This document is the durable, repo-tracked result of
 the Phase 17 design conversation. It does not claim that fingerprint collection, profile
 aggregation, scoring, callback delivery, or rapid-server synchronization has shipped.
 
@@ -300,9 +300,9 @@ work in dependency-ordered fresh sessions:
    typed-unavailable behavior without invented defaults.
 6. **Project callback/pull.** Extend the existing signed project callback and scoped-token pull
    boundary after committed profile/score updates.
-7. **Status: implementation in progress (2026-08-19); canonical contract/transport slice
-   complete. Unified report and `riskEvents` scoring.** Complete the dedicated plan's remaining
-   fresh slices for event configuration/row scoring, then `risk_events_sum` and overall
+7. **Status: implementation in progress (2026-08-19); canonical contract/transport and
+   event configuration/row-scoring slices complete. Unified report and `riskEvents` scoring.**
+   Complete the dedicated plan's remaining fresh slice for `risk_events_sum` and overall
    profile-scoring integration.
 8. **Deferred external IP profile/scoring integration.** Select and confirm a real vendor first,
    approve its bounded fields, then append approved profile inputs and scoring registration.

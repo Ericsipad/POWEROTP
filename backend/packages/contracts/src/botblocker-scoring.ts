@@ -23,6 +23,12 @@ export const ProfileFieldInputNameSchema = z.enum([
   "touchEvent",
   "touchStart",
 ]);
+export type ScoringFieldInputType =
+  | "number"
+  | "string"
+  | "screen_resolution"
+  | "touch_support"
+  | "boolean_array";
 
 const fieldLeafSchemas = [
   ExpressionLiteralSchema,
@@ -189,7 +195,7 @@ export const ProfileScoringConfigurationSchema = z
       }
       seen.add(field.field);
       const inputType = fieldInputTypes.get(field.field);
-      const invalidOperator = findInvalidFieldOperator(
+      const invalidOperator = findInvalidScoringFieldOperator(
         field.expression,
         inputType!,
       );
@@ -247,9 +253,9 @@ export const OperatorProfileScoringConfigurationResponseSchema =
 export const OperatorProfileScoringConfigurationMutationResponseSchema =
   ConfiguredProfileScoringResponseSchema;
 
-function findInvalidFieldOperator(
+export function findInvalidScoringFieldOperator(
   expression: unknown,
-  inputType: (typeof profileScoreableFields)[number]["inputType"],
+  inputType: ScoringFieldInputType,
 ): string | undefined {
   const node = expression as {
     op: string;
@@ -262,11 +268,11 @@ function findInvalidFieldOperator(
     expected?: unknown;
   };
   if (["add", "subtract", "multiply", "divide", "min", "max"].includes(node.op)) {
-    return findInvalidFieldOperator(node.left, inputType) ??
-      findInvalidFieldOperator(node.right, inputType);
+    return findInvalidScoringFieldOperator(node.left, inputType) ??
+      findInvalidScoringFieldOperator(node.right, inputType);
   }
   if (node.op === "abs" || node.op === "negate") {
-    return findInvalidFieldOperator(node.value, inputType);
+    return findInvalidScoringFieldOperator(node.value, inputType);
   }
   if (node.op === "input") {
     return fieldInputType(inputType, node.name) === "number"
@@ -294,7 +300,7 @@ function findInvalidFieldOperator(
 }
 
 function fieldInputType(
-  inputType: (typeof profileScoreableFields)[number]["inputType"],
+  inputType: ScoringFieldInputType,
   inputName: string | undefined,
 ): "number" | "string" | "boolean" | undefined {
   if (inputName === "value") {

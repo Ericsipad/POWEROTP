@@ -341,6 +341,10 @@ describe("Phase 6 BotBlocker persistence contracts", () => {
       updatedAt: now,
       retentionExpiresAt: later,
       serverEvidence: {},
+      risk_event_score: {
+        status: "unavailable" as const,
+        reason: "scoring_unconfigured" as const,
+      },
       report: {
         protocolVersion: 1 as const,
         siteId: scope.siteId,
@@ -396,6 +400,7 @@ describe("Phase 6 BotBlocker persistence contracts", () => {
       recordType: "canonical_report" as const,
       report: initialReport.report,
       serverEvidence: initialReport.serverEvidence,
+      risk_event_score: { status: "available" as const, score: 42 },
       pageUrl: "https://customer.example/products",
       occurredAt: now,
       createdAt: now,

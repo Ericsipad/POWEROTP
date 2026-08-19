@@ -19,6 +19,8 @@ import { BotBlockerPolicyPersistence } from "@powerotp/api/botblocker-policy-per
 import { BotBlockerPolicyService } from "@powerotp/api/botblocker-policy-service.js";
 import { BotBlockerProfileScoringPersistence } from "@powerotp/api/botblocker-profile-scoring-persistence.js";
 import { BotBlockerProfileScoringService } from "@powerotp/api/botblocker-profile-scoring.js";
+import { BotBlockerRiskEventScoringPersistence } from "@powerotp/api/botblocker-risk-event-scoring-persistence.js";
+import { BotBlockerRiskEventScoringService } from "@powerotp/api/botblocker-risk-event-scoring.js";
 import { BotBlockerRuntimeSecurity } from "@powerotp/api/botblocker-runtime-security.js";
 import { BotBlockerSiteCredentialPersistence } from "@powerotp/api/botblocker-site-credential-persistence.js";
 import { BotBlockerSiteCredentialService } from "@powerotp/api/botblocker-site-credential-service.js";
@@ -68,6 +70,7 @@ export interface ServerContext {
   botBlockerAsnClassifications: BotBlockerAsnClassificationPersistence;
   botBlockerAsnTypeScores: BotBlockerAsnTypeScorePersistence;
   botBlockerProfileScoringConfiguration: BotBlockerProfileScoringPersistence;
+  botBlockerRiskEventScoringConfiguration: BotBlockerRiskEventScoringPersistence;
   botBlockerNetworkIntelligence: BotBlockerNetworkIntelligenceService;
   botBlockerPolicy: BotBlockerPolicyService;
   botBlockerPolicyControl: BotBlockerPolicyControlService;
@@ -171,6 +174,11 @@ async function buildServerContext(): Promise<ServerContext> {
     botBlockerProfileScoringConfiguration,
     botBlockerIntelligence,
   );
+  const botBlockerRiskEventScoringConfiguration =
+    new BotBlockerRiskEventScoringPersistence(dataStores.db);
+  const botBlockerRiskEventScoring = new BotBlockerRiskEventScoringService(
+    botBlockerRiskEventScoringConfiguration,
+  );
   const botBlockerIngestion = new BotBlockerIngestionService(
     new BotBlockerIngestionPersistence(
       dataStores.db,
@@ -183,6 +191,7 @@ async function buildServerContext(): Promise<ServerContext> {
           siteId: scope.siteId,
           gateSessionId,
         }),
+      (report, session) => botBlockerRiskEventScoring.calculate(report, session),
     ),
     config,
   );
@@ -264,6 +273,7 @@ async function buildServerContext(): Promise<ServerContext> {
     botBlockerAsnClassifications,
     botBlockerAsnTypeScores,
     botBlockerProfileScoringConfiguration,
+    botBlockerRiskEventScoringConfiguration,
     botBlockerNetworkIntelligence,
     botBlockerPolicy,
     botBlockerPolicyControl,

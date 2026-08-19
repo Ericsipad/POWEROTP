@@ -102,6 +102,9 @@ function fixture(scorePersisted = true) {
   };
   const scoringCalls: string[] = [];
   const callbackCalls: string[] = [];
+  const riskScoringCalls: number[] = [];
+  let riskScore = 25;
+  let failRiskScoring = false;
   const db = {
     collection(name: string) {
       if (name === "gateSessions") {
@@ -149,7 +152,19 @@ function fixture(scorePersisted = true) {
       work: (session: {
         withTransaction: (transaction: () => Promise<void>) => Promise<void>;
       }) => Promise<void>,
-    ) => work({ withTransaction: async (transaction) => transaction() }),
+    ) => work({
+      withTransaction: async (transaction) => {
+        const snapshot = structuredClone({ gateSessions, riskEvents, aggregate });
+        try {
+          await transaction();
+        } catch (error) {
+          gateSessions.splice(0, gateSessions.length, ...snapshot.gateSessions);
+          riskEvents.splice(0, riskEvents.length, ...snapshot.riskEvents);
+          Object.assign(aggregate, snapshot.aggregate);
+          throw error;
+        }
+      },
+    }),
   } as unknown as MongoClient;
   return {
     persistence: new BotBlockerIngestionPersistence(
@@ -162,12 +177,24 @@ function fixture(scorePersisted = true) {
       async (_scope, gateSessionId) => {
         callbackCalls.push(gateSessionId);
       },
+      async (candidate) => {
+        riskScoringCalls.push(candidate.reportSequence);
+        if (failRiskScoring) throw new Error("injected risk scoring failure");
+        return { status: "available", score: riskScore };
+      },
     ),
     gateSessions,
     riskEvents,
     aggregate,
     scoringCalls,
     callbackCalls,
+    riskScoringCalls,
+    setRiskScore(value: number) {
+      riskScore = value;
+    },
+    failRiskScoring() {
+      failRiskScoring = true;
+    },
   };
 }
 
@@ -187,6 +214,7 @@ describe("BotBlockerIngestionPersistence", () => {
     assert.equal(state.riskEvents.length, 1);
     assert.deepEqual(state.scoringCalls, ["bui_owner_123456789"]);
     assert.deepEqual(state.callbackCalls, ["bgs_session_123456789"]);
+    assert.deepEqual(state.riskScoringCalls, [0]);
     assert.deepEqual(state.aggregate, {
       behaviorReportCount: 1,
       pageViewCount: 1,
@@ -197,6 +225,10 @@ describe("BotBlockerIngestionPersistence", () => {
     assert.equal(stored.recordType, "canonical_report");
     assert.equal(stored.pageUrl, pageUrl);
     assert.deepEqual(stored.report, value);
+    assert.deepEqual(stored.risk_event_score, {
+      status: "available",
+      score: 25,
+    });
     assert.equal(stored.report.payload.riskSignals?.length, 1);
     assert.equal(
       stored.retentionExpiresAt.getTime() - stored.occurredAt.getTime(),
@@ -235,6 +267,35 @@ describe("BotBlockerIngestionPersistence", () => {
       "accepted",
     );
     assert.deepEqual(state.scoringCalls, ["bui_owner_123456789"]);
+    assert.deepEqual(state.callbackCalls, []);
+  });
+
+  it("keeps existing row scores immutable when configuration changes", async () => {
+    const state = fixture();
+    await state.persistence.ingestReport(scope, report(0), {}, pageUrl, now);
+    state.setRiskScore(80);
+    await state.persistence.ingestReport(scope, report(1), {}, pageUrl, now);
+
+    assert.deepEqual(
+      state.riskEvents.map((event) => event.risk_event_score),
+      [
+        { status: "available", score: 25 },
+        { status: "available", score: 80 },
+      ],
+    );
+    assert.deepEqual(state.riskScoringCalls, [0, 1]);
+  });
+
+  it("rolls back sequence advancement when row scoring fails", async () => {
+    const state = fixture();
+    state.failRiskScoring();
+    await assert.rejects(
+      state.persistence.ingestReport(scope, report(0), {}, pageUrl, now),
+      /injected risk scoring failure/,
+    );
+    assert.equal(state.gateSessions[0]!.lastAppliedSequence, -1);
+    assert.equal(state.riskEvents.length, 0);
+    assert.deepEqual(state.scoringCalls, []);
     assert.deepEqual(state.callbackCalls, []);
   });
 });

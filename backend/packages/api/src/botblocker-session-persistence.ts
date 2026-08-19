@@ -5,6 +5,7 @@ import type {
   CanonicalReportRequest,
   FingerprintVector,
   FingerprintVerifySource,
+  RiskEventScoreStatus,
 } from "@powerotp/contracts";
 import type { ClientSession, Db, MongoClient } from "mongodb";
 
@@ -67,6 +68,10 @@ export class BotBlockerSessionPersistence {
       scope: BotBlockerScope,
       gateSessionId: string,
     ) => Promise<void>,
+    private readonly scoreRiskEvent?: (
+      report: CanonicalReportRequest,
+      session: ClientSession,
+    ) => Promise<RiskEventScoreStatus>,
   ) {
     this.#client = client;
     this.#gateSessions = db.collection<GateSessionDocument>("gateSessions");
@@ -195,6 +200,12 @@ export class BotBlockerSessionPersistence {
         await this.#gateSessions.insertOne(result, { session });
 
         const occurredAt = new Date(input.initialReport.issuedAt);
+        const riskEventScore = this.scoreRiskEvent
+          ? await this.scoreRiskEvent(input.initialReport, session)
+          : {
+            status: "unavailable" as const,
+            reason: "scoring_unconfigured" as const,
+          };
         const initialEvent: DurableRiskEventDocument = {
           _id: createRiskEventId(),
           ...input.scope,
@@ -204,6 +215,7 @@ export class BotBlockerSessionPersistence {
           recordType: "canonical_report",
           report: input.initialReport,
           serverEvidence: initialReport.serverEvidence,
+          risk_event_score: riskEventScore,
           ...(reportPageUrl(input.initialReport) ? {
             pageUrl: reportPageUrl(input.initialReport),
           } : {}),

@@ -24,6 +24,7 @@ import {
   FingerprintComponentsSchema,
 } from "./fingerprint.js";
 import { FingerprintComponentValueSchemas } from "./fingerprint-components.js";
+import { RiskEventScoreStatusSchema } from "./botblocker-risk-event-scoring.js";
 import { ProfileScoreStatusSchema } from "./botblocker-scoring.js";
 
 const OpaqueIdSchema = z.string().min(16).max(128);
@@ -327,6 +328,7 @@ export const CanonicalRiskEventRecordSchema = RiskEventRecordBaseSchema.extend({
   recordType: z.literal("canonical_report"),
   report: CanonicalReportRequestSchema,
   serverEvidence: CanonicalReportServerEvidenceSchema,
+  risk_event_score: RiskEventScoreStatusSchema,
   pageUrl: z.string().url().max(2_048).optional(),
 })
   .strict()

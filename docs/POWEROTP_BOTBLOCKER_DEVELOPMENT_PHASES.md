@@ -366,9 +366,9 @@ admin audit, lookup, and signed snapshots. Allowlist maps to `allow`; blacklist 
 ### Phase 17 — Proprietary scoring
 
 **Implementation status:** in progress. Phase 17 execution steps 1–6 and step 7's canonical
-report/transport slice are complete. The unified risk-report/reducer design for step 7 was
-approved on 2026-08-19; its row-scoring and profile-average runtime slices plus the later
-external-vendor profile integration remain.
+report/transport plus risk-event configuration/row-scoring slices are complete. The unified
+risk-report/reducer design for step 7 was approved on 2026-08-19; its profile-average runtime
+slice plus the later external-vendor profile integration remain.
 The approved design is saved in
 [`POWEROTP_BOTBLOCKER_PHASE17_PROPRIETARY_SCORING_PLAN.md`](POWEROTP_BOTBLOCKER_PHASE17_PROPRIETARY_SCORING_PLAN.md);
 the approved gate-session synchronization subplan is saved in
@@ -414,7 +414,8 @@ and pulls authoritative session data with the scoped visitor token. Local headle
 remains advisory only. CGNAT is not a direct observable signal, and IPv4/IPv6 remain lookup/storage
 families rather than score inputs. Complete step 7 in fresh sessions for canonical
 contract/transport, event-row configuration/scoring, and `risk_events_sum` profile integration.
-Step 8 later owns external IP profile/scoring integration.
+The first two slices are complete; step 7's profile integration remains. Step 8 later owns
+external IP profile/scoring integration.
 
 ### Phase 18 — Customer risk/OTP policy
 

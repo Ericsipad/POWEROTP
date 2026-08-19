@@ -3833,3 +3833,56 @@ integration, site-return cookie, minute-29 token refresh, Passport, OTP orchestr
 edge publication, or global verify Worker. It adds no formula, weight, threshold, default, fake
 data, migration, seed, deployment, or traffic activation. No `.env` file was read or changed.
 No commit or push was performed.
+
+## 2026-08-19 — BotBlocker Phase 17A item 7 slice 2: immutable risk-event row scoring
+
+**Status: risk-event configuration and insert-time row-scoring slice complete.** Added a separate
+closed V1 risk-event registry with 29 scalar inputs: trusted HTTP method; total and fixed-category
+click counts; mouse directness ratio/count; scroll aggregates; honeypot count; page duration,
+active duration, dimensions, and pointer-bin occupancy/sample/dwell totals; fixed automation
+indicator presence values; and fixed risk-signal-kind counts. Detailed path/page labels, click
+identifiers/positions, pointer coordinates, navigation targets, honeypot identifiers, fingerprint
+components, proof material, timing labels, and external-vendor payloads remain retained but not
+scoreable. Missing evidence categories are unavailable rather than zero-filled; a present
+collection can produce a real zero count/presence value. Mouse directness ratio is unavailable
+when its sample count is zero, and pointer sums use finite safe arithmetic.
+
+**Restricted operator configuration.** Added the singleton
+`botblockerRiskEventScoringConfiguration` document and authenticated
+`GET/POST /v1/control/botblocker/risk-event-scoring`. The route reuses the existing platform-admin
+session, mutation CSRF, rate-limit, and `Idempotency-Key` boundaries. Configuration uses the
+existing bounded restricted scoring-expression grammar: one enabled toggle, expression, and
+nonnegative finite weight per configured registry field plus one final expression over
+`weightedSum`, `presentWeightSum`, and `presentFieldCount`. No JavaScript/eval/dynamic property,
+database, filesystem, or network expression access exists. The collection starts absent; no
+formula, weight, coefficient, threshold, range, default score, migration, or seed was added.
+
+**Immutable insert-time score and transaction boundary.** Every accepted initial or later
+canonical `riskEvents` row now stores `risk_event_score` as either a finite `0..100` result or the
+typed unavailable reason `scoring_unconfigured`, `no_usable_fields`, or
+`invalid_final_calculation`. Field resolution and calculation read the current configuration
+inside the same MongoDB transaction that creates the immutable row and, for later reports,
+advances the gate-session sequence. A scoring/configuration-read failure rolls the transaction
+back. Missing, disabled, incompatible, out-of-range, non-finite, overflowed, or otherwise unusable
+fields are excluded independently from the weighted aggregate and denominator. Exact replay
+returns the existing row without invoking row scoring. Later configuration replacement affects
+only subsequently accepted rows; existing scores are never recalculated, modified, or backfilled.
+
+**Preserved behavior.** The slice does not update `userIntelligence` with an event average.
+Existing profile/fingerprint synchronization, current profile scoring, compare-and-set behavior,
+callback enqueue order, canonical authentication/scope/freshness/replay controls, 90-day event
+retention, 548-day profile retention, raw IP/fingerprint handling, and prohibited-data boundaries
+remain unchanged.
+
+**Verification.** Node `v22.18.0` was used. Full build, lint/typecheck, and package tests passed for
+`@powerotp/contracts` and `@powerotp/api`. The `@powerotp/backend` production build, typecheck, and
+focused **15/15** test suite across 7 suites passed, including the canonical route-inventory guard
+for the new control route. Final root `npm run verify` passed across all workspaces. No MCP or Gate
+package changed, and no browser-reachable contract/code changed, so no MCP, Gate, or gate-next
+production-bundle check was required.
+
+**Explicitly not shipped.** This slice adds no `userIntelligence.risk_events_sum`, scored-row count,
+event-average/profile-scoring integration, Phase 18 customer sensitivity/OTP policy, external
+IP-vendor integration, site-return cookie, minute-29 token refresh, Passport, OTP orchestration,
+billing, edge publication, or global verify Worker. No `.env` file, deployment, or customer
+traffic was changed. No commit or push was performed.

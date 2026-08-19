@@ -1,7 +1,7 @@
 # BotBlocker Phase 17A — Fingerprint collection and gate-session profile sync plan
 
-**Status: implementation in progress; unified risk-report/reducer design approved
-(2026-08-19).** This document is the durable result of the
+**Status: implementation in progress; unified report transport and risk-event
+configuration/row scoring complete (2026-08-19).** This document is the durable result of the
 Phase 17A design session. Despite the historical filename, this phase does not design the
 separate `riskEvents` behavior reducer. It defines:
 
@@ -438,9 +438,10 @@ This design is larger than one implementation session. Execute in fresh sessions
    transient bounded history aggregates, while missing inputs remain excluded.
 6. **Project callback/pull updates.** Notify middleware after committed profile/score changes
    using the existing project callback boundary and scoped visitor-token pull.
-7. **Status: implementation in progress (2026-08-19); canonical contract/transport slice
-   complete. Unified risk report, row scoring, and profile average.** Follow the dedicated plan's
-   remaining two fresh implementation sessions. The superseded parallel
+7. **Status: implementation in progress (2026-08-19); canonical contract/transport and
+   event configuration/row-scoring slices complete. Unified risk report, row scoring, and
+   profile average.** Follow the dedicated plan's remaining profile-average implementation
+   session. The superseded parallel
    initial/behavior/risk ingestion paths have been removed.
 8. **Deferred external IP profile/scoring integration.** Select a real vendor first, approve its
    bounded profile fields, then append and score them.

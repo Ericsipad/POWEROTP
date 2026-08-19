@@ -1,6 +1,9 @@
 import { isDeepStrictEqual } from "node:util";
 
-import type { CanonicalReportRequest } from "@powerotp/contracts";
+import type {
+  CanonicalReportRequest,
+  RiskEventScoreStatus,
+} from "@powerotp/contracts";
 import type { ClientSession, Db, MongoClient } from "mongodb";
 
 import {
@@ -41,6 +44,10 @@ export class BotBlockerIngestionPersistence {
       scope: BotBlockerScope,
       gateSessionId: string,
     ) => Promise<void>,
+    private readonly scoreRiskEvent?: (
+      report: CanonicalReportRequest,
+      session: ClientSession,
+    ) => Promise<RiskEventScoreStatus>,
   ) {
     this.#client = client;
     this.#gateSessions = db.collection<GateSessionDocument>("gateSessions");
@@ -52,6 +59,7 @@ export class BotBlockerIngestionPersistence {
       client,
       scoreProfile,
       notifyDataReady,
+      scoreRiskEvent,
     );
   }
 
@@ -132,6 +140,12 @@ export class BotBlockerIngestionPersistence {
         );
         if (!gateSession) return;
         userIntelligenceId = gateSession.userIntelligenceId;
+        const riskEventScore = this.scoreRiskEvent
+          ? await this.scoreRiskEvent(report, session)
+          : {
+            status: "unavailable" as const,
+            reason: "scoring_unconfigured" as const,
+          };
 
         const document: DurableRiskEventDocument = {
           _id: createRiskEventId(),
@@ -142,6 +156,7 @@ export class BotBlockerIngestionPersistence {
           recordType: "canonical_report",
           report,
           serverEvidence,
+          risk_event_score: riskEventScore,
           ...(pageUrl ? { pageUrl } : {}),
           occurredAt: new Date(report.issuedAt),
           createdAt: now,
