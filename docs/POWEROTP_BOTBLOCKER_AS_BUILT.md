@@ -3712,3 +3712,56 @@ site-return cookie, Passport, minute-29 token refresh, middleware bearer replace
 orchestration, billing, Phase 26 edge publication, or Phase 27 global verify Worker. No `.env`
 file, migration, seed, deployment, or customer traffic was changed. No commit or push was
 performed.
+
+## 2026-08-18 — BotBlocker Phase 17A: project callback and authoritative session pull
+
+**Status: Phase 17A implementation-split item 6 / Phase 17 execution step 6 complete.** Added
+the bounded `botblocker.session_data_ready` project callback event with only event ID/type,
+project/site/gate-session binding, occurrence time, and nonce. It contains no score,
+recommendation, raw fingerprint, IP evidence/history, credential, callback secret, or visitor
+bearer. Delivery reuses the existing project's configured callback URL, independently encrypted
+project callback signing secret, `verification-callbacks` BullMQ queue, eight-attempt exponential
+retry, stable event job ID, timestamped HMAC format, HTTPS/SSRF/redirect checks, timeout, and
+response-size limits. The existing verification callback branch remains unchanged.
+
+**Post-commit notification boundary.** Initial accepted session/profile synchronization and later
+accepted behavior-report/risk-event updates enqueue one notification only after the profile
+transaction commits and `BotBlockerProfileScoringService.recalculate` successfully replaces
+`userIntelligence.currentScore` under its existing compare-and-set guard. Exact initial replay,
+duplicate reports, stale/conflicting/cross-scope reports, request rejection, transaction/profile
+rollback, scoring failure, and a lost score compare-and-set do not enqueue. Queueing never changes
+the score, blacklist-first decision precedence, or `allow | otp` boundary.
+
+**Authoritative pull.** Added `GET /v1/botblocker/session-data/{webhookId}`. The immutable
+project/site endpoint resolves first; the read then requires the visitor session's scoped bearer
+and exact site/gate-session/audience/freshness headers. It returns only the callback event binding,
+the current MongoDB `userIntelligence.currentScore`, optional existing gate-session decision, and
+profile update time. The callback remains notification only and never carries or authors these
+values.
+
+**Adapter verification.** The shared `@powerotp/gate-node` server authority now owns
+`/_powerotp/webhooks/challenge-status` callback handling, so Express and Next inherit the same
+server-side path. It verifies the raw-body project callback HMAC and five-minute signature
+freshness, strict bounded event schema, configured project/site binding, gate-session existence,
+event-ID idempotency, and nonce replay. Only then does it call the injected authoritative pull
+service with the scoped visitor token held in `GateSession`; the token, project callback secret,
+site credential, and pulled score remain absent from browser bootstrap/state responses.
+`GateSessionStore.applyDataReady` atomically records accepted event/nonce windows and the pulled
+server-only snapshot. Generated Node, Express, and Next setup now supplies
+`POWEROTP_PROJECT_ID` and `POWEROTP_WEBHOOK_SIGNING_SECRET` only in server configuration.
+
+**Focused verification.** `@powerotp/contracts` build passed and its full package suite passed
+**195/195** tests across 50 suites. `@powerotp/api` build passed and its full package suite passed
+**350/350** tests across 92 suites. `@powerotp/gate-node` build passed and its package suite passed
+**24/24** tests. `@powerotp/mcp` build passed and its package suite passed **42/42** tests across
+6 suites. The server-facing `@powerotp/backend` workspace passed `tsc --noEmit` and its focused
+package suite passed **15/15** tests across 7 suites, including the canonical route-inventory
+guard for the new session-data route. No gate-next production-bundle check was required because
+no browser-reachable contracts/code or `@powerotp/contracts/browser` export changed. No
+full-repository verification was run.
+
+**Explicitly not shipped.** This slice adds no Phase 18 customer score sensitivity/OTP policy,
+`riskEvents` behavior reducer, external IP-vendor profile integration, site-return cookie,
+Passport, minute-29 visitor-token refresh, unrelated bearer replacement, OTP orchestration,
+billing, Phase 26 edge publication, or Phase 27 global verify Worker. No `.env` file, migration,
+seed, deployment, or customer traffic was changed. No commit or push was performed.

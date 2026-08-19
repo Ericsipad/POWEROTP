@@ -29,6 +29,20 @@ export function createMemoryGateSessionStore(maxEntries = 10_000): GateSessionSt
       sessions.delete(session.id);
       sessions.set(session.id, session);
     },
+    applyDataReady(event, data) {
+      const session = sessions.get(event.gateSessionId);
+      if (!session) return "session_not_found";
+      const eventIds = session.acceptedCallbackEventIds ?? [];
+      const nonces = session.acceptedCallbackNonces ?? [];
+      if (eventIds.includes(event.eventId)) return "duplicate_event";
+      if (nonces.includes(event.nonce)) return "replayed_nonce";
+      session.authoritativeSessionData = data;
+      session.acceptedCallbackEventIds = [...eventIds.slice(-127), event.eventId];
+      session.acceptedCallbackNonces = [...nonces.slice(-127), event.nonce];
+      sessions.delete(session.id);
+      sessions.set(session.id, session);
+      return "applied";
+    },
   };
 }
 

@@ -144,6 +144,22 @@ class MemoryIngestionStore {
     return Promise.resolve(session && sameScope(session, scope) ? session : null);
   }
 
+  async findCurrentSessionData(
+    scope: BotBlockerScope,
+    gateSessionId: string,
+  ) {
+    const session = await this.findGateSession(scope, gateSessionId);
+    return session
+      ? {
+          currentScore: { status: "available" as const, score: 42 },
+          ...(session.latestDecision
+            ? { decision: session.latestDecision }
+            : {}),
+          updatedAt: session.updatedAt,
+        }
+      : undefined;
+  }
+
   openGateSession(input: {
     scope: BotBlockerScope;
     gateSessionId: string;
@@ -247,6 +263,33 @@ class MemoryIngestionStore {
 }
 
 describe("BotBlockerIngestionService", () => {
+  it("returns bounded authoritative session data for the scoped profile", async () => {
+    const store = new MemoryIngestionStore();
+    const service = createService(store);
+    const request = rapidRequest();
+    await service.startSession({
+      scope: owner,
+      gateSessionId: request.gateSessionId,
+      initialRequest: request,
+    });
+    assert.deepEqual(
+      await service.getCurrentSessionData(
+        owner,
+        request.gateSessionId,
+        "bbd_1234567890123456",
+      ),
+      {
+        apiVersion: "2026-08-04",
+        eventId: "bbd_1234567890123456",
+        projectId: owner.projectId,
+        siteId: owner.siteId,
+        gateSessionId: request.gateSessionId,
+        currentScore: { status: "available", score: 42 },
+        updatedAt: now.toISOString(),
+      },
+    );
+  });
+
   it("ingests duplicate browser reports idempotently and rejects stale reports", async () => {
     const store = new MemoryIngestionStore();
     const service = createService(store);

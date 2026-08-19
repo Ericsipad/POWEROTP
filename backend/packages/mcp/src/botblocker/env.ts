@@ -12,6 +12,13 @@ export interface PowerOtpEnvVar {
 
 export const BOTBLOCKER_ENV_VARS: readonly PowerOtpEnvVar[] = [
   {
+    name: "POWEROTP_PROJECT_ID",
+    required: true,
+    description:
+      "Public project identifier used to verify project binding on signed callbacks. It " +
+      "authorizes nothing by itself and remains in server adapter configuration.",
+  },
+  {
     name: "POWEROTP_SITE_ID",
     required: true,
     description:
@@ -49,7 +56,7 @@ export const BOTBLOCKER_ENV_VARS: readonly PowerOtpEnvVar[] = [
     description:
       "Project-specific 256-bit callback secret returned exactly once in the atomic project " +
       "creation setup response and stored encrypted by PowerOTP. Verifies the signed timestamp " +
-      "and body of POWEROTP project callbacks, including challenge-status and planned BotBlocker " +
+      "and body of POWEROTP project callbacks, including challenge-status and BotBlocker " +
       "session-data-ready notifications, using " +
       "the same powerotp-signature: t=<unix-ms>,v1=<base64url HMAC-SHA256 of `${t}.${rawBody}`> " +
       "header scheme as other PowerOTP callbacks. Verify the signature and a recent timestamp " +

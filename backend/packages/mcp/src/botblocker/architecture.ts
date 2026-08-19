@@ -79,9 +79,10 @@ export function getBotBlockerDataBoundary() {
       webhookSigningSecret:
         "Independent 256-bit callback secret per project, shown once in the atomic project creation " +
         "response and stored encrypted at rest. It verifies POWEROTP's signed project callback " +
-        "events, including challenge-status events. BotBlocker session-data-ready notifications are " +
-        "currently unavailable. A callback notification is not visitor authority; the adapter pulls " +
-        "current session data with that visitor's scoped token.",
+        "events, including challenge-status and BotBlocker session-data-ready events. A callback " +
+        "notification is not visitor authority; the adapter verifies its project/site/session, " +
+        "freshness, nonce, and event binding, then pulls current session data with that visitor's " +
+        "scoped server-held token.",
       returningVisitorInstantAllowCookie:
         "`powerotp_site_return` is a signed, persistent, site-scoped credential bound to the exact " +
         "user-intelligence row. On a later visit the adapter verifies it locally and publishes " +

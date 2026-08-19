@@ -177,6 +177,12 @@ async function buildServerContext(): Promise<ServerContext> {
       dataStores.client,
       (scope, userIntelligenceId) =>
         botBlockerProfileScoring.recalculate(scope, userIntelligenceId),
+      (scope, gateSessionId) =>
+        queues.enqueueBotBlockerDataReady({
+          projectId: scope.projectId,
+          siteId: scope.siteId,
+          gateSessionId,
+        }),
     ),
     config,
   );

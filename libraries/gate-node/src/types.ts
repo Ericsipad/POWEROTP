@@ -2,7 +2,9 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 
 import type {
   BehaviorReport,
+  BotBlockerDataReadyCallbackEvent,
   BotBlockerOfflineResponse,
+  BotBlockerSessionDataResponse,
   BotBlockerUnavailableResponse,
   DecisionRevisionEnvelope,
   GateRecommendationSnapshot,
@@ -39,6 +41,9 @@ export interface GateSession {
   clearanceVerified?: boolean;
   latestDecision?: unknown;
   latestClearance?: unknown;
+  authoritativeSessionData?: BotBlockerSessionDataResponse;
+  acceptedCallbackEventIds?: string[];
+  acceptedCallbackNonces?: string[];
 }
 
 export type ChallengeMetadata = OtpLaunchMetadata;
@@ -46,6 +51,15 @@ export type ChallengeMetadata = OtpLaunchMetadata;
 export interface GateSessionStore {
   get(id: string): Promise<GateSession | undefined> | GateSession | undefined;
   set(session: GateSession): Promise<void> | void;
+  applyDataReady(
+    event: BotBlockerDataReadyCallbackEvent,
+    data: BotBlockerSessionDataResponse,
+  ):
+    | Promise<"applied" | "duplicate_event" | "replayed_nonce" | "session_not_found">
+    | "applied"
+    | "duplicate_event"
+    | "replayed_nonce"
+    | "session_not_found";
 }
 
 export interface DecisionResult {
@@ -113,6 +127,11 @@ export interface GateNodeServices {
   ): Promise<
     AuthoritativeGateStatus | BotBlockerUnavailableResponse | BotBlockerOfflineResponse
   >;
+  pullSessionData(
+    event: BotBlockerDataReadyCallbackEvent,
+    authorization: ScopedVisitorAuthorization,
+    session: Readonly<GateSession>,
+  ): Promise<BotBlockerSessionDataResponse | BotBlockerUnavailableResponse>;
 }
 
 export interface TrustedProxyConfig {
@@ -154,9 +173,11 @@ export type AdvisoryRouteHandler = (
 ) => void | Promise<void>;
 
 export interface GateNodeOptions {
+  projectId?: string;
   siteId: string;
   webhookId: string;
   siteCredential: string;
+  callbackSigningSecret?: string;
   audience: string;
   verificationKeys: BotBlockerVerificationKeySet;
   handle: AdvisoryRouteHandler;

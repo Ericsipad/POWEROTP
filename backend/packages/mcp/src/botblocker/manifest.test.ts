@@ -85,9 +85,11 @@ describe("BotBlocker MCP manifests", () => {
           combined.includes(name),
         );
         assert.ok(
-          requiredNames.includes("POWEROTP_SITE_ID") &&
+          requiredNames.includes("POWEROTP_PROJECT_ID") &&
+            requiredNames.includes("POWEROTP_SITE_ID") &&
             requiredNames.includes("POWEROTP_WEBHOOK_ID") &&
             requiredNames.includes("POWEROTP_SITE_CREDENTIAL") &&
+            requiredNames.includes("POWEROTP_WEBHOOK_SIGNING_SECRET") &&
             requiredNames.includes("POWEROTP_AUDIENCE"),
           "expected every active integration env var name to appear",
         );

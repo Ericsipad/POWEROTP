@@ -15,9 +15,11 @@ import { createPowerOtpBotBlocker } from "@powerotp/gate-express";
  * require OTP. Obtain the key pair for your site from PowerOTP.
  */
 export const powerOtp = createPowerOtpBotBlocker({
+  projectId: process.env.POWEROTP_PROJECT_ID!,
   siteId: process.env.POWEROTP_SITE_ID!,
   webhookId: process.env.POWEROTP_WEBHOOK_ID!,
   siteCredential: process.env.POWEROTP_SITE_CREDENTIAL!,
+  callbackSigningSecret: process.env.POWEROTP_WEBHOOK_SIGNING_SECRET!,
   audience: process.env.POWEROTP_AUDIENCE ?? "https://your-app.example",
   verificationKeys: {
     active: {
@@ -111,7 +113,7 @@ export function buildExpressTemplate(packageVersion: string): AdapterTemplate {
         "express.static(), and your API/SSR routers.",
       "3. Mount <PowerOtpBrowserGate /> near your React root, or call " +
         "createGateBrowserCoordinator directly if you need subscribe()/getSnapshot()/openOtp().",
-      "4. Copy POWEROTP_SITE_ID, POWEROTP_WEBHOOK_ID, and the show-once " +
+      "4. Copy POWEROTP_PROJECT_ID, POWEROTP_SITE_ID, POWEROTP_WEBHOOK_ID, and the show-once " +
         "POWEROTP_WEBHOOK_SIGNING_SECRET from the project creation response. Generate " +
         "POWEROTP_SITE_CREDENTIAL via POST /v1/projects/{projectId}/botblocker/" +
         "rotate-site-credential, then set all values and your verification key pair server-side. See " +

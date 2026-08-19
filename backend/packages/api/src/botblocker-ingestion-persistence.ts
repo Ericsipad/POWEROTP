@@ -41,6 +41,10 @@ export class BotBlockerIngestionPersistence {
       scope: BotBlockerScope,
       userIntelligenceId: string,
     ) => Promise<unknown>,
+    private readonly notifyDataReady?: (
+      scope: BotBlockerScope,
+      gateSessionId: string,
+    ) => Promise<void>,
   ) {
     this.#client = client;
     this.#gateSessions = db.collection<GateSessionDocument>("gateSessions");
@@ -51,11 +55,35 @@ export class BotBlockerIngestionPersistence {
       db,
       client,
       scoreProfile,
+      notifyDataReady,
     );
   }
 
   findGateSession(scope: BotBlockerScope, gateSessionId: string) {
     return this.#sessions.findGateSession(scope, gateSessionId);
+  }
+
+  async findCurrentSessionData(
+    scope: BotBlockerScope,
+    gateSessionId: string,
+  ) {
+    const gateSession = await this.#sessions.findGateSession(
+      scope,
+      gateSessionId,
+    );
+    if (!gateSession) return undefined;
+    const profile = await this.#userIntelligence.findOne({
+      _id: gateSession.userIntelligenceId,
+      ...scope,
+    });
+    if (!profile?.currentScore) return undefined;
+    return {
+      currentScore: profile.currentScore,
+      ...(gateSession.latestDecision
+        ? { decision: gateSession.latestDecision }
+        : {}),
+      updatedAt: profile.updatedAt,
+    };
   }
 
   openGateSession(
@@ -173,7 +201,13 @@ export class BotBlockerIngestionPersistence {
         ...scope,
       });
       if (gateSession) {
-        await this.scoreProfile?.(scope, gateSession.userIntelligenceId);
+        const score = await this.scoreProfile?.(
+          scope,
+          gateSession.userIntelligenceId,
+        );
+        if (score !== undefined) {
+          await this.notifyDataReady?.(scope, gateSessionId);
+        }
       }
     }
     return outcome;
@@ -283,7 +317,13 @@ export class BotBlockerIngestionPersistence {
         ...scope,
       });
       if (gateSession) {
-        await this.scoreProfile?.(scope, gateSession.userIntelligenceId);
+        const score = await this.scoreProfile?.(
+          scope,
+          gateSession.userIntelligenceId,
+        );
+        if (score !== undefined) {
+          await this.notifyDataReady?.(scope, gateSessionId);
+        }
       }
     }
     return outcome;

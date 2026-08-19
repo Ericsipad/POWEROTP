@@ -4,6 +4,7 @@ import {
   RiskEventBatchSchema,
   type BehaviorReport,
   type BotBlockerDecisionOutcome,
+  type BotBlockerSessionDataResponse,
   type RapidAuthRequest,
   type RiskEventBatch,
 } from "@powerotp/contracts";
@@ -28,6 +29,7 @@ const MAX_EVENT_CLOCK_SKEW_MS = 5 * 60 * 1_000;
 type IngestionStore = Pick<
   BotBlockerIngestionPersistence,
   | "findGateSession"
+  | "findCurrentSessionData"
   | "openGateSession"
   | "saveVisitorTokenMetadata"
   | "ingestBehaviorReport"
@@ -179,6 +181,30 @@ export class BotBlockerIngestionService {
     const result = await this.persistence.ingestRiskEvents(scope, batch, now);
     if (result === "stale") throw staleSequence();
     return result;
+  }
+
+  async getCurrentSessionData(
+    site: AuthenticatedBotBlockerSite,
+    gateSessionId: string,
+    eventId: string,
+  ): Promise<BotBlockerSessionDataResponse> {
+    const scope = scopeFor(site);
+    const data = await this.persistence.findCurrentSessionData(
+      scope,
+      gateSessionId,
+    );
+    if (!data) {
+      throw new BotBlockerRuntimeError("invalid_request", 404);
+    }
+    return {
+      apiVersion: "2026-08-04",
+      eventId,
+      projectId: site.projectId,
+      siteId: site.siteId,
+      gateSessionId,
+      ...data,
+      updatedAt: data.updatedAt.toISOString(),
+    };
   }
 
   #normalizedIp(value: string): string {

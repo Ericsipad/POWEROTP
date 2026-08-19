@@ -78,7 +78,7 @@ function riskBatch(sequence: number): RiskEventBatch {
   };
 }
 
-function fixture() {
+function fixture(scorePersisted = true) {
   const gateSessions: GateSessionDocument[] = [{
     _id: "bgs_session_123456789",
     ...scope,
@@ -124,6 +124,7 @@ function fixture() {
     totalActiveDurationMs: 0,
   };
   const scoringCalls: string[] = [];
+  const callbackCalls: string[] = [];
   const db = {
     collection(name: string) {
       if (name === "gateSessions") {
@@ -178,12 +179,17 @@ function fixture() {
       client,
       async (_scope, userIntelligenceId) => {
         scoringCalls.push(userIntelligenceId);
+        return scorePersisted ? {} : undefined;
+      },
+      async (_scope, gateSessionId) => {
+        callbackCalls.push(gateSessionId);
       },
     ),
     gateSessions,
     riskEvents,
     aggregate,
     scoringCalls,
+    callbackCalls,
   };
 }
 
@@ -202,6 +208,7 @@ describe("BotBlockerIngestionPersistence", () => {
     );
     assert.equal(state.riskEvents.length, 1);
     assert.deepEqual(state.scoringCalls, ["bui_owner_123456789"]);
+    assert.deepEqual(state.callbackCalls, ["bgs_session_123456789"]);
     assert.deepEqual(state.aggregate, {
       behaviorReportCount: 1,
       pageViewCount: 1,
@@ -252,6 +259,7 @@ describe("BotBlockerIngestionPersistence", () => {
     );
     assert.equal(state.riskEvents.length, 1);
     assert.deepEqual(state.scoringCalls, ["bui_owner_123456789"]);
+    assert.deepEqual(state.callbackCalls, ["bgs_session_123456789"]);
     assert.equal(state.gateSessions[0]!.lastAppliedSequence, 2);
   });
 
@@ -268,6 +276,7 @@ describe("BotBlockerIngestionPersistence", () => {
       "duplicate",
     );
     assert.equal(state.riskEvents.length, 1);
+    assert.deepEqual(state.callbackCalls, ["bgs_session_123456789"]);
     const stored = state.riskEvents[0]!;
     assert.equal(stored.recordType, "risk_signal");
     assert.equal(stored.eventIndex, 1);
@@ -275,6 +284,21 @@ describe("BotBlockerIngestionPersistence", () => {
       stored.retentionExpiresAt.getTime() - stored.occurredAt.getTime(),
       BOTBLOCKER_SESSION_INPUT_RETENTION_SECONDS * 1_000,
     );
+  });
+
+  it("does not notify when scoring did not persist current state", async () => {
+    const state = fixture(false);
+    assert.equal(
+      await state.persistence.ingestBehaviorReport(
+        scope,
+        behaviorReport(0),
+        pageUrl,
+        now,
+      ),
+      "accepted",
+    );
+    assert.deepEqual(state.scoringCalls, ["bui_owner_123456789"]);
+    assert.deepEqual(state.callbackCalls, []);
   });
 });
 

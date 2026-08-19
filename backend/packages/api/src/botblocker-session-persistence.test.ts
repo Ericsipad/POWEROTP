@@ -133,6 +133,7 @@ function fixture(options: {
   failGateInsert?: boolean;
   failRiskInsert?: boolean;
   failIntelligenceWrite?: boolean;
+  failScoring?: boolean;
 } = {}) {
   const gateSessions: GateSessionDocument[] = [];
   const riskEvents: DurableRiskEventDocument[] = [];
@@ -142,6 +143,7 @@ function fixture(options: {
     userIntelligenceId: string;
     committedProfileVisible: boolean;
   }> = [];
+  const callbackCalls: string[] = [];
   const collection = (name: string) => {
     const rows = name === "gateSessions"
       ? gateSessions
@@ -245,6 +247,7 @@ function fixture(options: {
       db,
       client,
       async (_scope, userIntelligenceId) => {
+        if (options.failScoring) throw new Error("injected scoring failure");
         scoringCalls.push({
           userIntelligenceId,
           committedProfileVisible:
@@ -253,6 +256,10 @@ function fixture(options: {
               (row) => row.userIntelligenceId === userIntelligenceId,
             ),
         });
+        return {};
+      },
+      async (_scope, gateSessionId) => {
+        callbackCalls.push(gateSessionId);
       },
     ),
     gateSessions,
@@ -260,6 +267,7 @@ function fixture(options: {
     fingerprints,
     riskEvents,
     scoringCalls,
+    callbackCalls,
   };
 }
 
@@ -482,6 +490,7 @@ describe("BotBlockerSessionPersistence fingerprint selection", () => {
       userIntelligenceId: first.userIntelligenceId,
       committedProfileVisible: true,
     }]);
+    assert.deepEqual(state.callbackCalls, [first._id]);
 
     await assert.rejects(
       state.persistence.openGateSession(openInput({
@@ -504,6 +513,7 @@ describe("BotBlockerSessionPersistence fingerprint selection", () => {
     assert.deepEqual(state.intelligence, []);
     assert.deepEqual(state.fingerprints, []);
     assert.deepEqual(state.scoringCalls, []);
+    assert.deepEqual(state.callbackCalls, []);
   });
 
   it("rolls back the session before any profile or fingerprint write when the initial event fails", async () => {
@@ -517,6 +527,18 @@ describe("BotBlockerSessionPersistence fingerprint selection", () => {
     assert.deepEqual(state.intelligence, []);
     assert.deepEqual(state.fingerprints, []);
     assert.deepEqual(state.scoringCalls, []);
+    assert.deepEqual(state.callbackCalls, []);
+  });
+
+  it("does not notify when post-commit scoring fails", async () => {
+    const state = fixture({ failScoring: true });
+    await assert.rejects(
+      state.persistence.openGateSession(openInput()),
+      /injected scoring failure/,
+    );
+    assert.equal(state.gateSessions.length, 1);
+    assert.equal(state.intelligence.length, 1);
+    assert.deepEqual(state.callbackCalls, []);
   });
 
   it("stores the same complete bounded initial request on the session and first event for 90 days", async () => {
@@ -785,6 +807,7 @@ describe("BotBlockerSessionPersistence direct fingerprint profile synchronizatio
     assert.deepEqual(state.fingerprints, [originalFingerprint]);
     assert.deepEqual(state.gateSessions, []);
     assert.deepEqual(state.riskEvents, []);
+    assert.deepEqual(state.callbackCalls, []);
   });
 });
 

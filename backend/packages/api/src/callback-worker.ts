@@ -1,4 +1,7 @@
-import type { CallbackEnvelope } from "@powerotp/contracts";
+import type {
+  BotBlockerDataReadyCallbackEnvelope,
+  CallbackEnvelope,
+} from "@powerotp/contracts";
 import { Worker, type ConnectionOptions } from "bullmq";
 import type { Db } from "mongodb";
 
@@ -28,6 +31,31 @@ export function createCallbackWorker(
   return new Worker<CallbackJobData>(
     CALLBACKS_QUEUE_NAME,
     async (job) => {
+      if (job.data.kind === "botblocker_session_data_ready") {
+        const { event } = job.data;
+        const project = await projects.findOne({ _id: event.projectId });
+        if (!project?.callbackUrl || !project.callbackSecretEncrypted) return;
+        const secret = decryptString(
+          project.callbackSecretEncrypted,
+          config.CONFIG_ENCRYPTION_KEY,
+        );
+        const envelope: BotBlockerDataReadyCallbackEnvelope = {
+          apiVersion: "2026-08-04",
+          event,
+        };
+        const result = await deliverCallback(
+          project.callbackUrl,
+          JSON.stringify(envelope),
+          secret,
+        );
+        if (!result.delivered) {
+          throw new Error(
+            result.error ??
+              `Callback delivery failed with HTTP ${result.statusCode}`,
+          );
+        }
+        return;
+      }
       const { interactionId, eventId } = job.data;
       const [verification, event] = await Promise.all([
         requests.findOne({ _id: interactionId }),

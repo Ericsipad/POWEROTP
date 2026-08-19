@@ -30,9 +30,11 @@ export type PowerOtpHandler = (
  */
 export function createPowerOtpListener(handle: PowerOtpHandler) {
   return createPowerOtpRequestListener({
+    projectId: process.env.POWEROTP_PROJECT_ID!,
     siteId: process.env.POWEROTP_SITE_ID!,
     webhookId: process.env.POWEROTP_WEBHOOK_ID!,
     siteCredential: process.env.POWEROTP_SITE_CREDENTIAL!,
+    callbackSigningSecret: process.env.POWEROTP_WEBHOOK_SIGNING_SECRET!,
     audience: process.env.POWEROTP_AUDIENCE ?? "https://your-app.example",
     verificationKeys: {
       active: {
@@ -129,7 +131,7 @@ export function buildNodeHttpTemplate(packageVersion: string): AdapterTemplate {
         "server entry point, replacing the listener passed to http.createServer/createServer.",
       "3. Bundle public/powerotp-client.ts (or the equivalent inline logic) into pages you want " +
         "observed; call mountPowerOtp() once on page load.",
-      "4. Copy POWEROTP_SITE_ID, POWEROTP_WEBHOOK_ID, and the show-once " +
+      "4. Copy POWEROTP_PROJECT_ID, POWEROTP_SITE_ID, POWEROTP_WEBHOOK_ID, and the show-once " +
         "POWEROTP_WEBHOOK_SIGNING_SECRET from the project creation response. Generate " +
         "POWEROTP_SITE_CREDENTIAL via POST /v1/projects/{projectId}/botblocker/" +
         "rotate-site-credential, then set all values and your verification key pair server-side; never in a browser " +

@@ -158,6 +158,13 @@ export async function readJsonBody(
   request: IncomingMessage,
   maxBytes: number,
 ): Promise<unknown> {
+  return (await readRawJsonBody(request, maxBytes)).parsed;
+}
+
+export async function readRawJsonBody(
+  request: IncomingMessage,
+  maxBytes: number,
+): Promise<{ raw: string; parsed: unknown }> {
   const contentType = request.headers["content-type"]?.split(";", 1)[0]?.trim();
   if (contentType !== "application/json") throw new HttpInputError(415);
   const chunks: Buffer[] = [];
@@ -169,8 +176,9 @@ export async function readJsonBody(
     chunks.push(buffer);
   }
   if (bytes === 0) throw new HttpInputError(400);
+  const raw = Buffer.concat(chunks).toString("utf8");
   try {
-    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    return { raw, parsed: JSON.parse(raw) };
   } catch {
     throw new HttpInputError(400);
   }

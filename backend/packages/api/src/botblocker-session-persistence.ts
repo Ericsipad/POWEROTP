@@ -64,6 +64,10 @@ export class BotBlockerSessionPersistence {
       scope: BotBlockerScope,
       userIntelligenceId: string,
     ) => Promise<unknown>,
+    private readonly notifyDataReady?: (
+      scope: BotBlockerScope,
+      gateSessionId: string,
+    ) => Promise<void>,
   ) {
     this.#client = client;
     this.#gateSessions = db.collection<GateSessionDocument>("gateSessions");
@@ -285,7 +289,13 @@ export class BotBlockerSessionPersistence {
       throw new BotBlockerSessionPersistenceError("session_not_found");
     }
     if (profileUpdated) {
-      await this.scoreProfile?.(input.scope, result.userIntelligenceId);
+      const score = await this.scoreProfile?.(
+        input.scope,
+        result.userIntelligenceId,
+      );
+      if (score !== undefined) {
+        await this.notifyDataReady?.(input.scope, input.gateSessionId);
+      }
     }
     return result;
   }

@@ -1,5 +1,7 @@
 import { Queue, Worker, type ConnectionOptions } from "bullmq";
+import type { BotBlockerDataReadyCallbackEvent } from "@powerotp/contracts";
 
+import { createId, createSecret } from "./security.js";
 import type { TransportRegistry } from "./transport.js";
 import type { VerificationService } from "./verification-service.js";
 
@@ -32,10 +34,20 @@ export function toQueueConnectionOptions(valkeyUrl: string): ConnectionOptions {
   };
 }
 
-export interface CallbackJobData {
+export interface VerificationCallbackJobData {
+  kind?: "verification";
   interactionId: string;
   eventId: string;
 }
+
+export interface BotBlockerCallbackJobData {
+  kind: "botblocker_session_data_ready";
+  event: BotBlockerDataReadyCallbackEvent;
+}
+
+export type CallbackJobData =
+  | VerificationCallbackJobData
+  | BotBlockerCallbackJobData;
 
 interface DispatchJobData {
   interactionId: string;
@@ -65,6 +77,11 @@ export interface VerificationQueues {
   enqueueDispatch(interactionId: string): Promise<void>;
   enqueueTimeout(interactionId: string, delayMs: number): Promise<void>;
   enqueueCallback(interactionId: string, eventId: string): Promise<void>;
+  enqueueBotBlockerDataReady(binding: {
+    projectId: string;
+    siteId: string;
+    gateSessionId: string;
+  }): Promise<void>;
   enqueueProviderReconcile(interactionId: string): Promise<void>;
   /**
    * Current job counts for every queue this app runs — for the admin
@@ -111,6 +128,26 @@ export function createVerificationQueues(connection: ConnectionOptions): Verific
         { interactionId, eventId },
         {
           jobId: `callback-${eventId}`,
+          attempts: 8,
+          backoff: { type: "exponential", delay: 5_000 },
+          removeOnComplete: true,
+          removeOnFail: { age: 7 * 24 * 60 * 60 },
+        },
+      );
+    },
+    async enqueueBotBlockerDataReady(binding) {
+      const event: BotBlockerDataReadyCallbackEvent = {
+        eventId: createId("bbd"),
+        type: "botblocker.session_data_ready",
+        ...binding,
+        occurredAt: new Date().toISOString(),
+        nonce: createSecret(24),
+      };
+      await callbacksQueue.add(
+        "callback",
+        { kind: "botblocker_session_data_ready", event },
+        {
+          jobId: `callback-${event.eventId}`,
           attempts: 8,
           backoff: { type: "exponential", delay: 5_000 },
           removeOnComplete: true,

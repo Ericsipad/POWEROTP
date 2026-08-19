@@ -41,6 +41,7 @@ export function createServices(
     assessBrowser: supplied?.assessBrowser ?? (async () => UNAVAILABLE),
     launchChallenge: supplied?.launchChallenge ?? (async () => UNAVAILABLE),
     pollChallenge: supplied?.pollChallenge ?? (async () => UNAVAILABLE),
+    pullSessionData: supplied?.pullSessionData ?? (async () => UNAVAILABLE),
   };
 }
 

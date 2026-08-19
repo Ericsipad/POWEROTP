@@ -5,10 +5,11 @@ import {
 } from "@powerotp/api/botblocker-errors.js";
 import type { AuthenticatedBotBlockerSite } from "@powerotp/api/botblocker-site-credential-service.js";
 import { withVerifiedBotBlockerWebhook } from "@powerotp/api/botblocker-webhook.js";
-import type {
-  BotBlockerErrorCode,
-  BotBlockerRuntimeRequestEnvelope,
-  RapidAuthRequest,
+import {
+  BotBlockerSessionDataResponseSchema,
+  type BotBlockerErrorCode,
+  type BotBlockerRuntimeRequestEnvelope,
+  type RapidAuthRequest,
 } from "@powerotp/contracts";
 import { NextResponse, type NextRequest } from "next/server";
 import type { ZodType } from "zod";
@@ -265,6 +266,64 @@ export async function unavailableChallengeRead(
       body: envelope,
     });
     return botBlockerUnavailable("not_implemented", false);
+  } catch (error) {
+    return mapBotBlockerRuntimeError(error);
+  }
+}
+
+export async function botBlockerSessionDataRead(
+  request: NextRequest,
+  webhookId: string,
+): Promise<NextResponse> {
+  const preflight = verifyWebhookPath(webhookId);
+  if (!preflight) return notFound();
+  const eventId = request.headers.get("x-botblocker-event-id") ?? "";
+  const envelope = {
+    siteId: request.headers.get("x-botblocker-site-id") ?? "",
+    gateSessionId:
+      request.headers.get("x-botblocker-gate-session-id") ?? "",
+    audience: request.headers.get("x-botblocker-audience") ?? "",
+    nonce: request.headers.get("x-botblocker-nonce") ?? "",
+    issuedAt: Number(request.headers.get("x-botblocker-issued-at")),
+  };
+  if (
+    eventId.length < 16 ||
+    eventId.length > 128 ||
+    envelope.gateSessionId.length < 16
+  ) {
+    return botBlockerError("invalid_request", 400);
+  }
+
+  const context = await getServerContext();
+  const runtimeSite = await context.botBlockerSites.resolveRuntimeSite({
+    projectId: preflight.projectId,
+    siteId: preflight.siteId,
+    webhookId,
+  });
+  if (!runtimeSite) return notFound();
+  if (!runtimeSite.projectActive || !runtimeSite.enabled) return offline();
+  try {
+    await enforceRateLimit(
+      context.dataStores.rateLimitStore,
+      `rl:botblocker:session-data:ip:${clientIp(request) ?? "unknown"}`,
+      300,
+      60,
+    );
+    const site = await context.botBlockerRuntimeSecurity.authorizeRead({
+      authorizationHeader:
+        request.headers.get("authorization") ?? undefined,
+      requestOrigin: request.nextUrl.origin,
+      runtimeSite,
+      body: envelope,
+    });
+    const data = await context.botBlockerIngestion.getCurrentSessionData(
+      site,
+      envelope.gateSessionId,
+      eventId,
+    );
+    return NextResponse.json(BotBlockerSessionDataResponseSchema.parse(data), {
+      headers: { "cache-control": "no-store" },
+    });
   } catch (error) {
     return mapBotBlockerRuntimeError(error);
   }

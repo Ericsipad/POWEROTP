@@ -26,9 +26,11 @@ import { createPowerOtpNext } from "@powerotp/gate-next";
  * require OTP. Obtain the key pair for your site from PowerOTP.
  */
 export const powerOtp = createPowerOtpNext({
+  projectId: process.env.POWEROTP_PROJECT_ID!,
   siteId: process.env.POWEROTP_SITE_ID!,
   webhookId: process.env.POWEROTP_WEBHOOK_ID!,
   siteCredential: process.env.POWEROTP_SITE_CREDENTIAL!,
+  callbackSigningSecret: process.env.POWEROTP_WEBHOOK_SIGNING_SECRET!,
   audience: process.env.POWEROTP_AUDIENCE ?? "https://your-app.example",
   verificationKeys: {
     active: {
@@ -155,7 +157,7 @@ export function buildNextjsTemplate(packageVersion: string): AdapterTemplate {
       "2. Add proxy.ts at the repository root with the literal matcher shown above.",
       "3. Add both App Router route files at their exact paths.",
       "4. Wrap app/layout.tsx's existing content with PowerOtpNextProvider.",
-      "5. Copy POWEROTP_SITE_ID, POWEROTP_WEBHOOK_ID, and the show-once " +
+      "5. Copy POWEROTP_PROJECT_ID, POWEROTP_SITE_ID, POWEROTP_WEBHOOK_ID, and the show-once " +
         "POWEROTP_WEBHOOK_SIGNING_SECRET from the project creation response. Generate " +
         "POWEROTP_SITE_CREDENTIAL via POST /v1/projects/{projectId}/botblocker/" +
         "rotate-site-credential, then set all values and your verification key pair server-side. See " +

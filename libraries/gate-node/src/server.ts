@@ -31,6 +31,7 @@ import {
   checkingSnapshot,
   unavailableSnapshot,
 } from "./advisory.js";
+import { handleProjectCallback } from "./callbacks.js";
 import { createMemoryGateSessionStore, resolveGateSession } from "./session.js";
 import type {
   GateNodeOptions,
@@ -40,6 +41,18 @@ export function createPowerOtpRequestListener(options: GateNodeOptions): Request
   const siteId = SiteIdSchema.parse(options.siteId);
   BotBlockerWebhookIdSchema.parse(options.webhookId);
   SiteCredentialSchema.parse(options.siteCredential);
+  if (
+    options.projectId !== undefined &&
+    (options.projectId.length < 16 || options.projectId.length > 128)
+  ) {
+    throw new TypeError("Project ID must contain 16 through 128 characters");
+  }
+  if (
+    options.callbackSigningSecret !== undefined &&
+    options.callbackSigningSecret.length < 32
+  ) {
+    throw new TypeError("Callback signing secret must contain at least 32 characters");
+  }
   if (!options.audience || options.audience.length > 2_048) {
     throw new TypeError("Audience must contain 1 through 2048 characters");
   }
@@ -77,6 +90,19 @@ export function createPowerOtpRequestListener(options: GateNodeOptions): Request
         } else {
           sendAgentDiscovery(response, discovery, request.method === "HEAD");
         }
+        return;
+      }
+      if (
+        await handleProjectCallback(request, response, path, {
+          projectId: options.projectId,
+          siteId,
+          callbackSigningSecret: options.callbackSigningSecret,
+          limits,
+          services,
+          store,
+          now,
+        })
+      ) {
         return;
       }
 
