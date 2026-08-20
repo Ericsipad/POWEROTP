@@ -155,30 +155,14 @@ h1 em {
 }
 
 .heroConnector {
-  align-items: center;
-  color: var(--green-dark);
-  display: flex;
-  font-family: Arial, Helvetica, sans-serif;
-  font-size: 15px;
-  font-weight: 900;
-  justify-content: center;
-  letter-spacing: 0.12em;
-  line-height: 1;
-  margin: 20px 0;
-  text-transform: uppercase;
+  color: color-mix(in srgb, var(--green) 70%, var(--green-dark) 30%);
+  display: block;
+  font-size: clamp(30px, 4.4vw, 60px);
+  letter-spacing: normal;
+  line-height: 0.82;
+  margin: 0;
+  text-align: center;
   width: 100%;
-}
-
-.heroConnectorMark {
-  align-items: center;
-  background: var(--green);
-  border-radius: 50%;
-  color: var(--ink);
-  display: inline-flex;
-  font-size: 16px;
-  height: 30px;
-  justify-content: center;
-  width: 30px;
 }
 
 .heroCopy {

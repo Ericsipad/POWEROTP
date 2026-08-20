@@ -59,11 +59,9 @@ export default function Home() {
             </div>
             <h1 className="heroHeadline">
               <span className="heroLine">Compliant</span>
-              <span className="heroConnector">
-                <span className="heroConnectorMark">$</span>
-              </span>
+              <span className="heroConnector">&amp;</span>
               <span className="heroLine">Monetized</span>
-              <span className="heroConnector">In just</span>
+              <span className="heroConnector">In Just</span>
               <span className="heroLine">5 Minutes</span>
             </h1>
             <p className="heroMcpLine">
