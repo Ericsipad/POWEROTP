@@ -2444,3 +2444,22 @@ failures without introducing a second ledger, wallet, or transaction abstraction
 - Referral receiver rows now use explicit, extensible signup, signin, ad-revenue, and recurring
   credit types instead of one generic type. Each source row records whether and where its referral
   payment was processed.
+
+### BotBlocker Phase 18 private customer OTP policy (2026-08-20)
+
+Each project-owned `botblockerSites` row now stores one private 0–100 trigger marker and enabled
+toggle for every existing OTP method. The authenticated dashboard edits those settings through
+the existing customer-session/CSRF-protected BotBlocker project route. Valid settings always save:
+balance, provider configuration, rates, node health, signing keys, and other runtime state are not
+configuration prerequisites.
+
+The shared contract requires exactly one bounded marker for each method and rejects duplicate
+enabled trigger scores. A pure server-side resolver selects the highest enabled trigger at or
+below the authoritative `userIntelligence.currentScore`, or allows when none has been crossed.
+Marker changes increment a site-local settings version and append an immutable audit event with
+the prior and new snapshots; identical retries are no-ops.
+
+These marker settings are not part of the existing signed policy-release system and are never
+sent to embedded customer-site code, adapters, callbacks, or public policy responses. Phase 19
+will load them inside POWEROTP when creating the hosted iframe and will own current balance,
+provider/rate checks, fallback, interaction creation, billing, and clearance.

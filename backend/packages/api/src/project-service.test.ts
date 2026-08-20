@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
+import { DEFAULT_BOTBLOCKER_OTP_METHOD_MARKERS } from "@powerotp/contracts";
 import type { Db, MongoClient } from "mongodb";
 
 import type { BotBlockerSiteDocument } from "./botblocker-site-persistence.js";
@@ -123,6 +124,11 @@ describe("ProjectService atomic BotBlocker provisioning", () => {
       },
     );
     const site = [...sites.values()][0]!;
+    assert.deepEqual(
+      site.otpMethodMarkers,
+      DEFAULT_BOTBLOCKER_OTP_METHOD_MARKERS,
+    );
+    assert.equal(site.otpPolicyVersion, 0);
     assert.notEqual(
       site.webhookSigningSecretEncrypted,
       created.botBlocker.webhookSigningSecret,

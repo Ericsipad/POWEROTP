@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import type { Db } from "mongodb";
+import { DEFAULT_BOTBLOCKER_OTP_METHOD_MARKERS } from "@powerotp/contracts";
 
 import type { BotBlockerSiteDocument } from "./botblocker-site-persistence.js";
 import { BotBlockerSiteService } from "./botblocker-site-service.js";
@@ -57,7 +58,10 @@ function fixture(includeSite = true) {
           ) ?? null,
         findOneAndUpdate: async (
           filter: { _id: string; projectId: string; customerId: string },
-          update: { $set: Partial<BotBlockerSiteDocument> },
+          update: {
+            $set: Partial<BotBlockerSiteDocument>;
+            $inc?: { otpPolicyVersion: number };
+          },
         ) => {
           const current = sites.get(filter.projectId);
           if (
@@ -67,7 +71,17 @@ function fixture(includeSite = true) {
           ) {
             return null;
           }
-          const updated = { ...current, ...update.$set };
+          const updated = {
+            ...current,
+            ...update.$set,
+            ...(update.$inc
+              ? {
+                  otpPolicyVersion:
+                    (current.otpPolicyVersion ?? 0) +
+                    update.$inc.otpPolicyVersion,
+                }
+              : {}),
+          };
           sites.set(filter.projectId, updated);
           return updated;
         },
@@ -83,6 +97,11 @@ describe("BotBlockerSiteService", () => {
     const configuration = await service.get(project.customerId, project._id);
     assert.equal(configuration.siteId, site._id);
     assert.equal(configuration.webhookId, site.webhookId);
+    assert.deepEqual(
+      configuration.otpMethodMarkers,
+      DEFAULT_BOTBLOCKER_OTP_METHOD_MARKERS,
+    );
+    assert.equal(configuration.otpPolicyVersion, 0);
   });
 
   it("never lazily creates a missing site", async () => {
@@ -149,5 +168,57 @@ describe("BotBlockerSiteService", () => {
       ProjectError,
     );
     assert.equal(audits.length, 0);
+  });
+
+  it("always saves valid marker settings without runtime readiness checks", async () => {
+    const { service, sites, audits } = fixture();
+    const otpMethodMarkers = DEFAULT_BOTBLOCKER_OTP_METHOD_MARKERS.map(
+      (marker) => ({
+        ...marker,
+        enabled: marker.method === "voice_code",
+        triggerScore: marker.method === "voice_code" ? 55 : marker.triggerScore,
+      }),
+    );
+
+    const updated = await service.update(
+      project.customerId,
+      project._id,
+      { otpMethodMarkers },
+      "192.0.2.1",
+    );
+
+    assert.deepEqual(updated.otpMethodMarkers, otpMethodMarkers);
+    assert.equal(updated.otpPolicyVersion, 1);
+    assert.deepEqual(sites.get(project._id)?.otpMethodMarkers, otpMethodMarkers);
+    assert.equal(audits[1]?.action, "botblocker_otp_policy.updated");
+    assert.deepEqual(audits[1]?.details, {
+      previousVersion: 0,
+      newVersion: 1,
+      previousMarkers: JSON.stringify(DEFAULT_BOTBLOCKER_OTP_METHOD_MARKERS),
+      newMarkers: JSON.stringify(otpMethodMarkers),
+    });
+  });
+
+  it("treats an identical marker retry as a no-op", async () => {
+    const configuredSite = {
+      ...site,
+      otpMethodMarkers: DEFAULT_BOTBLOCKER_OTP_METHOD_MARKERS.map((marker) => ({
+        ...marker,
+        enabled: marker.method === "voice_code",
+      })),
+      otpPolicyVersion: 1,
+    };
+    const { service, audits } = fixture();
+
+    const first = await service.update(project.customerId, project._id, {
+      otpMethodMarkers: configuredSite.otpMethodMarkers,
+    });
+    const second = await service.update(project.customerId, project._id, {
+      otpMethodMarkers: configuredSite.otpMethodMarkers,
+    });
+
+    assert.equal(first.otpPolicyVersion, 1);
+    assert.equal(second.otpPolicyVersion, 1);
+    assert.equal(audits.length, 2);
   });
 });

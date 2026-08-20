@@ -306,11 +306,16 @@ This is a trust boundary, not merely a packaging choice:
 
 ### Iframe / postMessage authority
 
+- Customer OTP trigger markers are private project settings stored only by POWEROTP. They are not
+  included in public/signed policy responses, callbacks, adapter state, or browser telemetry.
+  Dashboard reads/writes require the owning customer session, with CSRF validation on writes;
+  embedded customer-site runtime code cannot read or author them.
 - Customer code explicitly calls the one argument-free `gate.openOtp()` API after receiving an
   `otp` recommendation. POWEROTP validates the site/session decision and selects the OTP method
-  and iframe content server-side after resolving the gate-session-to-user-intelligence
-  relationship; caller-supplied IDs, method/content overrides, and non-empty opener bodies are
-  rejected.
+  and iframe content server-side from the owning project's saved markers after resolving the
+  gate-session-to-user-intelligence relationship. Balance, provider/rate availability, and method
+  fallback are evaluated only then; they never prevent the customer from saving project settings.
+  Caller-supplied IDs, method/content overrides, and non-empty opener bodies are rejected.
 - The hosted OTP iframe is the only source of an authoritative "verified" state. A
   same-window/opener `postMessage` from the customer's own page script is never treated as
   authoritative, exactly as already documented for the existing widget in

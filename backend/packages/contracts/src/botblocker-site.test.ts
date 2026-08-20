@@ -9,6 +9,8 @@ import {
 import {
   BotBlockerSiteConfigurationSchema,
   DEFAULT_BOTBLOCKER_SITE_CONFIGURATION,
+  DEFAULT_BOTBLOCKER_OTP_METHOD_MARKERS,
+  resolveBotBlockerOtpPolicy,
   type BotBlockerSiteConfiguration,
   UpdateBotBlockerSiteConfigurationSchema,
 } from "./botblocker-site.js";
@@ -19,6 +21,8 @@ const validConfiguration: BotBlockerSiteConfiguration = {
   webhookId: `bwh_${"A".repeat(120)}.${"B".repeat(43)}`,
   enabled: false,
   decisionTimeoutMs: BOTBLOCKER_TIMEOUT_DEFAULT_MS,
+  otpMethodMarkers: [...DEFAULT_BOTBLOCKER_OTP_METHOD_MARKERS],
+  otpPolicyVersion: 0,
   createdAt: "2026-08-13T00:00:00.000Z",
   updatedAt: "2026-08-13T00:00:00.000Z",
 };
@@ -28,6 +32,8 @@ describe("BotBlocker site configuration contracts", () => {
     assert.deepEqual(DEFAULT_BOTBLOCKER_SITE_CONFIGURATION, {
       enabled: false,
       decisionTimeoutMs: 200,
+      otpMethodMarkers: DEFAULT_BOTBLOCKER_OTP_METHOD_MARKERS,
+      otpPolicyVersion: 0,
     });
   });
 
@@ -104,5 +110,72 @@ describe("BotBlocker site configuration contracts", () => {
       }).success,
       false,
     );
+  });
+
+  it("requires one bounded marker for every OTP method", () => {
+    assert.equal(
+      UpdateBotBlockerSiteConfigurationSchema.safeParse({
+        otpMethodMarkers: DEFAULT_BOTBLOCKER_OTP_METHOD_MARKERS,
+      }).success,
+      true,
+    );
+    assert.equal(
+      UpdateBotBlockerSiteConfigurationSchema.safeParse({
+        otpMethodMarkers: DEFAULT_BOTBLOCKER_OTP_METHOD_MARKERS.slice(1),
+      }).success,
+      false,
+    );
+    assert.equal(
+      UpdateBotBlockerSiteConfigurationSchema.safeParse({
+        otpMethodMarkers: DEFAULT_BOTBLOCKER_OTP_METHOD_MARKERS.map((marker) =>
+          marker.method === "voice_code"
+            ? { ...marker, triggerScore: 101 }
+            : marker,
+        ),
+      }).success,
+      false,
+    );
+  });
+
+  it("rejects ambiguous enabled markers at the same score", () => {
+    const otpMethodMarkers = DEFAULT_BOTBLOCKER_OTP_METHOD_MARKERS.map(
+      (marker, index) => ({
+        ...marker,
+        enabled: index < 2,
+        triggerScore: index < 2 ? 50 : marker.triggerScore,
+      }),
+    );
+    assert.equal(
+      UpdateBotBlockerSiteConfigurationSchema.safeParse({
+        otpMethodMarkers,
+      }).success,
+      false,
+    );
+  });
+
+  it("selects the highest enabled marker at or below the score", () => {
+    assert.deepEqual(
+      resolveBotBlockerOtpPolicy(100, DEFAULT_BOTBLOCKER_OTP_METHOD_MARKERS),
+      { outcome: "allow" },
+    );
+    const otpMethodMarkers = DEFAULT_BOTBLOCKER_OTP_METHOD_MARKERS.map(
+      (marker) => ({
+        ...marker,
+        enabled:
+          marker.method === "call_reachability" ||
+          marker.method === "voice_code",
+      }),
+    );
+    assert.deepEqual(resolveBotBlockerOtpPolicy(19, otpMethodMarkers), {
+      outcome: "allow",
+    });
+    assert.deepEqual(resolveBotBlockerOtpPolicy(20, otpMethodMarkers), {
+      outcome: "otp",
+      method: "call_reachability",
+    });
+    assert.deepEqual(resolveBotBlockerOtpPolicy(75, otpMethodMarkers), {
+      outcome: "otp",
+      method: "voice_code",
+    });
   });
 });

@@ -1,7 +1,9 @@
 import type {
+  BotBlockerOtpMethodMarkers,
   BotBlockerSiteConfiguration,
   UpdateBotBlockerSiteConfiguration,
 } from "@powerotp/contracts";
+import { DEFAULT_BOTBLOCKER_OTP_METHOD_MARKERS } from "@powerotp/contracts";
 import type { Db } from "mongodb";
 
 import type { BotBlockerSiteDocument } from "./botblocker-site-persistence.js";
@@ -77,11 +79,30 @@ export class BotBlockerSiteService {
     ip?: string,
   ): Promise<BotBlockerSiteConfiguration> {
     const existing = await this.get(customerId, projectId);
+    const markersChanged =
+      input.otpMethodMarkers !== undefined &&
+      !sameMarkers(existing.otpMethodMarkers, input.otpMethodMarkers);
+    const enabledChanged =
+      input.enabled !== undefined && input.enabled !== existing.enabled;
+    const timeoutChanged =
+      input.decisionTimeoutMs !== undefined &&
+      input.decisionTimeoutMs !== existing.decisionTimeoutMs;
+    if (!markersChanged && !enabledChanged && !timeoutChanged) return existing;
+
     const now = new Date();
+    const changedSettings = {
+      ...(enabledChanged ? { enabled: input.enabled } : {}),
+      ...(timeoutChanged ? { decisionTimeoutMs: input.decisionTimeoutMs } : {}),
+      ...(markersChanged
+        ? { otpMethodMarkers: input.otpMethodMarkers?.map((marker) => ({ ...marker })) }
+        : {}),
+      updatedAt: now,
+    };
     const site = await this.#sites.findOneAndUpdate(
       { _id: existing.siteId, projectId, customerId },
       {
-        $set: { ...input, updatedAt: now },
+        $set: changedSettings,
+        ...(markersChanged ? { $inc: { otpPolicyVersion: 1 } } : {}),
       },
       { returnDocument: "after" },
     );
@@ -95,8 +116,31 @@ export class BotBlockerSiteService {
       targetId: site._id,
       occurredAt: now,
       ip,
-      details: input,
+      details: {
+        ...(enabledChanged ? { enabled: site.enabled } : {}),
+        ...(timeoutChanged ? { decisionTimeoutMs: site.decisionTimeoutMs } : {}),
+        ...(markersChanged
+          ? { otpPolicyVersion: site.otpPolicyVersion ?? 1 }
+          : {}),
+      },
     });
+    if (markersChanged) {
+      await this.#audits.insertOne({
+        _id: createId("aud"),
+        actorId: customerId,
+        action: "botblocker_otp_policy.updated",
+        targetType: "botblocker_site",
+        targetId: site._id,
+        occurredAt: now,
+        ip,
+        details: {
+          previousVersion: existing.otpPolicyVersion,
+          newVersion: site.otpPolicyVersion ?? existing.otpPolicyVersion + 1,
+          previousMarkers: JSON.stringify(existing.otpMethodMarkers),
+          newMarkers: JSON.stringify(site.otpMethodMarkers),
+        },
+      });
+    }
     return toResponse(site);
   }
 
@@ -113,7 +157,26 @@ function toResponse(site: BotBlockerSiteDocument): BotBlockerSiteConfiguration {
     webhookId: site.webhookId,
     enabled: site.enabled,
     decisionTimeoutMs: site.decisionTimeoutMs,
+    otpMethodMarkers: (
+      site.otpMethodMarkers ?? DEFAULT_BOTBLOCKER_OTP_METHOD_MARKERS
+    ).map((marker) => ({ ...marker })),
+    otpPolicyVersion: site.otpPolicyVersion ?? 0,
     createdAt: site.createdAt.toISOString(),
     updatedAt: site.updatedAt.toISOString(),
   };
+}
+
+function sameMarkers(
+  left: readonly { method: string; enabled: boolean; triggerScore: number }[],
+  right: BotBlockerOtpMethodMarkers,
+): boolean {
+  if (left.length !== right.length) return false;
+  const byMethod = new Map(right.map((marker) => [marker.method, marker]));
+  return left.every((marker) => {
+    const candidate = byMethod.get(marker.method as BotBlockerOtpMethodMarkers[number]["method"]);
+    return (
+      candidate?.enabled === marker.enabled &&
+      candidate.triggerScore === marker.triggerScore
+    );
+  });
 }

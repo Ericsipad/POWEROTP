@@ -4009,3 +4009,24 @@ upcoming product, and `visit` remains the explicit Phase 25 reserved value; neit
 producer. Referral source rows now record the receiver transaction, whose explicit extensible type
 identifies signup, signin, ad-revenue, or recurring credit. Manual admin adjustments require
 idempotency and reject the platform-admin pseudo-account.
+
+## 2026-08-20 — Phase 18 private customer risk/OTP settings
+
+**Status: implemented; Phase 19 orchestration remains unstarted.** The existing project-owned
+`botblockerSites` document now carries exactly one private 0–100 trigger marker and enabled toggle
+for each current OTP method. The existing authenticated dashboard route and panel read and save
+those fields with customer ownership and CSRF protection. Saving valid settings is unconditional:
+it does not inspect or depend on balance, providers, rates, node health, challenge inventory,
+signing configuration, or any other runtime readiness.
+
+**Selection contract and history.** Enabled markers must use distinct integer scores. The pure
+server resolver uses the authoritative Phase 17 `userIntelligence.currentScore`, selecting the
+highest enabled trigger at or below that score and returning allow if none was crossed. Actual
+marker changes increment a site-local version and append immutable before/after audit evidence;
+identical retries do not create another version or audit.
+
+**Private boundary.** These settings never enter signed policy releases, public policy responses,
+callbacks, adapter state, browser telemetry, or embedded customer-site code. No Ed25519, release,
+readiness, balance, provider, fallback, iframe, verification, billing, or clearance behavior was
+added. Phase 19 will read the settings inside POWEROTP when it builds the hosted iframe and owns
+all runtime availability and fallback behavior.

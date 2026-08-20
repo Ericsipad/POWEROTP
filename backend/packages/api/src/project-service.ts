@@ -111,6 +111,9 @@ export class ProjectService {
         this.config.CONFIG_ENCRYPTION_KEY,
       ),
       ...DEFAULT_BOTBLOCKER_SITE_CONFIGURATION,
+      otpMethodMarkers: DEFAULT_BOTBLOCKER_SITE_CONFIGURATION.otpMethodMarkers.map(
+        (marker) => ({ ...marker }),
+      ),
       createdAt: now,
       updatedAt: now,
     };

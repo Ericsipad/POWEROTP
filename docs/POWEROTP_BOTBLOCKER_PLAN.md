@@ -108,7 +108,9 @@ and a previous `allow` or clearance may be revised to `otp`.
   arbitrary CSS selectors are never collected. The backend derives an absolute query-free page
   URL from the authenticated audience plus sanitized route so a later customer heatmap viewer
   can open the page and render an aggregate overlay.
-- PowerOTP owns risk weights, thresholds, threat feeds, challenge logic, and sensor cadence.
+- PowerOTP owns risk weights, threat feeds, challenge logic, and sensor cadence. Customers place
+  private per-project 0–100 OTP-method trigger markers in the POWEROTP dashboard; those settings
+  remain on POWEROTP's server and are not sent to customer-site runtime code.
 - Advisory state is attached to every customer application request except fixed owned,
   infrastructure, static, health, `OPTIONS`, and WebSocket exclusions. Customers select
   purchased OTP methods, optional POWEROTP-hosted CleanDataPages for agent access, the decision
@@ -259,6 +261,8 @@ that reports state without affecting rendering.
 The installed adapter remains stable while centrally controlled behavior arrives as declarative signed data.
 
 - Policy fields include version, activation, expiration, site audience, protocol compatibility, risk weights, challenge mapping, edge endpoints, sensor version, verification keys, dataset versions, and revocation-filter metadata.
+- Customer OTP-method trigger markers are not signed-policy fields. They remain private project
+  configuration read by POWEROTP when the hosted OTP iframe is created.
 - The adapter verifies Ed25519 signatures and schema before activation.
 - It caches a last-known-good policy and rejects unauthorized rollback.
 - Verification keys arrive through this same signed policy fetch, resolved from only the public

@@ -1,3 +1,4 @@
+import type { BotBlockerOtpMethodMarkers } from "@powerotp/contracts";
 import type { Db } from "mongodb";
 
 export interface BotBlockerSiteDocument {
@@ -10,6 +11,8 @@ export interface BotBlockerSiteDocument {
   webhookSigningSecretEncrypted: string;
   enabled: boolean;
   decisionTimeoutMs: number;
+  otpMethodMarkers?: BotBlockerOtpMethodMarkers;
+  otpPolicyVersion?: number;
   /** Atomic monotonic publication head. Releases remain append-only; this
    * pointer prevents concurrent publication from inserting a rollback. */
   latestPolicyVersion?: number;

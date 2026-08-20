@@ -215,7 +215,78 @@
 
 .botBlockerForm {
   margin-top: 16px;
-  max-width: 420px;
+  max-width: 560px;
+}
+
+.otpPolicyFieldset {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 12px;
+  margin: 8px 0;
+  padding: 14px;
+}
+
+.otpPolicyFieldset legend {
+  font-size: 13px;
+  font-weight: 700;
+  padding: 0 6px;
+}
+
+.otpPolicyScale {
+  color: var(--muted);
+  display: flex;
+  font-size: 10px;
+  justify-content: space-between;
+  margin-left: 174px;
+}
+
+.otpPolicyMarker {
+  align-items: center;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 162px 1fr;
+}
+
+.otpPolicyToggle {
+  align-items: center;
+  display: flex;
+  font-size: 12px;
+  gap: 7px;
+}
+
+.otpPolicyRange {
+  align-items: center;
+  display: grid;
+  gap: 6px;
+  grid-template-columns: 1fr 12px 28px;
+}
+
+.otpPolicyRange input {
+  margin: 0;
+  width: 100%;
+}
+
+.otpPolicyArrow {
+  color: var(--accent);
+  font-size: 10px;
+}
+
+.otpPolicyRange output {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+@media (max-width: 620px) {
+  .otpPolicyScale {
+    margin-left: 0;
+  }
+
+  .otpPolicyMarker {
+    grid-template-columns: 1fr;
+    gap: 5px;
+  }
 }
 
 .mutedCell {

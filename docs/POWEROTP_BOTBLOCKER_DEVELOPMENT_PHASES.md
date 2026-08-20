@@ -429,8 +429,12 @@ orchestration.
 
 ### Phase 18 — Customer risk/OTP policy
 
-Add the 0–100 dashboard policy and score-band-to-enabled-OTP mapping, signed policy
-release, readiness/balance validation, fallback behavior, and immutable audit events.
+**Implementation status: complete (2026-08-20).** Add private project-scoped 0–100 dashboard
+settings with one toggleable trigger marker for each
+OTP method, strict validation, server-side score-to-method resolution, simple settings versioning,
+and immutable configuration audit events. These settings remain inside POWEROTP: they are not
+part of signed policy releases and are never sent to customer sites. Saving them never depends on
+balance, provider, rate, or other runtime readiness.
 
 ### Phase 19 — OTP orchestration
 
@@ -441,8 +445,9 @@ timeout/failure/cancel. Expose one argument-free `openOtp()` launch: the custome
 method/content at call time. Initial RapidAuth uses the site credential to mint a short-lived,
 revocable, audience/site/session-bound token stored by the adapter; `openOtp()` forwards only
 that token. POWEROTP resolves the HttpOnly-bound visitor gate session to user intelligence and
-selects both from authoritative site/session policy. The token remains absent from browser
-JavaScript.
+selects both from the private project settings and authoritative site/session state. At iframe
+creation time POWEROTP checks current balance, provider/rate availability, and applies its
+server-side fallback rules. The token remains absent from browser JavaScript.
 
 ### Phase 20 — Continuous reassessment and lockout
 
