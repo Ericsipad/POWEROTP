@@ -27,6 +27,17 @@ describe("accounting contracts", () => {
     assert.equal(parsed.type, "voice_challenge");
     assert.equal(parsed.paymentProcessor, "processor_two");
     assert.equal(FinancialTransactionSchema.safeParse({ ...parsed, type: "otp3" }).success, false);
+    assert.equal(FinancialTransactionSchema.safeParse({ ...parsed, type: "age_verification" }).success, true);
+    assert.equal(FinancialTransactionSchema.safeParse({ ...parsed, type: "visit" }).success, true);
+    assert.equal(
+      FinancialTransactionSchema.safeParse({
+        ...parsed,
+        type: "signup_referral_credit",
+        referralProcessed: true,
+        referralTransactionId: "txn_referral_123456789",
+      }).success,
+      true,
+    );
     assert.equal(
       FinancialTransactionSchema.safeParse({
         ...parsed,

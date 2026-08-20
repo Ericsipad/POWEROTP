@@ -38,6 +38,8 @@ function fakeInteraction(overrides: Partial<VerificationRequestDocument> = {}): 
  * branching. */
 function createFakeDb() {
   const ledgerRows: FinancialTransactionDocument[] = [];
+  const claims = new Set<string>();
+  const requests: VerificationRequestDocument[] = [];
   const balancesCollection = {
     findOne: async () => null,
     updateOne: async () => {},
@@ -49,10 +51,29 @@ function createFakeDb() {
     find: () => ({ sort: () => ({ toArray: async () => [] }) }),
   };
   const eventsCollection = { find: () => ({ sort: () => ({ toArray: async () => [] }) }) };
+  const claimsCollection = {
+    insertOne: async ({ _id }: { _id: string }) => {
+      if (claims.has(_id)) throw Object.assign(new Error("duplicate key"), { code: 11000 });
+      claims.add(_id);
+    },
+    findOne: async ({ _id }: { _id: string }) => claims.has(_id) ? { _id } : null,
+  };
+  const requestsCollection = {
+    find: () => ({ toArray: async () => requests.filter((row) => row.billingPendingAt && !row.billingAppliedAt) }),
+    updateOne: async (
+      { _id }: { _id: string },
+      update: { $set: Partial<VerificationRequestDocument> },
+    ) => {
+      const request = requests.find((row) => row._id === _id);
+      if (request) Object.assign(request, update.$set);
+    },
+  };
   const db = {
     collection: (name: string) => {
       if (name === "customerBalances") return balancesCollection;
       if (name === "financialTransactions") return ledgerCollection;
+      if (name === "billingIdempotencyClaims") return claimsCollection;
+      if (name === "verificationRequests") return requestsCollection;
       return eventsCollection;
     },
   } as unknown as Db;
@@ -64,7 +85,7 @@ function createFakeDb() {
       endSession: async () => {},
     }),
   } as never;
-  return { db, client, ledgerRows };
+  return { db, client, ledgerRows, requests };
 }
 
 describe("BillingChargeService.chargeCompletedInteraction", () => {
@@ -146,6 +167,37 @@ describe("BillingChargeService.chargeCompletedInteraction", () => {
     );
 
     assert.equal(ledgerRows[0]?.amountUsd, 0);
+  });
+
+  it("uses the interaction as a durable claim so callback retries cannot double-charge", async () => {
+    const { db, client, ledgerRows } = createFakeDb();
+    const balances = new BalanceService(client, db);
+    const rates = {
+      smsRateFor: async () => ({ tier1PerMessageUsd: 0.02 }),
+    } as unknown as RateChartService;
+    const service = new BillingChargeService(db, balances, rates);
+    const interaction = fakeInteraction();
+
+    await service.chargeCompletedInteraction(interaction);
+    await service.chargeCompletedInteraction(interaction);
+
+    assert.equal(ledgerRows.length, 1);
+    assert.equal(ledgerRows[0]?.amountUsd, -0.02);
+  });
+
+  it("repairs a pending charge and marks the existing verification applied", async () => {
+    const { db, client, ledgerRows, requests } = createFakeDb();
+    const verification = fakeInteraction({ billingPendingAt: new Date() });
+    requests.push(verification);
+    const balances = new BalanceService(client, db);
+    const rates = {
+      smsRateFor: async () => ({ tier1PerMessageUsd: 0.02 }),
+    } as unknown as RateChartService;
+
+    await new BillingChargeService(db, balances, rates).retryPendingCharges();
+
+    assert.equal(ledgerRows.length, 1);
+    assert.ok(verification.billingAppliedAt);
   });
 });
 

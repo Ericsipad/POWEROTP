@@ -42,12 +42,13 @@ function commissionInput(
   referralCode: string,
   percent: number,
   sourceEntryIndex: number,
+  type: LedgerEntryInput["type"],
 ): LedgerEntryInput | undefined {
   if (percent <= 0) return undefined;
   return {
     userId: referrerUserId,
     projectId,
-    type: "referral_commission",
+    type,
     amountUsd: (_tier, entries) =>
       Math.abs(entries[sourceEntryIndex]?.amountUsd ?? 0) * percent / 100,
     sourceEntryIndex,
@@ -86,9 +87,12 @@ export class AccountingDailyService {
   }
 
   async run(now = new Date()): Promise<void> {
-    await this.#adPayouts.settleEntered(now);
-    await this.#chargeThresholds(now);
-    await this.#chargeDailyProjects(now);
+    const payoutFailed = await this.#adPayouts.settleEntered(now);
+    const thresholdFailed = await this.#chargeThresholds(now);
+    const dailyChargeFailed = await this.#chargeDailyProjects(now);
+    if (payoutFailed || thresholdFailed || dailyChargeFailed) {
+      throw new Error("daily_accounting_operations_failed");
+    }
   }
 
   async #chargeThresholds(now: Date) {
@@ -98,6 +102,7 @@ export class AccountingDailyService {
       this.#commissions.findOne({ _id: "global" }),
     ]);
     const since = new Date(now.getTime() - 30 * DAY_MS);
+    let failed = false;
     for (const project of projects) {
       if (project.customerId === PLATFORM_ADMIN_USER_ID) continue;
       const referral = await this.#projectReferrals.findOne({
@@ -127,7 +132,16 @@ export class AccountingDailyService {
           ? settings?.signupChargePercent
           : settings?.signinChargePercent;
         const commission = referral && percent !== undefined
-          ? commissionInput(referral.referrerUserId, project._id, referral.referralCode, percent, 0)
+          ? commissionInput(
+              referral.referrerUserId,
+              project._id,
+              referral.referralCode,
+              percent,
+              0,
+              rule.eventType === "signup"
+                ? "signup_referral_credit"
+                : "signin_referral_credit",
+            )
           : undefined;
         if (commission) entries.push({ ...commission, thresholdRuleId: rule._id });
         try {
@@ -168,10 +182,12 @@ export class AccountingDailyService {
           );
         } catch (error) {
           if (error instanceof ThresholdNoLongerEligibleError) continue;
+          failed = true;
           await this.#recordFailure("threshold charge failed", project._id, error);
         }
       }
     }
+    return failed;
   }
 
   async #chargeDailyProjects(now: Date) {
@@ -180,6 +196,7 @@ export class AccountingDailyService {
       this.#commissions.findOne({ _id: "global" }),
     ]);
     const serviceDate = now.toISOString().slice(0, 10);
+    let failed = false;
     for (const project of projects) {
       if (project.customerId === PLATFORM_ADMIN_USER_ID) continue;
       const referral = await this.#projectReferrals.findOne({
@@ -194,6 +211,7 @@ export class AccountingDailyService {
           const plan = await this.rates.planChargeFor(tier);
           return plan ? -plan.dailyChargedUsd : 0;
         },
+          omitWhenZero: true,
       }];
       const commission = referral && settings
         ? commissionInput(
@@ -202,6 +220,7 @@ export class AccountingDailyService {
             referral.referralCode,
             settings.recurringChargePercent,
             0,
+            "recurring_referral_credit",
           )
         : undefined;
       if (commission) entries.push(commission);
@@ -211,9 +230,11 @@ export class AccountingDailyService {
           `daily-charge:${project._id}:${serviceDate}`,
         );
       } catch (error) {
+        failed = true;
         await this.#recordFailure("daily charge failed", project._id, error);
       }
     }
+    return failed;
   }
 
   async #recordFailure(message: string, targetId: string, error: unknown) {

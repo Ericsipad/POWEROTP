@@ -1,7 +1,7 @@
 "use client";
 
 import type { CustomerBalance, FinancialTransaction } from "@/lib/contracts";
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 
 import { apiFetch } from "@/lib/api-client";
 
@@ -22,6 +22,7 @@ export function BillingLedgerPanel({ csrfToken }: BillingLedgerPanelProps) {
   const [adjustAmount, setAdjustAmount] = useState("");
   const [adjustNote, setAdjustNote] = useState("");
   const [adjustStatus, setAdjustStatus] = useState("");
+  const adjustmentKey = useRef<string | undefined>(undefined);
 
   async function lookup(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -50,10 +51,16 @@ export function BillingLedgerPanel({ csrfToken }: BillingLedgerPanelProps) {
     event.preventDefault();
     const amountUsd = Number(adjustAmount);
     if (!userId.trim() || !amountUsd) return;
+    const idempotencyKey = adjustmentKey.current ?? crypto.randomUUID();
+    adjustmentKey.current = idempotencyKey;
     setAdjustStatus("Applying…");
     const response = await apiFetch("/v1/admin/billing/credit", {
       method: "POST",
-      headers: { "content-type": "application/json", "x-csrf-token": csrfToken },
+      headers: {
+        "content-type": "application/json",
+        "x-csrf-token": csrfToken,
+        "idempotency-key": idempotencyKey,
+      },
       body: JSON.stringify({ userId: userId.trim(), amountUsd, note: adjustNote.trim() || undefined }),
     });
     if (!response.ok) {
@@ -63,6 +70,7 @@ export function BillingLedgerPanel({ csrfToken }: BillingLedgerPanelProps) {
     setAdjustStatus("Applied.");
     setAdjustAmount("");
     setAdjustNote("");
+    adjustmentKey.current = undefined;
     await lookup({ preventDefault: () => {} } as FormEvent<HTMLFormElement>);
   }
 
@@ -73,7 +81,14 @@ export function BillingLedgerPanel({ csrfToken }: BillingLedgerPanelProps) {
       <form onSubmit={lookup}>
         <label className="field">
           User id
-          <input value={userId} onChange={(event) => setUserId(event.target.value)} required />
+          <input
+            value={userId}
+            onChange={(event) => {
+              setUserId(event.target.value);
+              adjustmentKey.current = undefined;
+            }}
+            required
+          />
         </label>
         <button className="button buttonSmall" type="submit">
           Look up
@@ -92,16 +107,29 @@ export function BillingLedgerPanel({ csrfToken }: BillingLedgerPanelProps) {
             type="number"
             step="0.01"
             value={adjustAmount}
-            onChange={(event) => setAdjustAmount(event.target.value)}
+            onChange={(event) => {
+              setAdjustAmount(event.target.value);
+              adjustmentKey.current = undefined;
+            }}
             placeholder="e.g. 10 or -5"
             required
           />
         </label>
         <label className="field">
           Note (optional)
-          <input value={adjustNote} onChange={(event) => setAdjustNote(event.target.value)} />
+          <input
+            value={adjustNote}
+            onChange={(event) => {
+              setAdjustNote(event.target.value);
+              adjustmentKey.current = undefined;
+            }}
+          />
         </label>
-        <button className="button buttonSmall" type="submit" disabled={!userId.trim()}>
+        <button
+          className="button buttonSmall"
+          type="submit"
+          disabled={!userId.trim() || adjustStatus === "Applying…"}
+        >
           Apply adjustment
         </button>
         {adjustStatus && <p>{adjustStatus}</p>}

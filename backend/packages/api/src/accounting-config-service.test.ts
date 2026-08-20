@@ -55,4 +55,43 @@ describe("ad payout entry calendar", () => {
         error instanceof AccountingConfigError && error.code === "payout_already_settled",
     );
   });
+
+  it("rejects an edit that loses a race with settlement", async () => {
+    const serviceDate = completeServiceDates()[0]!;
+    const db = {
+      collection: (name: string) => {
+        if (name === "adSystems") return { findOne: async () => ({ _id: "ads_one" }) };
+        if (name === "adDailyPayouts") {
+          return {
+            findOne: async () => ({
+              _id: "adp_1234567890123456",
+              adSystemId: "ads_one",
+              serviceDate,
+              enteredAt: new Date(),
+              status: "entered",
+            }),
+            replaceOne: async () => ({ matchedCount: 0 }),
+          };
+        }
+        if (name === "auditEvents") return { insertOne: async () => {} };
+        return {};
+      },
+    } as unknown as Db;
+    const client = {
+      startSession: () => ({
+        withTransaction: (work: () => Promise<unknown>) => work(),
+        endSession: async () => {},
+      }),
+    } as unknown as MongoClient;
+
+    await assert.rejects(
+      () => new AccountingConfigService(client, db).savePayout("usr_admin", {
+        adSystemId: "ads_one",
+        serviceDate,
+        grossPayoutUsd: "10",
+      }),
+      (error: unknown) =>
+        error instanceof AccountingConfigError && error.code === "payout_already_settled",
+    );
+  });
 });

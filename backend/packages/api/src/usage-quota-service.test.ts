@@ -12,8 +12,13 @@ import { UsageQuotaService, type UsageQuotaDocument } from "./usage-quota-servic
  * tests (e.g. `balance-service.test.ts`, `node-service.test.ts`); no real
  * Mongo connection needed to exercise this service's own control flow.
  */
-function createFakeDb(accountCreatedAt: Date) {
+function createFakeDb(
+  accountCreatedAt: Date,
+  options: { balanceUsd?: number; hasPaidTopup?: boolean } = {},
+) {
   let quota: UsageQuotaDocument | undefined;
+  const balanceUsd = options.balanceUsd ?? 25;
+  const hasPaidTopup = options.hasPaidTopup ?? true;
 
   const quotasCollection = {
     findOne: async () => quota ?? null,
@@ -47,9 +52,20 @@ function createFakeDb(accountCreatedAt: Date) {
   const customerAccountsCollection = {
     findOne: async () => ({ createdAt: accountCreatedAt }) as Pick<CustomerAccountDocument, "createdAt">,
   };
+  const balancesCollection = {
+    findOne: async () => ({ _id: "usr_1", balanceUsd }),
+  };
+  const ledgerCollection = {
+    findOne: async () => hasPaidTopup ? { _id: "txn_topup", type: "topup" } : null,
+  };
 
   const db = {
-    collection: (name: string) => (name === "usageQuotas" ? quotasCollection : customerAccountsCollection),
+    collection: (name: string) => {
+      if (name === "usageQuotas") return quotasCollection;
+      if (name === "customerAccounts") return customerAccountsCollection;
+      if (name === "customerBalances") return balancesCollection;
+      return ledgerCollection;
+    },
   } as unknown as Db;
 
   return { db, getQuota: () => quota };
@@ -70,6 +86,18 @@ describe("UsageQuotaService.tryConsumeFreeQuota", () => {
     const { db } = createFakeDb(new Date());
     const service = new UsageQuotaService(db);
     assert.equal(await service.tryConsumeFreeQuota("usr_1", "voice_challenge"), false);
+  });
+
+  it("requires both a paid top-up and a positive current balance", async () => {
+    const withoutTopup = new UsageQuotaService(
+      createFakeDb(new Date(), { hasPaidTopup: false }).db,
+    );
+    const withoutBalance = new UsageQuotaService(
+      createFakeDb(new Date(), { balanceUsd: 0 }).db,
+    );
+
+    assert.equal(await withoutTopup.tryConsumeFreeQuota("usr_1", "email_code"), false);
+    assert.equal(await withoutBalance.tryConsumeFreeQuota("usr_1", "email_code"), false);
   });
 
   it("tracks each verification type's quota independently", async () => {

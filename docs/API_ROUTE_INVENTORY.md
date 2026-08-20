@@ -21,7 +21,7 @@ Usage classes describe the route's callers, not its implementation status:
 | `app/v1/admin/billing/ad-payouts/route.ts` | `/v1/admin/billing/ad-payouts` | `PUT` | Admin session + CSRF | admin | Admin 10-day ad payout calendar | `https://api.powerotp.com` |
 | `app/v1/admin/billing/ad-systems/route.ts` | `/v1/admin/billing/ad-systems` | `PUT` | Admin session + CSRF | admin | Admin accounting configuration panel | `https://api.powerotp.com` |
 | `app/v1/admin/billing/call-rates/route.ts` | `/v1/admin/billing/call-rates` | `GET, PUT` | Admin session; CSRF on PUT | admin | Admin billing rates panel | `https://api.powerotp.com` |
-| `app/v1/admin/billing/credit/route.ts` | `/v1/admin/billing/credit` | `POST` | Admin session + CSRF | admin | Admin billing ledger panel | `https://api.powerotp.com` |
+| `app/v1/admin/billing/credit/route.ts` | `/v1/admin/billing/credit` | `POST` | Admin session + CSRF + Idempotency-Key | admin | Admin billing ledger panel | `https://api.powerotp.com` |
 | `app/v1/admin/billing/email-rate/route.ts` | `/v1/admin/billing/email-rate` | `GET, PUT` | Admin session; CSRF on PUT | admin | Admin billing rates panel | `https://api.powerotp.com` |
 | `app/v1/admin/billing/ledger/route.ts` | `/v1/admin/billing/ledger` | `GET` | Admin session | admin | Admin billing ledger panel | `https://api.powerotp.com` |
 | `app/v1/admin/billing/plan-charges/route.ts` | `/v1/admin/billing/plan-charges` | `GET, PUT` | Admin session; CSRF on PUT | admin | Admin billing rates panel | `https://api.powerotp.com` |

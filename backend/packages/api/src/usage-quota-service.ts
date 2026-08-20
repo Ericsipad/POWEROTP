@@ -1,12 +1,17 @@
 import type { VerificationType } from "@powerotp/contracts";
 import type { Db } from "mongodb";
 
+import type {
+  CustomerBalanceDocument,
+  FinancialTransactionDocument,
+} from "./billing-persistence.js";
 import { PLATFORM_ADMIN_USER_ID, type CustomerAccountDocument } from "./persistence.js";
 
 /**
- * A new account's free monthly allowance per verification type, for its
- * first 180 days only — see `docs/AS_BUILT.md`'s "Customer signup flow"
- * section. `voice_challenge` deliberately has no free allowance (always
+ * A paid customer's free monthly allowance per verification type, during
+ * its first 180 days only. Eligibility requires both a completed processor
+ * top-up and a current balance above zero. `voice_challenge` deliberately
+ * has no free allowance (always
  * goes straight to normal balance-gated charging, per explicit product
  * decision). This is a plain usage counter, not a dollar credit — consuming
  * it lets `VerificationService#create` skip
@@ -44,9 +49,9 @@ export interface UsageQuotaDocument {
 }
 
 /**
- * Tracks each customer's rolling-30-day free usage counter per type, for
- * their first 180 days since account creation — a simple counter, never a
- * dollar amount. Not a Mongo transaction: a small race window under
+ * Tracks each eligible customer's rolling-30-day free usage counter per
+ * type during the first 180 days since account creation — a simple counter,
+ * never a dollar amount. Not a Mongo transaction: a small race window under
  * concurrent requests could over-consume a quota slot by one, which is
  * self-correcting (see `tryConsumeFreeQuota`) and low-stakes since nothing
  * here is money.
@@ -60,24 +65,39 @@ export interface UsageQuotaDocument {
 export class UsageQuotaService {
   readonly #quotas;
   readonly #customerAccounts;
+  readonly #balances;
+  readonly #ledger;
 
   constructor(db: Db) {
     this.#quotas = db.collection<UsageQuotaDocument>("usageQuotas");
     this.#customerAccounts = db.collection<CustomerAccountDocument>("customerAccounts");
+    this.#balances = db.collection<CustomerBalanceDocument>("customerBalances");
+    this.#ledger = db.collection<FinancialTransactionDocument>("financialTransactions");
   }
 
   /**
    * Returns `true` and consumes one unit of free quota if this request is
    * covered by the account's remaining free allowance; `false` if it is
-   * not (no free type configured, quota already used up for the current
-   * rolling window, or the account's 180-day eligibility window has
-   * passed) — the caller must then fall through to
+   * not (no paid top-up, no positive balance, no free type configured,
+   * quota already used up, or the 180-day eligibility window has passed) —
+   * the caller must then fall through to
    * `BalanceService#requireNonNegativeBalance`.
    */
   async tryConsumeFreeQuota(userId: string, type: VerificationType): Promise<boolean> {
     if (userId === PLATFORM_ADMIN_USER_ID) return true;
     const limit = FREE_QUOTA_LIMITS[type];
     if (!limit) return false;
+    const [balance, paidTopup] = await Promise.all([
+      this.#balances.findOne({ _id: userId }),
+      this.#ledger.findOne({
+        userId,
+        type: "topup",
+        amountUsd: { $gt: 0 },
+        paymentProcessor: { $type: "string" },
+        paymentProcessorTransactionId: { $type: "string" },
+      }),
+    ]);
+    if (!balance || balance.balanceUsd <= 0 || !paidTopup) return false;
 
     const now = new Date();
     let quota = await this.#quotas.findOne({ _id: userId });

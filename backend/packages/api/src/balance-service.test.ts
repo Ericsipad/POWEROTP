@@ -157,6 +157,13 @@ describe("BalanceService.applyLedgerEntries", () => {
           insertOne: async (document: FinancialTransactionDocument) => {
             ledgerRows.push(document);
           },
+          updateOne: async (
+            filter: { _id: string },
+            update: { $set: Partial<FinancialTransactionDocument> },
+          ) => {
+            const row = ledgerRows.find((entry) => entry._id === filter._id);
+            if (row) Object.assign(row, update.$set);
+          },
         };
       },
     } as unknown as Db;
@@ -178,9 +185,10 @@ describe("BalanceService.applyLedgerEntries", () => {
       {
         userId: "usr_referrer",
         projectId: "prj_1",
-        type: "referral_commission",
+        type: "signup_referral_credit",
         amountUsd: (_tier, prior) => Math.abs(prior[0]?.amountUsd ?? 0) * 0.1,
         sourceEntryIndex: 0,
+        referralCode: "partner-one",
         commissionPercent: 10,
       },
     ]);
@@ -190,6 +198,8 @@ describe("BalanceService.applyLedgerEntries", () => {
     assert.equal(rows[1]?.amountUsd, 0.2);
     assert.equal(rows[1]?.sourceTransactionId, rows[0]?._id);
     assert.equal(rows[1]?.commissionBaseUsd, 2);
+    assert.equal(rows[0]?.referralProcessed, true);
+    assert.equal(rows[0]?.referralTransactionId, rows[1]?._id);
     assert.equal(balanceByUser.get("usr_owner")?.balanceUsd, 58);
     assert.equal(balanceByUser.get("usr_referrer")?.balanceUsd, 0.2);
   });

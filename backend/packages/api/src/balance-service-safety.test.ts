@@ -64,10 +64,20 @@ function createTransactionalService(
             claims.add(_id);
           },
           findOne: async ({ _id }: { _id: string }) => claims.has(_id) ? { _id } : null,
+          deleteOne: async ({ _id }: { _id: string }) => {
+            claims.delete(_id);
+          },
         };
       }
       return {
         insertOne: async (row: FinancialTransactionDocument) => ledger.push(row),
+        updateOne: async (
+          { _id }: { _id: string },
+          update: { $set: Partial<FinancialTransactionDocument> },
+        ) => {
+          const row = ledger.find((entry) => entry._id === _id);
+          if (row) Object.assign(row, update.$set);
+        },
         find: () => ({
           sort: () => ({ limit: () => ({ toArray: async () => ledger }) }),
         }),
@@ -101,9 +111,10 @@ const sourceAndCommission = (): LedgerEntryInput[] => [
   { userId: "usr_owner", type: "daily_charge", amountUsd: -2 },
   {
     userId: "usr_referrer",
-    type: "referral_commission",
+    type: "recurring_referral_credit",
     amountUsd: (_tier, rows) => Math.abs(rows[0]?.amountUsd ?? 0) * 0.1,
     sourceEntryIndex: 0,
+    referralCode: "partner-one",
     omitWhenZero: true,
   },
 ];
@@ -148,13 +159,40 @@ describe("BalanceService transaction safety", () => {
     );
   });
 
+  it("makes a single-row admin adjustment safe to submit twice", async () => {
+    const { service, balances, ledger } = createTransactionalService();
+    const input = { userId: "usr_owner", type: "admin_adjustment" as const, amountUsd: 10 };
+
+    assert.ok(await service.applyLedgerEntry(input, "admin-adjustment:admin:key"));
+    assert.equal(
+      await service.applyLedgerEntry(input, "admin-adjustment:admin:key"),
+      undefined,
+    );
+    assert.equal(ledger.length, 1);
+    assert.equal(balances.get("usr_owner")?.balanceUsd, 10);
+  });
+
+  it("does not consume a claim when every row is intentionally omitted", async () => {
+    const { service, claims, ledger } = createTransactionalService();
+    const key = "daily-charge:project:2026-08-19";
+    assert.deepEqual(
+      await service.applyLedgerEntries(
+        [{ userId: "usr_owner", type: "daily_charge", amountUsd: 0, omitWhenZero: true }],
+        key,
+      ),
+      [],
+    );
+    assert.equal(claims.has(key), false);
+    assert.equal(ledger.length, 0);
+  });
+
   it("keeps source indexes aligned when platform-admin rows are excluded", async () => {
     const { service } = createTransactionalService();
     const rows = await service.applyLedgerEntries([
       { userId: PLATFORM_ADMIN_USER_ID, type: "ad_revenue", amountUsd: 1 },
       {
         userId: "usr_unused_referrer",
-        type: "referral_commission",
+        type: "ad_revenue_referral_credit",
         amountUsd: (_tier, prior) => prior[0]?.amountUsd ?? 0,
         sourceEntryIndex: 0,
         omitWhenZero: true,
@@ -162,7 +200,7 @@ describe("BalanceService transaction safety", () => {
       { userId: "usr_owner", type: "daily_charge", amountUsd: -2 },
       {
         userId: "usr_referrer",
-        type: "referral_commission",
+        type: "recurring_referral_credit",
         amountUsd: (_tier, prior) => Math.abs(prior[2]?.amountUsd ?? 0) * 0.1,
         sourceEntryIndex: 2,
         omitWhenZero: true,

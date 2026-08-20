@@ -114,6 +114,7 @@ async function buildServerContext(): Promise<ServerContext> {
   const balances = new BalanceService(dataStores.client, dataStores.db);
   const rateCharts = new RateChartService(dataStores.db);
   const billingCharges = new BillingChargeService(dataStores.db, balances, rateCharts);
+  await billingCharges.retryPendingCharges();
   const stripeTopups = new StripeTopupService(dataStores.db, config, balances);
   const accountingConfig = new AccountingConfigService(dataStores.client, dataStores.db);
   const projectAuthSessions = new ProjectAuthSessionService(dataStores.db);

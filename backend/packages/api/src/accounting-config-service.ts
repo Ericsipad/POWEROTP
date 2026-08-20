@@ -108,11 +108,16 @@ export class AccountingConfigService {
         updatedAt: now,
         status: "entered",
       };
-      await this.#payouts.replaceOne(
-        { adSystemId: input.adSystemId, serviceDate: input.serviceDate },
+      const result = await this.#payouts.replaceOne(
+        existing
+          ? { _id: existing._id, status: { $ne: "settled" } }
+          : { adSystemId: input.adSystemId, serviceDate: input.serviceDate },
         document,
-        { upsert: true, session },
+        { upsert: !existing, session },
       );
+      if (existing && result.matchedCount !== 1) {
+        throw new AccountingConfigError("payout_already_settled", 409);
+      }
       await this.#audit(
         actorId,
         "accounting.ad_payout.saved",

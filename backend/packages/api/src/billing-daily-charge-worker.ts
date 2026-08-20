@@ -8,10 +8,8 @@ import type { RateChartService } from "./rate-chart-service.js";
 const BILLING_DAILY_CHARGE_QUEUE_NAME = "billing-daily-charges";
 const BILLING_DAILY_CHARGE_JOB_ID = "billing-daily-charge-tick";
 /** Once/day is a simplification, not aligned to a fixed wall-clock time
- * (e.g. midnight UTC) — the per-project idempotency check below (a
- * `daily_charge` row already exists for this project since the start of
- * today, UTC) is what actually prevents a double charge, not the repeat
- * interval alone. */
+ * (e.g. midnight UTC). The permanent per-project/date monetary claim is
+ * what prevents a double charge, not the repeat interval alone. */
 const BILLING_DAILY_CHARGE_INTERVAL_MS = 24 * 60 * 60 * 1_000;
 
 export function createBillingDailyChargeQueue(connection: ConnectionOptions) {
@@ -24,7 +22,12 @@ export async function scheduleBillingDailyCharges(queue: Queue) {
   await queue.add(
     "tick",
     {},
-    { jobId: BILLING_DAILY_CHARGE_JOB_ID, repeat: { every: BILLING_DAILY_CHARGE_INTERVAL_MS } },
+    {
+      jobId: BILLING_DAILY_CHARGE_JOB_ID,
+      repeat: { every: BILLING_DAILY_CHARGE_INTERVAL_MS },
+      attempts: 5,
+      backoff: { type: "exponential", delay: 5_000 },
+    },
   );
 }
 

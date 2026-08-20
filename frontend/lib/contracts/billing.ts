@@ -38,7 +38,11 @@ export interface FinancialTransaction {
   sessionId?: string;
   paymentProcessor?: string;
   paymentProcessorTransactionId?: string;
+  paymentProcessorEventId?: string;
+  paymentRequestId?: string;
   sourceTransactionId?: string;
+  referralProcessed?: true;
+  referralTransactionId?: string;
   adPayoutId?: string;
   adSettlementId?: string;
   thresholdRuleId?: string;
@@ -56,7 +60,10 @@ export interface FinancialTransaction {
     | "signup_threshold_charge"
     | "signin_threshold_charge"
     | "ad_revenue"
-    | "referral_commission"
+    | "signup_referral_credit"
+    | "signin_referral_credit"
+    | "ad_revenue_referral_credit"
+    | "recurring_referral_credit"
     | "age_verification"
     | "topup"
     | "admin_adjustment";

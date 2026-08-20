@@ -3989,3 +3989,23 @@ build/lint/typecheck/test passed. The initial API test run found an incorrect in
 added regression test; after correcting that test, the complete API check passed. The initial
 focused route command was run from the parent backend workspace and found no file; the same suite
 passed from the server workspace. One final root `npm run verify` passed.
+
+## 2026-08-19 — Pre-Phase-18 accounting transaction simplification audit
+
+**Status: confirmed defects corrected; Phase 18 remains unstarted.** Stripe top-ups now persist
+the request sent to the processor and permanent generic processor-event history. Immediate and
+delayed paid events must match that request; event processing, request completion, the linked
+ledger row, and the balance update are atomic. OTP
+charges have permanent per-interaction claims, and Brevo-accepted `email_code` delivery now reaches
+the completion billing hook without scheduling the voice/SMS-only provider reconciliation.
+Durable pending/applied markers repair an interrupted OTP charge on dispatch retry or server
+restart.
+
+**Retry and contract corrections.** Failed daily-accounting operations still record their
+individual status/audit evidence but now fail a bounded-retry BullMQ tick; successful rows remain
+protected by durable claims during retry. Unrelated project-auth-session database errors propagate
+instead of being mislabeled as duplicate reports. `age_verification` remains reserved for its
+upcoming product, and `visit` remains the explicit Phase 25 reserved value; neither has a current
+producer. Referral source rows now record the receiver transaction, whose explicit extensible type
+identifies signup, signin, ad-revenue, or recurring credit. Manual admin adjustments require
+idempotency and reject the platform-admin pseudo-account.

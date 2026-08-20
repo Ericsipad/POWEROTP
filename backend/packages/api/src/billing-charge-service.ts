@@ -1,7 +1,7 @@
 import { otpChargeTypeFor } from "@powerotp/contracts";
 import type { Db } from "mongodb";
 
-import type { BalanceService } from "./balance-service.js";
+import type { BalanceService, LedgerEntryInput } from "./balance-service.js";
 import { countryForE164 } from "./country-lookup.js";
 import { PLATFORM_ADMIN_USER_ID } from "./persistence.js";
 import type { RateChartService } from "./rate-chart-service.js";
@@ -35,6 +35,7 @@ export function computeBillableMinutes(events: Pick<VerificationEventDocument, "
  */
 export class BillingChargeService {
   readonly #events;
+  readonly #requests;
 
   constructor(
     db: Db,
@@ -42,10 +43,38 @@ export class BillingChargeService {
     private readonly rates: RateChartService,
   ) {
     this.#events = db.collection<VerificationEventDocument>("verificationEvents");
+    this.#requests = db.collection<VerificationRequestDocument>("verificationRequests");
+  }
+
+  async #applyCharge(
+    verification: VerificationRequestDocument,
+    input: LedgerEntryInput,
+  ): Promise<void> {
+    await this.balances.applyLedgerEntry(input, `otp:${verification._id}`);
+    await this.#requests.updateOne(
+      { _id: verification._id },
+      { $set: { billingAppliedAt: new Date() } },
+    );
+  }
+
+  async retryPendingCharges(): Promise<void> {
+    const pending = await this.#requests.find({
+      billingPendingAt: { $exists: true },
+      billingAppliedAt: { $exists: false },
+    }).toArray();
+    for (const verification of pending) {
+      await this.chargeCompletedInteraction(verification);
+    }
   }
 
   async chargeCompletedInteraction(verification: VerificationRequestDocument): Promise<void> {
-    if (verification.customerId === PLATFORM_ADMIN_USER_ID) return;
+    if (verification.customerId === PLATFORM_ADMIN_USER_ID) {
+      await this.#requests.updateOne(
+        { _id: verification._id },
+        { $set: { billingAppliedAt: new Date() } },
+      );
+      return;
+    }
     // Nothing was ever really dispatched (e.g. method_not_available) —
     // no real provider attempt happened, so there is nothing to bill.
     if (!verification.callTrunkId && !verification.smsDid && !verification.emailSent) return;
@@ -62,7 +91,7 @@ export class BillingChargeService {
     // in the same ledger/reports every real charge appears in, per the
     // user's explicit requirement.
     if (verification.freeQuotaCovered) {
-      await this.balances.applyLedgerEntry({
+      await this.#applyCharge(verification, {
         userId: verification.customerId,
         projectId: verification.projectId,
         interactionId: verification._id,
@@ -75,7 +104,7 @@ export class BillingChargeService {
     }
 
     if (verification.type === "sms_code") {
-      await this.balances.applyLedgerEntry({
+      await this.#applyCharge(verification, {
         userId: verification.customerId,
         projectId: verification.projectId,
         interactionId: verification._id,
@@ -94,7 +123,7 @@ export class BillingChargeService {
     if (verification.type === "email_code") {
       // Flat global rate, no country dimension — see `EmailRateSchema`'s
       // doc comment in `backend/packages/contracts/src/billing.ts`.
-      await this.balances.applyLedgerEntry({
+      await this.#applyCharge(verification, {
         userId: verification.customerId,
         projectId: verification.projectId,
         interactionId: verification._id,
@@ -112,9 +141,15 @@ export class BillingChargeService {
       .find({ interactionId: verification._id })
       .sort({ sequence: 1 })
       .toArray();
-    const minutes = computeBillableMinutes(events);
+    const timeline = events.at(-1)?.sequence === verification.sequence
+      ? events
+      : [
+          ...events,
+          { state: verification.state, occurredAt: verification.updatedAt },
+        ];
+    const minutes = computeBillableMinutes(timeline);
 
-    await this.balances.applyLedgerEntry({
+    await this.#applyCharge(verification, {
       userId: verification.customerId,
       projectId: verification.projectId,
       interactionId: verification._id,

@@ -1198,10 +1198,8 @@ transactional running-balance ledger, and Stripe fixed-amount top-ups.
 - **The ledger** (`financialTransactions` collection, append-only, no TTL —
   a permanent financial record, unlike the 18-month-TTL'd verification
   collections): one row per balance-affecting event —
-  `userId`/`projectId`/`interactionId`/`stripePaymentId` (whichever apply),
-  `type` (`otp1`..`otp4` map 1:1 to
-  `call_reachability`/`voice_code`/`voice_challenge`/`sms_code` via
-  `otpChargeTypeFor` in `backend/packages/contracts/src/billing.ts`;
+  `userId`/`projectId`/`interactionId`/processor-qualified payment identity
+  (whichever apply), `type` (the exact OTP method,
   `daily_charge`; `topup`; `visit` is reserved but unused, see below),
   `country` where applicable, and `openingBalanceUsd`/`tierAtTransaction`/
   `amountUsd`/`closingBalanceUsd` — every row carries its own before/after
@@ -1249,11 +1247,8 @@ transactional running-balance ledger, and Stripe fixed-amount top-ups.
   BullMQ repeatable job (`billing-daily-charges` queue, once/day) charges
   every *active project* ("website install"/card) its owning customer's
   current-tier `dailyChargedUsd` — one row per project per day, not one per
-  customer account. Per-project idempotency is a direct query ("does a
-  `daily_charge` row already exist for this project since the start of
-  today, UTC?"), not just the repeatable job's stable `jobId` — a mid-tick
-  restart re-running the same calendar day's pass can never double-charge
-  an already-charged project.
+  customer account. A permanent per-project/UTC-date monetary claim—not
+  merely the repeatable job's stable `jobId`—makes a mid-tick retry safe.
 - **Stripe top-ups** (`backend/packages/api/src/stripe-service.ts`): fixed amounts only
   — $5/$25/$50/$100, no arbitrary custom amount.
   `POST /v1/billing/topups` (customer session-gated) creates a Stripe
@@ -1261,9 +1256,15 @@ transactional running-balance ledger, and Stripe fixed-amount top-ups.
   `POST /v1/billing/stripe/webhook` (public, authenticated entirely by
   Stripe's own request signature) on a `checkout.session.completed` event —
   never from the session-creation response itself, since the customer might
-  never complete payment. A `processedStripeEvents` collection (keyed by
-  Stripe's own event id, 90-day TTL) makes the webhook idempotent, since
-  Stripe retries on any non-2xx response. New optional config:
+  never complete payment. `topupRequests` records the customer and fixed
+  amount sent to Stripe before checkout creation. Every verified webhook is
+  retained permanently in the generic `paymentProcessorEvents` collection
+  using only the nonblank fields POWEROTP actually uses. A paid event must
+  match its request; the event status, request completion, top-up ledger row,
+  and balance update commit together, so a crash leaves the event retryable.
+  Both immediate
+  `checkout.session.completed` payments and delayed `checkout.session.async_payment_succeeded`
+  payments require Stripe's authoritative `paid` status and exact USD amount. New optional config:
   `STRIPE_SECRET_KEY`/`STRIPE_WEBHOOK_SECRET` — both empty-string-is-unset
   like every other optional var; fails closed with `billing_not_configured`
   until both are set, same deferred-credential convention as every other
@@ -1371,16 +1372,18 @@ normally."
   then deliberately discarded mid-session as needless complexity for this —
   "give the free quota a counter then start charges"). The interaction still
   gets a real row in the same `financialTransactions` ledger at completion,
-  always at `amountUsd: 0` with `note: "free_quota"` (`otp1`..`otp4`, set via
+  always at `amountUsd: 0` with `note: "free_quota"` (using its exact OTP method, set via
   `VerificationRequestDocument#freeQuotaCovered`, fixed at creation time and
   read by `BillingChargeService#chargeCompletedInteraction`) — per explicit
   instruction, free usage must be fully visible in every report/UI a real
   charge appears in (the customer dashboard's ledger table, the admin ledger
-  lookup panel), not silently invisible. Per account, for its first 180 days
-  since signup only:
+  lookup panel), not silently invisible. Eligibility requires a completed
+  payment-processor top-up, a current balance greater than zero, and an
+  account still within its first 180 days:
   - `call_reachability`: 10 free per rolling 30-day window
   - `voice_code`: 10 free per rolling 30-day window
   - `sms_code`: 5 free per rolling 30-day window
+  - `email_code`: 1,000 free per rolling 30-day window
   - `voice_challenge`: **no free quota at all** — always goes straight to
     normal balance-gated charging, an explicit product decision, not an
     oversight.
@@ -1558,8 +1561,9 @@ settings and filtered history view.
   documented scope cut, not an oversight.
 - **Free quota and billing**: `email_code` gets its own free allowance in
   `backend/packages/api/src/usage-quota-service.ts` — **1,000 per rolling 30 days**, the
-  user's own number from when this type was first scoped, same 180-day
-  eligibility window as every other type. Once quota runs out, charging
+  user's own number from when this type was first scoped, with the same
+  paid-top-up, positive-balance, and 180-day eligibility requirements as
+  every other free type. Once quota runs out, charging
   goes through a **new, deliberately flat, non-per-country rate** —
   `EmailRateSchema`/`EmailRateCardDocument` (`backend/packages/contracts/src/billing.ts`,
   `backend/packages/api/src/billing-persistence.ts`) is a single global document (fixed
@@ -1569,10 +1573,9 @@ settings and filtered history view.
   /v1/admin/billing/email-rate` and a new card in `/admin`'s
   "Billing rates" panel (`frontend/app/admin/billing-rates-panel.tsx`), same
   "gathered and entered by an admin, never auto-fetched" convention as
-  every other rate. Ledger type `otp5` was added to
-  `financialTransactionTypes`, mapped 1:1 from `email_code` via
-  `otpChargeTypeFor` — a free-quota-covered `email_code` interaction still
-  writes a normal `otp5` row at `amountUsd: 0`/`note: "free_quota"`, same
+  every other rate. Ledger type `email_code` is mapped directly via
+  `otpChargeTypeFor` — a free-quota-covered interaction still
+  writes a normal `email_code` row at `amountUsd: 0`/`note: "free_quota"`, same
   convention as every other type.
 - **Customer-brandable delivery emails**: `ProjectDocument` gained optional
   `brandName`/`brandLogoUrl` fields (`backend/packages/api/src/persistence.ts`,
@@ -2178,7 +2181,7 @@ testing the node rebuild script), **VoIP.ms support** (the `trunk-2`/`trunk-3`
    bullet for the user's exact described rule, recorded so it isn't lost.
    **The real-customer-blocking gap itself is now addressed**: a full "Customer signup
    flow" (see that section above) lets a real customer actually reach a nonzero balance —
-   a per-type free monthly usage quota for their first 180 days, plus an admin manual
+   a paid-top-up/positive-balance per-type free monthly usage quota for their first 180 days, plus an admin manual
    balance credit/debit action (`POST /v1/admin/billing/credit`) for support cases. Still
    not done: no rate has actually been entered into the admin rate charts yet (every
    country still bills $0), and a real Stripe test-mode top-up has still never been
@@ -2214,7 +2217,7 @@ testing the node rebuild script), **VoIP.ms support** (the `trunk-2`/`trunk-3`
 10. **Customer signup flow is now implemented** (see that section above):
     password pepper, the rapid signup modal (account + first project/API key
     together), an email-verification gate before any real usage, a per-type
-    free monthly usage quota for an account's first 180 days (no per-type
+    paid-top-up/positive-balance free monthly usage quota for an account's first 180 days (no per-type
     minimum balance floor — tried and removed, see that section), Brevo
     template support, an admin manual balance credit/debit action, and a
     data-minimization design where most services only ever pass around an
@@ -2345,14 +2348,14 @@ second wallet or project ledger. `financialTransactions` remains append-only and
 `customerBalances` remains its transactionally updated current-balance projection.
 
 - New ledger writes use `paymentProcessor` plus `paymentProcessorTransactionId`, allowing
-  independently namespaced IDs from Stripe and future processors. Historical `stripePaymentId`
-  rows remain readable as Stripe history. OTP ledger types now expose the exact verification
-  method (`call_reachability`, `voice_code`, `voice_challenge`, `sms_code`, or `email_code`)
-  instead of opaque `otp1`–`otp5` labels.
+  independently namespaced IDs from Stripe and future processors. Payment request and webhook
+  references are stored directly on top-up rows. OTP ledger types use the exact verification
+  method (`call_reachability`, `voice_code`, `voice_challenge`, `sms_code`, or `email_code`).
 - `BalanceService#applyLedgerEntries` writes ordered multi-account batches in one MongoDB
   transaction. Source and referral rows, balance projections, durable idempotency claims, and
-  settlement/cooldown state commit or roll back together. Every commission row links to and
-  snapshots the amount/percentage of its immutable source row.
+  settlement/cooldown state commit or roll back together. Every referral-credit row links to and
+  snapshots the amount/percentage of its immutable source row; the source row is finalized in the
+  same transaction with `referralProcessed: true` and the receiver transaction ID.
 - `projectAuthSessions` stores closed, immutable customer-site signup/signin reports with project,
   session, timestamp, ad system, allotted slots, filled slots, and idempotency key. Reports require
   the project API credential, rate limit, bounded timestamp, and `filled <= allotted`; browser code
@@ -2415,3 +2418,29 @@ run exposed an incorrect source index in one newly added regression test; that t
 and the complete API check then passed. The first focused route invocation used the backend
 workspace rather than the server workspace and found no test file; the same focused route suite
 then passed from its correct workspace. One final root `npm run verify` passed.
+
+### Pre-Phase-18 accounting transaction simplification audit (2026-08-19)
+
+A fresh end-to-end audit removed one redundant claim mechanism and corrected retry/producer
+failures without introducing a second ledger, wallet, or transaction abstraction:
+
+- Stripe top-ups use generic permanent `paymentProcessorEvents` history plus a stored
+  `topupRequests` row. The webhook must match the request and authoritative paid USD amount; event
+  processing, request completion, the linked top-up row, and the balance projection are atomic.
+- OTP charges now use a permanent per-interaction monetary claim. Successful `email_code`
+  delivery is included in the same completion trigger as voice and SMS, while VoIP.ms provider
+  reconciliation remains limited to voice/SMS. The provider-completion transition also records a
+  durable pending marker; a failed charge is repaired by the existing dispatch retry path or the
+  next server start, and the applied marker is written only after the claimed ledger operation.
+- A failed payout, threshold, or daily-charge operation still records its focused audit/status,
+  but now also fails the BullMQ tick. The repeat job has bounded retries, and already committed
+  monetary work is skipped by durable claims on retry.
+- Unrelated project-auth-session persistence failures propagate so the reporting server can
+  retry; only an actual duplicate key enters replay/conflict handling.
+- Manual admin adjustments require a client-stable idempotency key and reject the platform-admin
+  pseudo-account, preventing double-submit money and silent no-op success.
+- `age_verification` remains an explicitly reserved transaction type for its upcoming product and
+  has no producer yet. `visit` likewise remains reserved for Phase 25.
+- Referral receiver rows now use explicit, extensible signup, signin, ad-revenue, and recurring
+  credit types instead of one generic type. Each source row records whether and where its referral
+  payment was processed.

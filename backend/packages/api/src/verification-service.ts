@@ -293,6 +293,9 @@ export class VerificationService {
   ): Promise<boolean> {
     const current = await this.#requests.findOne({ _id: interactionId });
     if (!current) return false;
+    if (current.billingPendingAt && !current.billingAppliedAt) {
+      await this.chargeCompletedInteraction(current);
+    }
     if (current.expiresAt.getTime() < Date.now() && !isTerminalState(current.state)) {
       to = "expired";
       reasonCode = "interaction_expired";
@@ -300,6 +303,10 @@ export class VerificationService {
     if (!isTransitionAllowed(current.type, current.state, to)) return false;
 
     const nextSequence = current.sequence + 1;
+    const billingPending =
+      !hasReachedAwaitingResponse(current.type, current.state) &&
+      hasReachedAwaitingResponse(current.type, to) &&
+      Boolean(current.callTrunkId || current.smsDid || current.emailSent);
     const updated = await this.#requests.findOneAndUpdate(
       { _id: interactionId, state: current.state, sequence: current.sequence },
       {
@@ -308,6 +315,7 @@ export class VerificationService {
           reasonCode,
           sequence: nextSequence,
           updatedAt: new Date(),
+          ...(billingPending ? { billingPendingAt: new Date() } : {}),
         },
       },
       { returnDocument: "after" },
@@ -330,12 +338,14 @@ export class VerificationService {
     const justFinishedDelivery =
       !hasReachedAwaitingResponse(current.type, current.state) &&
       hasReachedAwaitingResponse(updated.type, updated.state);
-    if (justFinishedDelivery && (updated.callTrunkId || updated.smsDid)) {
-      await this.#requests.updateOne(
-        { _id: updated._id },
-        { $set: { providerRecordStatus: "pending" } },
-      );
-      await this.enqueueProviderReconcile(updated._id);
+    if (justFinishedDelivery && (updated.callTrunkId || updated.smsDid || updated.emailSent)) {
+      if (updated.callTrunkId || updated.smsDid) {
+        await this.#requests.updateOne(
+          { _id: updated._id },
+          { $set: { providerRecordStatus: "pending" } },
+        );
+        await this.enqueueProviderReconcile(updated._id);
+      }
       // Charge the customer's balance for this real, completed delivery
       // attempt at the same moment — see
       // `backend/packages/api/src/billing-charge-service.ts#chargeCompletedInteraction`.

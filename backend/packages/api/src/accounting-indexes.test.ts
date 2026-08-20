@@ -62,13 +62,11 @@ describe("accounting integrity indexes", () => {
     );
   });
 
-  it("removes the ledger batch-key uniqueness and namespaces processor IDs", async () => {
-    const { created, db, dropped } = fakeIndexDb({
-      financialTransactions: [{ name: "idempotencyKey_1", unique: true }],
-    });
+  it("uses claims instead of a ledger batch-key index and namespaces processor IDs", async () => {
+    const { created, db, dropped } = fakeIndexDb({});
     await ensureBillingIndexes(db);
 
-    assert.deepEqual(dropped, ["financialTransactions:idempotencyKey_1"]);
+    assert.deepEqual(dropped, []);
     assert.equal(
       created.some((index) => "idempotencyKey" in index.keys),
       false,
@@ -77,6 +75,27 @@ describe("accounting integrity indexes", () => {
       created.some((index) =>
         index.keys.paymentProcessor === 1 &&
         index.keys.paymentProcessorTransactionId === 1 &&
+        index.options?.unique === true
+      ),
+      true,
+    );
+    assert.equal(
+      created.some((index) => index.collection === "processedStripeEvents"),
+      false,
+    );
+    assert.equal(
+      created.some((index) =>
+        index.collection === "financialTransactions" &&
+        index.keys.userId === 1 &&
+        index.keys.type === 1
+      ),
+      true,
+    );
+    assert.equal(
+      created.some((index) =>
+        index.collection === "topupRequests" &&
+        index.keys.paymentProcessor === 1 &&
+        index.keys.processorCheckoutSessionId === 1 &&
         index.options?.unique === true
       ),
       true,

@@ -8,6 +8,10 @@ import type {
 
 const EVENT_LOOKBACK_MS = 31 * 24 * 60 * 60 * 1_000;
 
+function isDuplicateKey(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "code" in error && error.code === 11000;
+}
+
 export class ProjectAuthSessionError extends Error {
   constructor(
     readonly code: string,
@@ -68,7 +72,8 @@ export class ProjectAuthSessionService {
     };
     try {
       await this.#sessions.insertOne(document);
-    } catch {
+    } catch (error) {
+      if (!isDuplicateKey(error)) throw error;
       const replay = await this.#sessions.findOne({ projectId, idempotencyKey });
       if (replay) return this.report(projectId, customerId, idempotencyKey, input);
       throw new ProjectAuthSessionError("session_already_reported", 409);

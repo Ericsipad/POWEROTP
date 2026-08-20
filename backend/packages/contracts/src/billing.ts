@@ -83,14 +83,16 @@ export const UpdatePlanChargeSchema = PlanChargeSchema.omit({ updatedAt: true })
  * charging logic exists for it yet; see `docs/AS_BUILT.md`'s "Customer
  * balance billing" section. OTP rows use their exact verification method
  * (`call_reachability`/`voice_code`/`voice_challenge`/`sms_code`/`email_code`).
- * New-account free
- * usage (see `backend/packages/api/src/usage-quota-service.ts`) is a simple per-type
+ * Paid-account free usage during the first 180 days (see
+ * `backend/packages/api/src/usage-quota-service.ts`) is a simple per-type
  * rolling counter, not a dollar credit, so it has no dedicated ledger type
  * of its own — a free-quota-covered interaction still writes a normal
  * OTP row, just always at `amountUsd: 0` with
  * `note: "free_quota"` (see `backend/packages/api/src/billing-charge-service.ts`), so it
  * stays fully visible in the same ledger/reports every real charge appears
  * in.
+ * `age_verification` is intentionally reserved for the age-verification
+ * product planned next; it has no producer until that implementation exists.
  * `admin_adjustment` is a manual support credit/debit
  * (`POST /v1/admin/billing/credit`), added for the "Customer signup flow"
  * work — see `docs/AS_BUILT.md`.
@@ -102,7 +104,10 @@ export const financialTransactionTypes = [
   "signup_threshold_charge",
   "signin_threshold_charge",
   "ad_revenue",
-  "referral_commission",
+  "signup_referral_credit",
+  "signin_referral_credit",
+  "ad_revenue_referral_credit",
+  "recurring_referral_credit",
   "age_verification",
   "topup",
   "admin_adjustment",
@@ -135,7 +140,11 @@ export const FinancialTransactionSchema = z
     sessionId: z.string().min(1).optional(),
     paymentProcessor: PaymentProcessorSchema.optional(),
     paymentProcessorTransactionId: z.string().min(1).max(200).optional(),
+    paymentProcessorEventId: z.string().min(1).max(200).optional(),
+    paymentRequestId: z.string().min(1).optional(),
     sourceTransactionId: z.string().min(1).optional(),
+    referralProcessed: z.literal(true).optional(),
+    referralTransactionId: z.string().min(1).optional(),
     adPayoutId: z.string().min(1).optional(),
     adSettlementId: z.string().min(1).optional(),
     thresholdRuleId: z.string().min(1).optional(),
@@ -158,6 +167,27 @@ export const FinancialTransactionSchema = z
     {
       message: "Payment processor and transaction ID must be supplied together",
       path: ["paymentProcessorTransactionId"],
+    },
+  )
+  .refine(
+    (value) =>
+      (
+        value.paymentProcessorEventId === undefined &&
+        value.paymentRequestId === undefined
+      ) ||
+      value.paymentProcessor !== undefined,
+    {
+      message: "Payment request and event references require a payment processor",
+      path: ["paymentProcessor"],
+    },
+  )
+  .refine(
+    (value) =>
+      (value.referralProcessed === undefined) ===
+      (value.referralTransactionId === undefined),
+    {
+      message: "Referral processed marker and transaction ID must be supplied together",
+      path: ["referralTransactionId"],
     },
   );
 

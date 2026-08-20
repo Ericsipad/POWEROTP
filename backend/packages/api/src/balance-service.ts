@@ -57,8 +57,12 @@ export interface LedgerEntryInput {
   sessionId?: string;
   paymentProcessor?: string;
   paymentProcessorTransactionId?: string;
+  paymentProcessorEventId?: string;
+  paymentRequestId?: string;
   sourceTransactionId?: string;
   sourceEntryIndex?: number;
+  referralProcessed?: true;
+  referralTransactionId?: string;
   adPayoutId?: string;
   adSettlementId?: string;
   thresholdRuleId?: string;
@@ -150,8 +154,11 @@ export class BalanceService {
    * `PLATFORM_ADMIN_USER_ID`); returns `undefined` in that case since there
    * is nothing to record.
    */
-  async applyLedgerEntry(input: LedgerEntryInput): Promise<FinancialTransactionDocument | undefined> {
-    const [entry] = await this.applyLedgerEntries([input]);
+  async applyLedgerEntry(
+    input: LedgerEntryInput,
+    idempotencyKey?: string,
+  ): Promise<FinancialTransactionDocument | undefined> {
+    const [entry] = await this.applyLedgerEntries([input], idempotencyKey);
     return entry;
   }
 
@@ -173,8 +180,12 @@ export class BalanceService {
     for (const input of inputs) {
       const hasProcessor = input.paymentProcessor !== undefined;
       const hasTransactionId = input.paymentProcessorTransactionId !== undefined;
+      const hasProcessorEvidence =
+        input.paymentProcessorEventId !== undefined ||
+        input.paymentRequestId !== undefined;
       if (
         hasProcessor !== hasTransactionId ||
+        (hasProcessorEvidence && !hasProcessor) ||
         (hasProcessor && !PaymentProcessorSchema.safeParse(input.paymentProcessor).success) ||
         (hasTransactionId &&
           (input.paymentProcessorTransactionId!.length < 1 ||
@@ -226,7 +237,11 @@ export class BalanceService {
               sessionId: input.sessionId,
               paymentProcessor: input.paymentProcessor,
               paymentProcessorTransactionId: input.paymentProcessorTransactionId,
+              paymentProcessorEventId: input.paymentProcessorEventId,
+              paymentRequestId: input.paymentRequestId,
               sourceTransactionId,
+              referralProcessed: input.referralProcessed,
+              referralTransactionId: input.referralTransactionId,
               adPayoutId: input.adPayoutId,
               adSettlementId: input.adSettlementId,
               thresholdRuleId: input.thresholdRuleId,
@@ -237,7 +252,6 @@ export class BalanceService {
                 (input.sourceEntryIndex === undefined
                   ? undefined
                   : Math.abs(entries[input.sourceEntryIndex]?.amountUsd ?? 0)),
-              idempotencyKey,
               type: input.type,
               country: input.country,
               note: input.note,
@@ -262,6 +276,27 @@ export class BalanceService {
             );
             balances.set(input.userId, closingBalanceUsd);
             entries[inputIndex] = entry;
+          }
+          for (const [inputIndex, input] of inputs.entries()) {
+            if (input.sourceEntryIndex === undefined || !input.referralCode) continue;
+            const referralEntry = entries[inputIndex];
+            const sourceEntry = entries[input.sourceEntryIndex];
+            if (!referralEntry || !sourceEntry) continue;
+            sourceEntry.referralProcessed = true;
+            sourceEntry.referralTransactionId = referralEntry._id;
+            await this.#ledger.updateOne(
+              { _id: sourceEntry._id },
+              {
+                $set: {
+                  referralProcessed: true,
+                  referralTransactionId: referralEntry._id,
+                },
+              },
+              { session },
+            );
+          }
+          if (idempotencyKey && entries.every((entry) => entry === undefined)) {
+            await this.#claims.deleteOne({ _id: idempotencyKey }, { session });
           }
           if (onApplied) await onApplied(entries, session);
           committedEntries = entries.filter(

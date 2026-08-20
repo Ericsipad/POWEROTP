@@ -457,8 +457,9 @@ across every customer at once, without needing to know any customer's credential
   remains only its transactionally updated current-balance projection. Project reporting and ad
   settlement collections never maintain a competing balance.
 - Payment references bind both a normalized processor identifier and that processor's transaction
-  ID. A bare provider transaction ID is never treated as globally unique, and historical
-  Stripe-only references are read as Stripe without remaining the write contract.
+  ID. A bare provider transaction ID is never treated as globally unique. Top-ups persist the
+  request sent to the processor and permanent normalized event history; only a paid event matching
+  that request can atomically credit the ledger and balance.
 - Customer-site signup/signin events are accepted only from the authenticated project server,
   with a project-scoped idempotency key, rate limit, bounded timestamp, closed event schema, and
   `filled <= allotted` validation. Browser reports cannot author session counts, slot totals,
@@ -470,7 +471,8 @@ across every customer at once, without needing to know any customer's credential
   credits; late entry is limited to the latest ten complete days.
 - Threshold charges use indexed immutable events, configured positive thresholds, the owning
   account's tier inside the ledger transaction, and durable per-project/rule cooldown state.
-  Referral commissions are linked to their source row and commit atomically with it.
+  Referral credits are linked bidirectionally with their marked source row and commit atomically
+  with it.
 - Referral codes reject reserved names and self-referral. Account attribution is first-touch and
   immutable; project referral replacement requires the owning customer session and CSRF, closes
   the prior attribution without rewriting history, and affects only future rows.

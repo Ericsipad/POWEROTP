@@ -12,7 +12,8 @@ a second account or project balance system.
   transactionally updated current-balance projection.
 - New payment rows identify both `paymentProcessor` and
   `paymentProcessorTransactionId`. Processor transaction IDs are not globally unique without
-  their processor namespace. Historical `stripePaymentId` values remain immutable history.
+  their processor namespace. `topupRequests` records what POWEROTP sent to a processor, while
+  `paymentProcessorEvents` permanently records the nonblank webhook fields POWEROTP actually uses.
 - OTP transaction types are the exact verification methods: `call_reachability`, `voice_code`,
   `voice_challenge`, `sms_code`, and `email_code`.
 - Customer-site signup/signin events are trusted server-to-server project reports. Browser code
@@ -45,6 +46,10 @@ a second account or project balance system.
 - `customerBalances`: current balance/tier projection, written only in the same transaction as its
   ledger row.
 - `billingIdempotencyClaims`: permanent claims for retry-safe monetary batches.
+- `topupRequests`: customer, amount, processor checkout identity, and completion state for each
+  requested balance top-up.
+- `paymentProcessorEvents`: permanent generic processor-event history with event/payment/request
+  linkage and processing status; no unused or blank payload fields.
 
 ### Project event and ad accounting
 
@@ -74,7 +79,12 @@ a second account or project balance system.
 - Source rows, referral rows, balance projections, idempotency claims, settlement rows, and
   threshold state commit or roll back together.
 - Every referral row links to its immutable source transaction and snapshots the commission base
-  and percentage.
+  and percentage. The source row is finalized in the same transaction with
+  `referralProcessed: true` and the receiver transaction ID. Receiver rows use explicit,
+  extensible signup, signin, ad-revenue, or recurring referral-credit types.
+- A paid top-up event must match its stored request, authoritative paid status, currency, and
+  amount. The processor event, request completion, ledger credit, and balance projection commit
+  together; failed processing leaves the event retryable.
 - Ad payout input is validated to at most six decimal places and converted to integer micro-USD.
 - Project ad allocation floors each proportional share, then distributes remaining micros by
   largest fractional remainder with project ID as the deterministic tie-breaker.
@@ -136,5 +146,5 @@ Focused contracts, API, backend production, backend route, and frontend checks p
 a clean root `npm run verify`.
 
 This prerequisite does not implement Phase 18 customer risk/OTP policy, Phase 19 orchestration,
-automatic OTP opening, Passport, CleanDataPages, visitor billing, PaidTokenPass, edge publication,
-Shopify, or external IP-reputation integration.
+automatic OTP opening, Passport, CleanDataPages, visitor billing, age-verification production,
+PaidTokenPass, edge publication, Shopify, or external IP-reputation integration.

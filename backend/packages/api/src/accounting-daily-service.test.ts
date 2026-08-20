@@ -122,4 +122,39 @@ describe("daily accounting boundaries", () => {
     assert.equal(completedKeys.some((key) => key.startsWith("threshold:")), false);
     assert.equal(completedKeys.some((key) => key.startsWith("daily-charge:")), true);
   });
+
+  it("records individual failures and fails the tick so BullMQ retries it", async () => {
+    const audits: unknown[] = [];
+    const projects = [{ _id: "prj_1", customerId: "usr_owner", active: true }];
+    const db = {
+      collection: (name: string) => {
+        if (name === "adDailyPayouts") {
+          return { find: () => ({ sort: () => ({ toArray: async () => [] }) }) };
+        }
+        if (name === "projects") return { find: () => ({ toArray: async () => projects }) };
+        if (name === "billingThresholdRules") {
+          return { find: () => ({ sort: () => ({ toArray: async () => [] }) }) };
+        }
+        if (name === "referralCommissionSettings" || name === "projectReferralAttributions") {
+          return { findOne: async () => null };
+        }
+        if (name === "auditEvents") {
+          return { insertOne: async (audit: unknown) => audits.push(audit) };
+        }
+        return {};
+      },
+    } as unknown as Db;
+    const balances = {
+      applyLedgerEntries: async () => {
+        throw new Error("database unavailable");
+      },
+    } as unknown as BalanceService;
+
+    await assert.rejects(
+      () => new AccountingDailyService(db, balances, {} as RateChartService)
+        .run(new Date("2026-08-19T12:00:00.000Z")),
+      /daily_accounting_operations_failed/,
+    );
+    assert.equal(audits.length, 1);
+  });
 });

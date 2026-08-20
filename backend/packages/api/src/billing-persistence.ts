@@ -1,4 +1,4 @@
-import type { BillingTier, FinancialTransactionType, VerificationType } from "@powerotp/contracts";
+import type { BillingTier, FinancialTransactionType } from "@powerotp/contracts";
 import type { Db } from "mongodb";
 
 /** Admin-entered per-country, per-tier call rate (USD/minute) — `_id` is the
@@ -69,17 +69,18 @@ export interface FinancialTransactionDocument {
   sessionId?: string;
   paymentProcessor?: string;
   paymentProcessorTransactionId?: string;
-  /** Historical Stripe rows written before generic processor identity shipped. */
-  stripePaymentId?: string;
+  paymentProcessorEventId?: string;
+  paymentRequestId?: string;
   sourceTransactionId?: string;
+  referralProcessed?: true;
+  referralTransactionId?: string;
   adPayoutId?: string;
   adSettlementId?: string;
   thresholdRuleId?: string;
   referralCode?: string;
   commissionPercent?: number;
   commissionBaseUsd?: number;
-  idempotencyKey?: string;
-  type: FinancialTransactionType | "otp1" | "otp2" | "otp3" | "otp4" | "otp5";
+  type: FinancialTransactionType;
   country?: string;
   /** A short annotation — the admin's stated reason for `admin_adjustment`
    * rows, or the literal `"free_quota"` for a free-quota-covered OTP row. */
@@ -96,49 +97,63 @@ export interface BillingIdempotencyClaimDocument {
   createdAt: Date;
 }
 
-export const legacyOtpTypeMap: Record<`otp${1 | 2 | 3 | 4 | 5}`, VerificationType> = {
-  otp1: "call_reachability",
-  otp2: "voice_code",
-  otp3: "voice_challenge",
-  otp4: "sms_code",
-  otp5: "email_code",
-};
-
-/** Keyed by Stripe's own event id — makes webhook delivery idempotent,
- * since Stripe retries on any non-2xx response and this must never
- * double-credit a top-up. 90-day TTL: only needed long enough to dedupe
- * retries, not a billing record itself (the ledger row is the record). */
-export interface ProcessedStripeEventDocument {
+export interface TopupRequestDocument {
   _id: string;
-  processedAt: Date;
+  userId: string;
+  amountUsd: number;
+  paymentProcessor: string;
+  processorCheckoutSessionId?: string;
+  processorTransactionId?: string;
+  status: "creating" | "pending" | "completed" | "failed";
+  failureReason?: string;
+  createdAt: Date;
+  updatedAt: Date;
+  completedAt?: Date;
 }
 
-const PROCESSED_STRIPE_EVENT_TTL_SECONDS = 90 * 24 * 60 * 60;
+export interface PaymentProcessorEventDocument {
+  _id: string;
+  paymentProcessor: string;
+  eventId: string;
+  eventType: string;
+  status: "received" | "processed" | "ignored" | "failed";
+  topupRequestId?: string;
+  processorCheckoutSessionId?: string;
+  processorTransactionId?: string;
+  processorPaymentStatus?: string;
+  amountUsd?: number;
+  currency?: string;
+  processorCreatedAt?: Date;
+  livemode?: boolean;
+  failureReason?: string;
+  receivedAt: Date;
+  processedAt?: Date;
+}
 
 export async function ensureBillingIndexes(db: Db) {
   const ledger = db.collection<FinancialTransactionDocument>("financialTransactions");
   await Promise.all([
     ledger.createIndex({ userId: 1, createdAt: -1 }),
     ledger.createIndex({ projectId: 1, createdAt: -1 }),
+    ledger.createIndex({ userId: 1, type: 1 }),
   ]);
-  const legacyIdempotencyIndex = (await ledger.listIndexes().toArray())
-    .find((index) => index.name === "idempotencyKey_1" && index.unique);
-  if (legacyIdempotencyIndex) {
-    await ledger.dropIndex("idempotencyKey_1");
-  }
-  await Promise.all([
-    ledger.createIndex(
-      { paymentProcessor: 1, paymentProcessorTransactionId: 1 },
+  await ledger.createIndex(
+    { paymentProcessor: 1, paymentProcessorTransactionId: 1 },
+    {
+      unique: true,
+      partialFilterExpression: {
+        paymentProcessor: { $type: "string" },
+        paymentProcessorTransactionId: { $type: "string" },
+      },
+    },
+  );
+  await db
+    .collection<TopupRequestDocument>("topupRequests")
+    .createIndex(
+      { paymentProcessor: 1, processorCheckoutSessionId: 1 },
       {
         unique: true,
-        partialFilterExpression: {
-          paymentProcessor: { $type: "string" },
-          paymentProcessorTransactionId: { $type: "string" },
-        },
+        partialFilterExpression: { processorCheckoutSessionId: { $type: "string" } },
       },
-    ),
-    db
-      .collection<ProcessedStripeEventDocument>("processedStripeEvents")
-      .createIndex({ processedAt: 1 }, { expireAfterSeconds: PROCESSED_STRIPE_EVENT_TTL_SECONDS }),
-  ]);
+    );
 }

@@ -9,7 +9,7 @@ import {
   ProjectAuthSessionService,
 } from "./project-auth-session-service.js";
 
-function createService() {
+function createService(insertError?: Error) {
   const rows: ProjectAuthSessionDocument[] = [];
   let adSystemActive = true;
   const collection = {
@@ -18,6 +18,7 @@ function createService() {
         (row) => row.projectId === filter.projectId && row.idempotencyKey === filter.idempotencyKey,
       ) ?? null,
     insertOne: async (document: ProjectAuthSessionDocument) => {
+      if (insertError) throw insertError;
       if (rows.some((row) => row._id === document._id)) {
         throw Object.assign(new Error("duplicate"), { code: 11000 });
       }
@@ -78,6 +79,14 @@ describe("ProjectAuthSessionService", () => {
       () => service.report("prj_1", "usr_1", "idem_1", { ...input, adSlotsFilled: 2 }),
       (error: unknown) =>
         error instanceof ProjectAuthSessionError && error.code === "idempotency_conflict",
+    );
+  });
+
+  it("propagates unrelated persistence failures so the sender can retry", async () => {
+    const { service } = createService(new Error("database unavailable"));
+    await assert.rejects(
+      () => service.report("prj_1", "usr_1", "idem_1", input),
+      /database unavailable/,
     );
   });
 

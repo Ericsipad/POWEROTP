@@ -1,5 +1,6 @@
 import { toCustomerBalanceResponse } from "@powerotp/api/billing-responses.js";
-import { parseBody } from "@powerotp/api/errors.js";
+import { ApiError, parseBody } from "@powerotp/api/errors.js";
+import { PLATFORM_ADMIN_USER_ID } from "@powerotp/api/persistence.js";
 import { AdjustBalanceSchema } from "@powerotp/contracts";
 import { NextResponse } from "next/server";
 
@@ -20,12 +21,22 @@ export const POST = apiRoute(async (request) => {
   verifyCsrfHeader(request, auth, authenticated.session);
 
   const input = parseBody(AdjustBalanceSchema, await request.json());
-  await balances.applyLedgerEntry({
-    userId: input.userId,
-    type: "admin_adjustment",
-    amountUsd: input.amountUsd,
-    note: input.note,
-  });
+  const idempotencyKey = request.headers.get("idempotency-key")?.trim();
+  if (!idempotencyKey || idempotencyKey.length < 16 || idempotencyKey.length > 200) {
+    throw new ApiError("idempotency_key_required", 400);
+  }
+  if (input.userId === PLATFORM_ADMIN_USER_ID) {
+    throw new ApiError("admin_balance_not_adjustable", 400);
+  }
+  await balances.applyLedgerEntry(
+    {
+      userId: input.userId,
+      type: "admin_adjustment",
+      amountUsd: input.amountUsd,
+      note: input.note,
+    },
+    `admin-adjustment:${authenticated.user._id}:${idempotencyKey}`,
+  );
 
   const balance = await balances.getBalance(input.userId);
   const response = NextResponse.json({ balance: toCustomerBalanceResponse(balance) });

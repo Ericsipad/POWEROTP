@@ -51,16 +51,18 @@ export class AdPayoutSettlementService {
     this.#audits = db.collection<AuditDocument>("auditEvents");
   }
 
-  async settleEntered(now: Date): Promise<void> {
+  async settleEntered(now: Date): Promise<boolean> {
     const payouts = await this.#payouts
       .find({ serviceDate: { $in: completeServiceDates(now) }, status: { $in: ["entered", "failed"] } })
       .sort({ serviceDate: 1, adSystemId: 1 })
       .toArray();
     const settings = await this.#commissions.findOne({ _id: "global" });
+    let failed = false;
     for (const payout of payouts) {
       try {
         await this.#settleOne(payout, settings, now);
       } catch (error) {
+        failed = true;
         await this.#payouts.updateOne(
           { _id: payout._id, status: { $ne: "settled" } },
           {
@@ -73,6 +75,7 @@ export class AdPayoutSettlementService {
         await this.#recordFailure(payout._id, error);
       }
     }
+    return failed;
   }
 
   async #settleOne(
@@ -142,7 +145,7 @@ export class AdPayoutSettlementService {
         entries.push({
           userId: referral.referrerUserId,
           projectId: project._id,
-          type: "referral_commission",
+          type: "ad_revenue_referral_credit",
           amountUsd: microsToUsd(commissionMicros),
           sourceEntryIndex: ownerIndex,
           referralCode: referral.referralCode,

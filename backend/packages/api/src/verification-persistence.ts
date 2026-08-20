@@ -125,6 +125,12 @@ export interface VerificationRequestDocument {
    * attempt (nothing to reconcile).
    */
   providerRecordStatus?: "pending" | "matched" | "not_found" | "error";
+  /** Durable completion-side-effect state. The transition that first
+   * finishes a real provider delivery sets `billingPendingAt`; the
+   * idempotent ledger write then sets `billingAppliedAt`. An unfinished
+   * pair is repaired on dispatch retry or server restart. */
+  billingPendingAt?: Date;
+  billingAppliedAt?: Date;
   /**
    * Set once at `create()` from `UsageQuotaService#tryConsumeFreeQuota`'s
    * result — `true` means this interaction's completion charge (see
@@ -208,6 +214,17 @@ export async function ensureVerificationIndexes(db: Db) {
     db
       .collection<VerificationRequestDocument>("verificationRequests")
       .createIndex({ type: 1, state: 1, createdAt: 1 }),
+    db
+      .collection<VerificationRequestDocument>("verificationRequests")
+      .createIndex(
+        { billingPendingAt: 1 },
+        {
+          partialFilterExpression: {
+            billingPendingAt: { $exists: true },
+            billingAppliedAt: { $exists: false },
+          },
+        },
+      ),
     db
       .collection<VerificationRequestDocument>("verificationRequests")
       .createIndex({ createdAt: 1 }, { expireAfterSeconds: RETENTION_PERIOD_SECONDS }),
