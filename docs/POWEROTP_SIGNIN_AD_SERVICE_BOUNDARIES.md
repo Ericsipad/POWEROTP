@@ -62,3 +62,5 @@ or preserve these exact boundaries rather than redefining them.
 P0-S2 data custody and governance are locked separately in
 [`POWEROTP_SIGNIN_AD_SERVICE_DATA_GOVERNANCE.md`](POWEROTP_SIGNIN_AD_SERVICE_DATA_GOVERNANCE.md);
 they preserve every boundary above.
+P0-S3 consent purposes, vendor gates, and public-claim limits are locked in
+[`POWEROTP_SIGNIN_AD_SERVICE_CONSENT_AND_VENDOR_GATES.md`](POWEROTP_SIGNIN_AD_SERVICE_CONSENT_AND_VENDOR_GATES.md).

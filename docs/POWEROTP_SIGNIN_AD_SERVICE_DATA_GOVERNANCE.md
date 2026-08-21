@@ -79,7 +79,8 @@ systems:
   and deletion. It gives the client no POWEROTP identity deletion or credential-reset authority.
 
 Consent evidence is security/audit evidence governed by the approved audit period. Its exact
-purposes, text, vendor disclosures, and production gates belong exclusively to P0-S3.
+purposes, text, vendor disclosures, and production gates are locked in
+[`POWEROTP_SIGNIN_AD_SERVICE_CONSENT_AND_VENDOR_GATES.md`](POWEROTP_SIGNIN_AD_SERVICE_CONSENT_AND_VENDOR_GATES.md).
 
 ## Trust boundaries
 

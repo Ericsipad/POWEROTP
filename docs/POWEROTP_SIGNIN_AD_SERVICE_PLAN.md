@@ -10,6 +10,9 @@ P0-S1's normative glossary and executable-boundary mapping are recorded in
 P0-S2's normative classification, custody, trust, abuse, retention, and deletion mapping is
 recorded in
 [`POWEROTP_SIGNIN_AD_SERVICE_DATA_GOVERNANCE.md`](POWEROTP_SIGNIN_AD_SERVICE_DATA_GOVERNANCE.md).
+P0-S3's normative consent purposes, provider activation gates, certification wording, and
+prohibited claims are recorded in
+[`POWEROTP_SIGNIN_AD_SERVICE_CONSENT_AND_VENDOR_GATES.md`](POWEROTP_SIGNIN_AD_SERVICE_CONSENT_AND_VENDOR_GATES.md).
 
 ## Product boundary — do not conflate these services
 

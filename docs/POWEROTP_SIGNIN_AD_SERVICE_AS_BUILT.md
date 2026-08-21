@@ -15,7 +15,8 @@ Do not mark a phase/step implemented, deployed, remote-green, or certified witho
 - Final review correction — 2026-08-21 06:00 UTC, terminal-result TTL
 - P0-S1 — completed 2026-08-21 19:09 UTC, hosted-auth glossary and executable boundaries
 - P0-S2 — completed 2026-08-21 19:26 UTC, data governance and trust boundaries
-- P0-S3 through P15-S6 — not started
+- P0-S3 — completed 2026-08-21 19:40 UTC, consent, vendor gates, and claims policy
+- P0-S4 through P15-S6 — not started
 
 Update this index after every execution step with a link to that step's latest timestamped entry.
 
@@ -422,3 +423,74 @@ Commit, push, and remote check:
 Next step:
 
 - P0-S3 remains unchanged.
+
+## 2026-08-21 19:40 UTC — P0-S3: Hosted-auth consent, vendor gates, and claims policy
+
+Status and scope:
+
+- P0-S3 is complete. This step locked hosted-auth consent purposes and evidence, Didit production
+  activation gates, approved certification wording, and prohibited claims.
+- P0-S4 `THREAT_MODEL.md` changes were not started. P0-S1/P0-S2 boundaries were preserved, and
+  Passport and BotBlocker plans were not modified.
+
+Evidence and implemented contracts:
+
+- Added strict `@powerotp/contracts` schemas for six separately recorded consent purposes: core
+  hosted identity/authentication, `didit_pii` contact custody, age assurance, KYC assurance,
+  liveness/face enrollment, and fresh biometric authentication with retained face.
+- Required exact text/policy versions, purpose, named-provider disclosure, locale, timestamp,
+  affirmative action, and withdrawal/deletion path. Bundled, preselected, and after-capture consent
+  are rejected.
+- Locked eight Didit production gates covering counsel-approved copy, provider disclosure,
+  contractual reuse carve-out, data-processing terms, finite capability retention, written
+  model-training opt-out, deletion reconciliation, and vendor exit/replacement.
+- Locked the two approved pre-certification statements and ten prohibited claim categories.
+- Added reject-by-construction tests for incomplete, reordered, bundled, reclassified, or invented
+  purpose/gate/claim sets.
+
+Affected files:
+
+- `backend/packages/contracts/src/hosted-auth-consent-and-vendor-gates.ts`
+- `backend/packages/contracts/src/hosted-auth-consent-and-vendor-gates.test.ts`
+- `backend/packages/contracts/src/index.ts`
+- `docs/POWEROTP_SIGNIN_AD_SERVICE_CONSENT_AND_VENDOR_GATES.md`
+- `docs/POWEROTP_SIGNIN_AD_SERVICE_BOUNDARIES.md`
+- `docs/POWEROTP_SIGNIN_AD_SERVICE_DATA_GOVERNANCE.md`
+- `docs/POWEROTP_SIGNIN_AD_SERVICE_PLAN.md`
+- `docs/POWEROTP_SIGNIN_AD_SERVICE_AS_BUILT.md`
+
+Findings and directional changes:
+
+- No P0-S1/P0-S2 product, identity, custody, storage, or client-exposure direction changed.
+- The core hosted-identity purpose explicitly discloses private cross-project reuse while each
+  client still receives only its own project-scoped identifier.
+- Process-and-purge liveness/face enrollment does not authorize retained-face biometric
+  authentication; retained face requires a distinct affirmative purpose.
+- Didit credentials or completed adapter code do not satisfy vendor activation gates.
+- Final legal copy and calendar retention periods remain counsel-approved inputs.
+
+Security, privacy, compatibility, and migration impact:
+
+- Provider collection cannot precede the applicable recorded affirmative decision, and Didit
+  cannot be hidden from the provider disclosure.
+- Vendor certificates cannot be represented as POWEROTP certifications. Pseudonymous/keyed data
+  cannot be described as anonymous, and verification cannot be guaranteed.
+- This additive contracts/documentation step has no database migration, route, environment,
+  deployment, provider-credential, Passport, or BotBlocker impact.
+
+Focused verification:
+
+- `npm run test -w @powerotp/contracts` — passed.
+- `npm run typecheck -w @powerotp/contracts` — passed.
+- No full-monorepo verification was run because only the contracts package and documentation were
+  changed.
+
+Commit, push, and remote check:
+
+- The coherent P0-S3 commit contains this entry. Its final hash, push confirmation, and one remote
+  result check are reported in the post-push session handoff.
+
+Next step:
+
+- P0-S4 — add hosted-auth assets, threats, and mitigations to `docs/THREAT_MODEL.md` without
+  beginning Phase 1 contracts.
