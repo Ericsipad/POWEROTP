@@ -20,6 +20,8 @@ export * from "./challenges.js";
 export * from "./fingerprint-components.js";
 export * from "./fingerprint.js";
 export * from "./hosted-auth-boundaries.js";
+export * from "./hosted-auth-data-classes.js";
+export * from "./hosted-auth-data-governance.js";
 export * from "./modal-sessions.js";
 export * from "./nodes.js";
 export * from "./projects.js";

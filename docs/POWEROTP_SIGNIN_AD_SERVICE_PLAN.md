@@ -7,6 +7,9 @@ of what is deployed.
 
 P0-S1's normative glossary and executable-boundary mapping are recorded in
 [`POWEROTP_SIGNIN_AD_SERVICE_BOUNDARIES.md`](POWEROTP_SIGNIN_AD_SERVICE_BOUNDARIES.md).
+P0-S2's normative classification, custody, trust, abuse, retention, and deletion mapping is
+recorded in
+[`POWEROTP_SIGNIN_AD_SERVICE_DATA_GOVERNANCE.md`](POWEROTP_SIGNIN_AD_SERVICE_DATA_GOVERNANCE.md).
 
 ## Product boundary — do not conflate these services
 

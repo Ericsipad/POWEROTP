@@ -14,7 +14,8 @@ Do not mark a phase/step implemented, deployed, remote-green, or certified witho
 - Latest coherence correction — 2026-08-21 05:55 UTC
 - Final review correction — 2026-08-21 06:00 UTC, terminal-result TTL
 - P0-S1 — completed 2026-08-21 19:09 UTC, hosted-auth glossary and executable boundaries
-- P0-S2 through P15-S6 — not started
+- P0-S2 — completed 2026-08-21 19:22 UTC, data governance and trust boundaries
+- P0-S3 through P15-S6 — not started
 
 Update this index after every execution step with a link to that step's latest timestamped entry.
 
@@ -320,3 +321,81 @@ Commit, push, and remote check:
 Next step:
 
 - P0-S2 remains unchanged.
+
+## 2026-08-21 19:22 UTC — P0-S2: Hosted-auth data governance and trust boundaries
+
+Status and scope:
+
+- P0-S2 is complete. This step locked hosted-auth data classification, contact custody, trust
+  boundaries, abuse cases, retention behavior, and deletion execution ownership.
+- P0-S3 consent purposes/vendor wording and P0-S4 `THREAT_MODEL.md` changes were not started.
+  Passport and BotBlocker plans and behavior were not modified.
+
+Evidence and implemented contracts:
+
+- Added `hosted-auth-data-classes.ts` and `hosted-auth-data-governance.ts` to
+  `@powerotp/contracts` with strict canonical contracts for 18 identity, contact, provider,
+  consent-evidence, credential, request, audit, key, project-content, security-event, and client
+  mapping data classes. Every class names its controller, custodian/store, applicable custody mode,
+  client exposure, retention rule, and deletion owner.
+- Locked mode-specific recoverable contact custody:
+  - `powerotp_pii` stores encrypted contact in POWEROTP Supabase and authenticates through
+    purpose-separated POWEROTP providers.
+  - `didit_pii` stores recoverable contact only on the Didit User and authenticates through Didit.
+  - Cross-mode provider fallback is rejected.
+- Locked the client/browser/store/KMS/provider/support trust boundary and the complete canonical set
+  of cross-project, redirect, cross-realm, reset, enumeration/pumping, token, callback, compromise,
+  privileged-support, logging, and deletion-orphan abuse cases.
+- Added reject-by-construction tests for omitted/duplicated/reclassified data, sensitive client
+  exposure, cross-mode custody, provider fallback, cross-project/cross-realm access, client/global
+  reset authority, database-only decryption, privileged support mutation, and incomplete abuse sets.
+- Added the normative data-governance document with deletion-saga ownership and linked it from the
+  canonical plan and P0-S1 boundary document.
+
+Affected files:
+
+- `backend/packages/contracts/src/hosted-auth-data-governance.ts`
+- `backend/packages/contracts/src/hosted-auth-data-governance.test.ts`
+- `backend/packages/contracts/src/hosted-auth-data-classes.ts`
+- `backend/packages/contracts/src/index.ts`
+- `docs/POWEROTP_SIGNIN_AD_SERVICE_DATA_GOVERNANCE.md`
+- `docs/POWEROTP_SIGNIN_AD_SERVICE_BOUNDARIES.md`
+- `docs/POWEROTP_SIGNIN_AD_SERVICE_PLAN.md`
+- `docs/POWEROTP_SIGNIN_AD_SERVICE_AS_BUILT.md`
+
+Findings and directional changes:
+
+- No P0-S1 product or identity direction changed.
+- Final calendar durations remain counsel-approved policy inputs as already deferred by the
+  canonical plan. P0-S2 nevertheless forbids indefinite-by-default retention by assigning every
+  class a lifecycle/policy anchor and one deletion executor.
+- Didit storage custody does not transfer POWEROTP's controller responsibility. Provider deletion
+  is owned by the Didit adapter and reconciled by POWEROTP's deletion orchestrator.
+- The runtime database's exact terminal-result retention remains three minutes. Redacted durable
+  audit evidence is a separate data class and cannot contain poll/browser secrets, PII, provider
+  secrets, or the complete result.
+
+Security, privacy, compatibility, and migration impact:
+
+- Clients remain limited to their project-scoped user ID and explicitly authorized outcomes.
+  They gain no PII/global identifier exposure or identity recovery/deletion/credential authority.
+- Database-only compromise is explicitly outside the decryption trust boundary; runtime compromise
+  remains a bounded threat rather than being treated as harmless.
+- This additive contracts/documentation step has no database migration, route, environment,
+  deployment, Passport, BotBlocker, or vendor-configuration impact.
+
+Focused verification:
+
+- `npm run test -w @powerotp/contracts` — passed.
+- No full-monorepo verification was run because this step touched only the contracts package and
+  documentation.
+
+Commit, push, and remote check:
+
+- The coherent P0-S2 commit contains this entry. Its final hash, push confirmation, and one remote
+  result check are reported in the post-push session handoff.
+
+Next step:
+
+- P0-S3 — lock consent purposes, certification wording, Didit/vendor gates, and prohibited claims
+  without beginning P0-S4 hosted-auth threat-model changes.

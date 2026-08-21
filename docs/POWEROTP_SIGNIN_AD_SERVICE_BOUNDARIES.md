@@ -58,3 +58,7 @@ be a step in those ceremonies without changing the product boundary.
 P0-S1 locks names and relationships only. Later steps own identifier formats, persistence schemas,
 request state machines, provider interfaces, and browser/API payloads. Those contracts must import
 or preserve these exact boundaries rather than redefining them.
+
+P0-S2 data custody and governance are locked separately in
+[`POWEROTP_SIGNIN_AD_SERVICE_DATA_GOVERNANCE.md`](POWEROTP_SIGNIN_AD_SERVICE_DATA_GOVERNANCE.md);
+they preserve every boundary above.
