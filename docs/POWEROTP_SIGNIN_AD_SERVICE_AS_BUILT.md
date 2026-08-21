@@ -836,6 +836,7 @@ Affected files:
 - `backend/packages/contracts/src/hosted-auth-protocol.ts`
 - `backend/packages/contracts/src/hosted-auth-route-contracts.ts`
 - `backend/packages/contracts/src/hosted-auth-protocol.test.ts`
+- `backend/packages/contracts/src/hosted-auth-route-contracts.test.ts`
 - `backend/packages/contracts/src/index.ts`
 - `docs/POWEROTP_SIGNIN_AD_SERVICE_AS_BUILT.md`
 
