@@ -269,9 +269,9 @@ Findings and directional changes:
 
 - No canonical direction changed. P0-S1 converted the already-locked plan boundaries into named,
   strict executable contracts without pulling later identifier or storage design into this step.
-- The existing untracked `apps/web/instrumentation.ts` is byte-identical to the tracked
-  `backend/apps/server/instrumentation.ts`, belongs to no current workspace, and is unrelated to
-  hosted auth. It was inspected and intentionally left untouched/uncommitted.
+- The existing untracked `instrumentation.ts` duplicate under a removed top-level deployment root
+  is byte-identical to the tracked server instrumentation, belongs to no current workspace, and is
+  unrelated to hosted auth. It was inspected and intentionally left untouched/uncommitted.
 
 Security, privacy, compatibility, and migration impact:
 
@@ -297,3 +297,26 @@ Next step:
 
 - P0-S2 — lock data classification, contact custody, trust boundaries, abuse cases, retention, and
   deletion owners without beginning P0-S3 consent/vendor wording or P0-S4 threat-model changes.
+
+## 2026-08-21 19:14 UTC — P0-S1 remote verification correction
+
+Finding and correction:
+
+- The first pushed Verify workflow failed because the P0-S1 AS-BUILT evidence named an intentionally
+  untracked file using a removed deployment-root path. The repository's hostname/separation guard
+  correctly rejects that stale path text anywhere in tracked files.
+- Reworded the evidence without the removed path. The untracked file itself remains untouched and
+  excluded from both P0-S1 commits.
+
+Focused verification:
+
+- `node --import tsx --test integration-tests/post-separation-hostnames.test.ts` — passed.
+
+Commit, push, and remote check:
+
+- The correction is included in a P0-S1 follow-up commit. Final push and replacement Verify result
+  are reported in the post-push session handoff.
+
+Next step:
+
+- P0-S2 remains unchanged.
