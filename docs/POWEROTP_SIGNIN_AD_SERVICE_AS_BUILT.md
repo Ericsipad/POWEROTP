@@ -19,7 +19,8 @@ Do not mark a phase/step implemented, deployed, remote-green, or certified witho
 - P0-S4 — completed 2026-08-21 19:59 UTC, hosted-auth threat model
 - P1-S1 — completed 2026-08-21 20:39 UTC, purpose-specific hosted-auth identifiers
 - P1-S2 — completed 2026-08-21 21:02 UTC, hosted-auth state machines
-- P1-S3 through P15-S6 — not started
+- P1-S3 — completed 2026-08-21 21:30 UTC, provider and balance-operation interfaces
+- P1-S4 through P15-S6 — not started
 
 Update this index after every execution step with a link to that step's latest timestamped entry.
 
@@ -722,3 +723,82 @@ Next step:
 
 - P1-S3 — add vendor-neutral email, phone, and Didit interfaces plus the balance-operation contract
   while preserving these state, scope, custody, consent, and identifier boundaries.
+
+## 2026-08-21 21:30 UTC — P1-S3: Provider and balance-operation interfaces
+
+Status and scope:
+
+- P1-S3 is complete. This step added only vendor-neutral hosted-auth email, phone, Didit, and
+  prepaid-balance operation contracts.
+- P1-S4 stable errors, TTLs, API idempotency, compatibility versions, PWA-safe routes, persistence,
+  runtime adapters, provider credentials, Passport, and BotBlocker plans and behavior were not
+  started or modified.
+
+Evidence and implemented contracts:
+
+- Added strict email and phone challenge/proof schemas and TypeScript provider interfaces. Every
+  operation binds the auth request, project, realm, flow, provider purpose, channel, and immutable
+  custody mode. `powerotp_pii` accepts only POWEROTP email/SMS/voice adapters; `didit_pii` accepts
+  only Didit email/phone adapters.
+- Added a normalized Didit interface for idempotent User resolution, verification start, and
+  decision reads using the permanent private
+  `hostedPersonIdentityId → potpDiditId → diditInternalId` mapping. No provider SDK payload,
+  document, selfie, biometric media, raw evidence, credential, or client-facing global identifier
+  appears in the contract.
+- Provider starts and decisions echo their exact purpose/realm scope and provider-operation
+  reference, preventing a successful operation from being substituted across ceremonies.
+- Added an atomic `debit_before_provider` balance-operation contract over the existing prepaid
+  ledger boundary. It requires a positive configured USD amount, exact project/auth-request scope,
+  and a custody/purpose-compatible billable method before paid provider work. Its only outcomes are
+  a linked balance transaction or `insufficient_balance`; WebAuthn has no billable method.
+
+Affected files:
+
+- `backend/packages/contracts/src/hosted-auth-provider-interfaces.ts`
+- `backend/packages/contracts/src/hosted-auth-provider-interfaces.test.ts`
+- `backend/packages/contracts/src/hosted-auth-balance-operation.ts`
+- `backend/packages/contracts/src/index.ts`
+- `docs/POWEROTP_SIGNIN_AD_SERVICE_AS_BUILT.md`
+
+Findings and directional changes:
+
+- No Phase 0, P1-S1, or P1-S2 boundary changed. Provider results carry normalized internal
+  references and minimal evidence references only; later adapters own vendor payload translation.
+- The balance contract uses the existing append-only prepaid ledger and deliberately introduces no
+  reservation store, spend-limit subsystem, route, or API idempotency contract. P1-S4 retains
+  ownership of public idempotency and stable errors.
+- Provider-purpose and custody checks apply to both debit requests and results, so a valid charge
+  cannot be relabeled for another method, project, realm, or capability.
+
+Security, privacy, compatibility, and migration impact:
+
+- Cross-mode contact fallback, channel substitution, project substitution, verification-purpose
+  substitution, zero-cost paid operations, and undeclared/raw provider fields fail strict schema
+  validation.
+- Recoverable contact values occur only in the internal adapter request boundary. Provider results
+  contain no contact value or raw provider evidence, and no contract expands client exposure.
+- This additive contracts step requires no database migration, environment value, provider
+  credential, deployment, Passport change, or BotBlocker change.
+
+Intentional limits and deviations:
+
+- No deviation from P1-S3 was made. Concrete Brevo/SMS/voice/Didit adapters, callback verification,
+  persistence, charge execution, retries, reconciliation, and routes remain assigned to later
+  dependency steps.
+
+Focused verification:
+
+- `npm run test -w @powerotp/contracts` — passed after the final contract changes.
+- `npm run typecheck -w @powerotp/contracts` — passed after the final contract changes.
+- No full-monorepo verification was run because only the contracts package and documentation were
+  changed.
+
+Commit, push, and remote check:
+
+- The coherent P1-S3 commit contains this entry. Its final hash, push confirmation, and one remote
+  result check are reported in the post-push session handoff.
+
+Next step:
+
+- P1-S4 — add stable errors, active/result TTLs, API idempotency, compatibility versions, and
+  PWA-safe route contracts without beginning Phase 2 persistence or runtime implementation.
