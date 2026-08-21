@@ -16,7 +16,8 @@ Do not mark a phase/step implemented, deployed, remote-green, or certified witho
 - P0-S1 — completed 2026-08-21 19:09 UTC, hosted-auth glossary and executable boundaries
 - P0-S2 — completed 2026-08-21 19:26 UTC, data governance and trust boundaries
 - P0-S3 — completed 2026-08-21 19:40 UTC, consent, vendor gates, and claims policy
-- P0-S4 through P15-S6 — not started
+- P0-S4 — completed 2026-08-21 19:59 UTC, hosted-auth threat model
+- P1-S1 through P15-S6 — not started
 
 Update this index after every execution step with a link to that step's latest timestamped entry.
 
@@ -494,3 +495,72 @@ Next step:
 
 - P0-S4 — add hosted-auth assets, threats, and mitigations to `docs/THREAT_MODEL.md` without
   beginning Phase 1 contracts.
+
+## 2026-08-21 19:59 UTC — P0-S4: Hosted-auth threat model
+
+Status and scope:
+
+- P0-S4 is complete. This documentation-only step added the hosted-auth protected assets, trust
+  boundaries, threats, mitigations, and production gates to the shared threat model.
+- No Phase 1 identifier contracts were started. P0-S1 through P0-S3 boundaries were preserved, and
+  Passport and BotBlocker plans and behavior were not modified.
+
+Evidence and implemented behavior:
+
+- Added a distinct hosted-auth threat-model section that identifies private identity/profile and
+  project-binding data, WebAuthn material, contact/cryptographic/provider data, consent evidence,
+  auth-request secrets/results, project content/assets/ads, and service integrity/availability as
+  protected assets.
+- Recorded seven hosted-auth trust boundaries across client backends, top-level realm browsers,
+  hosted request state, separated stores/KMS, mode-specific providers, privileged operators, and
+  untrusted tenant/ad content.
+- Required mitigations now explicitly cover cross-project correlation/access, open redirects and
+  forged browser results, cross-realm credential/cookie use, token/recovery replay, enumeration and
+  paid-resource abuse, database-only and runtime compromise, privileged-service abuse, provider
+  callbacks/custody/consent/deletion, hosted content/assets/ads, and partial/outage/stale-assurance
+  behavior.
+- Added explicit product and production gates preserving client-owned sessions, fresh hosted-auth
+  proof, BotBlocker/Passport separation, Didit activation evidence, and counsel-owned legal copy and
+  calendar retention periods.
+
+Affected files:
+
+- `docs/THREAT_MODEL.md`
+- `docs/POWEROTP_SIGNIN_AD_SERVICE_AS_BUILT.md`
+
+Findings and directional changes:
+
+- No canonical product, realm, custody, consent, vendor, client-exposure, Passport, or BotBlocker
+  direction changed. P0-S4 consolidated the already-locked boundaries into one reviewable
+  asset/threat/mitigation model.
+- The shared threat-model introduction previously named only the OTP/telephony and BotBlocker
+  sections. It now identifies hosted auth as a third separate product section without changing
+  either existing product's controls.
+- Runtime compromise is explicitly treated as an incident and bounded by minimal hot data,
+  least-privilege roles, short result retention, and audit; database separation is not represented
+  as protection from a compromised authorized runtime.
+
+Security, privacy, compatibility, and migration impact:
+
+- The threat model now directly covers the Phase 0 acceptance review areas: cross-project linkage,
+  open redirect, client-requested global reset, cross-realm credential/cookie replay, database-only
+  compromise, runtime compromise, and BotBlocker boundary preservation.
+- This step changes no contracts, routes, data stores, UI, environment, credentials, deployments,
+  Passport behavior, or BotBlocker behavior and requires no migration.
+
+Focused verification:
+
+- Documentation-only change; per repository verification policy, no build, test, typecheck, or
+  full-monorepo verification was run.
+- Reviewed the focused diff for consistency with the P0-S1 through P0-S3 normative documents before
+  commit.
+
+Commit, push, and remote check:
+
+- The coherent P0-S4 commit contains this entry. Its final hash, push confirmation, and one remote
+  result check are reported in the post-push session handoff.
+
+Next step:
+
+- P1-S1 — add person/profile/project-binding/Didit/auth-request/poll-token identifier schemas while
+  preserving all Phase 0 boundaries.

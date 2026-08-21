@@ -1,12 +1,12 @@
 # Phase 0 threat model
 
 Covers the OTP/telephony platform (this top-level section, written for that product's own
-Phase 0) and, separately, the [BotBlocker threat model](#botblocker-threat-model) section below
-for the BotBlocker product. The two sections share this file because they share infrastructure
-and several controls, but "Phase 0" in a heading always refers to that product's own phase
-numbering — see [`PLAN.md`](PLAN.md) for the OTP platform's phases and
-[`POWEROTP_BOTBLOCKER_DEVELOPMENT_PHASES.md`](POWEROTP_BOTBLOCKER_DEVELOPMENT_PHASES.md) for
-BotBlocker's.
+Phase 0), the separate [hosted-auth threat model](#hosted-auth-threat-model), and the separate
+[BotBlocker threat model](#botblocker-threat-model). The products share this file because they
+share infrastructure and several controls, but "Phase 0" in a heading always refers to that
+product's own phase numbering — see [`PLAN.md`](PLAN.md),
+[`POWEROTP_SIGNIN_AD_SERVICE_PLAN.md`](POWEROTP_SIGNIN_AD_SERVICE_PLAN.md), and
+[`POWEROTP_BOTBLOCKER_DEVELOPMENT_PHASES.md`](POWEROTP_BOTBLOCKER_DEVELOPMENT_PHASES.md).
 
 ## Protected assets
 
@@ -112,6 +112,182 @@ Before unrestricted production traffic, obtain an appropriate legal review cover
 consent, TCPA/telemarketing restrictions, do-not-call handling, quiet hours, STIR/SHAKEN,
 caller-ID rules, recording disclosure, privacy notices, retention, deletion, supported
 countries, and provider acceptable-use requirements.
+
+---
+
+## Hosted-auth threat model
+
+Scope: the Sign-Up and Sign-In as a Service product described in
+[`POWEROTP_SIGNIN_AD_SERVICE_PLAN.md`](POWEROTP_SIGNIN_AD_SERVICE_PLAN.md). Its normative product,
+realm, custody, data, consent, vendor, and claims boundaries are locked in the corresponding
+`POWEROTP_SIGNIN_AD_SERVICE_*` documents. This section does not describe shipped behavior until the
+AS-BUILT record says that the corresponding implementation phase is complete. It does not alter
+Passport, BotBlocker, or the customer-site BotBlocker iframe.
+
+### Protected assets
+
+- Private person roots, realm-specific authentication profiles, opaque user handles, and
+  project-identity bindings. Only the owning project may receive its stable `projectUserId`; no
+  client receives a person-root/profile ID or another project's binding.
+- WebAuthn public credentials, credential status/counters, registration and assertion challenges,
+  and credential-management grants. Authenticator private keys remain on authenticators.
+- Recoverable `powerotp_pii` contact data, dedicated keyed contact lookups in both modes, encrypted
+  derived attributes, per-identity DEKs, wrapped keys, KMS key-encryption keys, derivation peppers,
+  and lookup secrets.
+- Permanent opaque Didit mappings, provider operation/session references, signed callback evidence,
+  reusable verification claims, provider-held contact records, process-and-purge media, and
+  separately authorized retained faces.
+- Exact consent evidence, policy/text versions, provider disclosures, deletion/withdrawal paths,
+  and redacted audit/security events.
+- Auth-request IDs and state, browser handles, realm cookies, CSRF values, shown-once poll tokens,
+  encrypted terminal results, exact configured return URLs, and redacted durable retention rows.
+- Project authentication policy, immutable custody mode, Template 1 configuration, re-encoded
+  hosted assets, fixed ad-slot configuration, and manually approved direct-sold creatives.
+- Authentication, recovery, provider, deletion, audit, and key-service integrity and availability,
+  including prepaid balances and the prevention of unauthorized paid provider use.
+
+### Trust boundaries
+
+1. Client backend to the project API using a server-held project API key; authoritative result
+   polling additionally requires the shown-once request-bound poll token.
+2. Browser to exactly one top-level hosted realm: `authx.powerotp.com` for `powerotp_pii` or
+   `authz.powerotp.com` for `didit_pii`. Host-only cookies, user handles, passkeys, and ceremonies
+   do not cross realms.
+3. Hosted browser routes to the auth-request service through a request-bound browser handle,
+   same-origin CSRF protection, and server-resolved project/realm/flow state. Browser redirects and
+   completion hints are untrusted.
+4. Hosted identity services to separately authorized Supabase, hot runtime MongoDB, durable
+   retention MongoDB, and KMS/HSM roles. No database stores both usable key authority and
+   decryptable PII.
+5. Purpose- and mode-specific provider adapters to Brevo/SMS/voice or Didit. Provider callbacks are
+   untrusted until signature, timestamp, replay, operation, person, purpose, and state checks pass.
+6. Project administrators/support operators to configuration, audit, and deletion workflows.
+   Project ownership and separation of duties apply; support statements or client initiation never
+   authorize identity recovery, credential replacement, or global identity mutation.
+7. Client-authored structured content and uploaded media to POWEROTP-owned renderers/CDN, and
+   operator-approved ad creative to fixed hosted slots. Neither boundary accepts executable tenant
+   or third-party code.
+
+### Threats and required mitigations
+
+#### Cross-project correlation, access, or binding replay
+
+- Authorize every request from server-resolved project ownership; bind API key, auth request,
+  poll token, flow, return URLs, and result to that exact project.
+- Derive and persist one opaque pairwise `projectUserId` per person/project. Never expose private
+  roots, profiles, global identifiers, contact data, provider evidence, or other project bindings.
+- Reject caller-supplied identity/binding authority and test cross-project request, token, poll,
+  configuration, asset, and result access.
+
+#### Open redirect, request substitution, and browser-result forgery
+
+- Permit only exact server-stored production HTTPS signup, signin, failure, recovery, and restart
+  URLs. Reject wildcard hosts, fragments, userinfo, ambiguous ports, encoded-host tricks, browser
+  `Referer` routing, and per-request return URLs.
+- Bind the opaque browser request handle and host-only cookie to request, project, flow, and realm;
+  use same-origin CSRF protection for mutations and rotate/fix session state at ceremony boundaries.
+- Treat browser return hints as presentation-only. Client backends accept success only from polling
+  with both the project API key and poll token.
+
+#### Cross-realm credential, cookie, or profile use
+
+- Validate the exact origin and RP ID for every WebAuthn ceremony and keep credentials, user
+  handles, cookies, and request state isolated by realm.
+- Never copy credentials between profiles or silently fall back across custody modes. Cross-mode
+  profile linking requires target-mode contact proof plus fresh proof from an existing profile;
+  contact equality alone never merges roots.
+
+#### Credential, challenge, poll-token, and recovery replay
+
+- Generate high-entropy purpose-specific challenges, browser handles, poll tokens, provider
+  sessions, handoff tokens, and grants; bind each to its operation and expiry and consume it once.
+- Store poll tokens only as hashes, compare in constant time, keep them server-side, and delete the
+  token hash and encrypted result exactly three minutes after every terminal outcome.
+- Make terminal states immutable and transitions atomic. Recovery proof must complete before a
+  short-lived one-time credential-management grant can add a passkey; client initiation, client
+  sessions, support claims, and remembered-account cookies grant no reset authority.
+
+#### Enumeration, credential stuffing, OTP pumping, and paid-resource abuse
+
+- Use generic discovery, signin, recovery, and unavailable responses; do not reveal whether a
+  person, profile, contact, credential, project binding, or Didit User exists.
+- Apply layered limits by project, IP, request, identity lookup, credential, recovery destination,
+  channel, and provider operation. Bound resend/attempt counts, active requests, and concurrency.
+- Reserve/debit the existing prepaid balance before paid provider work, make provider operations
+  idempotent, and reconcile ambiguous outcomes. Insufficient required assurance fails closed.
+
+#### Database-only, ciphertext-swapping, and key compromise
+
+- Envelope-encrypt every recoverable PII field with AEAD associated data binding person, field,
+  schema version, and purpose. Keep per-identity DEKs wrapped and usable only through narrowly
+  authorized KMS roles.
+- Separate identity, runtime, retention, wrapped-key, and KMS authority boundaries. Use dedicated
+  keyed-lookup secrets and derivation peppers with versioning and rotation.
+- Network-restrict stores, use least-privilege service roles and immutable key-access audit, and
+  isolate production, staging, test, and development credentials, databases, keys, and providers.
+- Treat compromise of any database as an incident even though a database dump alone must not
+  decrypt recoverable PII.
+
+#### Runtime or privileged-service compromise
+
+- Keep hot request records minimal and short-lived, grant each service only its required store/KMS
+  operations, and prevent poll-result and hosted-browser roles from receiving identity-admin or
+  deletion authority.
+- Audit privileged reads, configuration, credential, key, return-URL, consent, provider, and
+  deletion operations. Redact PII, contact values, cookies, browser handles, poll tokens,
+  challenges, credential IDs, API/provider secrets, evidence, and KMS material from logs.
+- Require separation of duties and end-user proof for sensitive recovery/credential actions;
+  support access alone cannot disclose PII/evidence to clients or mutate an identity.
+
+#### Provider callback, custody, consent, and deletion abuse
+
+- Route contact authentication only through the immutable custody mode's adapter. Validate signed
+  provider callbacks for timestamp, replay, ordering, expected operation/person/purpose, and
+  authoritative current state; reconcile polling and webhook disagreement.
+- Collect separate, versioned affirmative consent before applicable provider collection. Do not
+  treat process-and-purge face use as retained-face consent or a previous biometric event as fresh
+  presence.
+- Keep documents, selfies, liveness media, and biometric templates out of POWEROTP databases and
+  all client responses. Enforce capability-specific finite provider retention.
+- Execute deletion as a blocked-state, credential-revocation, hot-data purge, provider-deletion,
+  evidence-minimization, crypto-shred, retry, reconciliation, and alerting saga.
+
+#### Hosted content, asset, advertising, and browser attacks
+
+- Accept only versioned structured rich text; never tenant HTML, CSS, JavaScript, remote image
+  hotlinks, executable embeds, or arbitrary fonts/layout. Validate and re-encode uploads, strip
+  metadata, host them on POWEROTP's CDN, and atomically replace/delete assets.
+- Serve only manually reviewed, fixed-position direct-sold creatives from POWEROTP. No client,
+  advertiser, or third-party script may reorder content, cover the credential card, or imitate
+  credential/provider UI.
+- Enforce strict CSP with no third-party authentication-page scripts, restrictive
+  `frame-ancestors`, `Referrer-Policy`, permissions policy, MIME/no-sniff controls, output encoding,
+  accessibility, and `Cache-Control: no-store` on sensitive routes and results.
+- Service workers and caches may contain only immutable public shell/education assets, never auth
+  pages, API responses, PII, tokens, provider material, or results.
+
+#### Availability, partial commits, and stale assurance
+
+- Use idempotency keys bound to request hashes, atomic state transitions, durable redacted
+  retention-before-result publication, and reconciliation for partial person/profile/provider/
+  credential/claim/binding/deletion work.
+- Fail required identity, age, KYC, liveness, biometric, or recovery assurance closed on provider
+  outage, indeterminate/underage result, stale claim, insufficient balance, or missing consent.
+- Reuse an assurance claim only when its source, policy, threshold, validity, and project
+  authorization still satisfy the current request; never infer present user presence from history.
+
+### Product and production gates
+
+- Hosted auth never accepts BotBlocker OTP, Passport assertions, dashboard sessions, another
+  client's session, or UI-only remembered-account cookies as authentication proof.
+- Clients create and govern their own local sessions after authoritative polling; POWEROTP neither
+  creates nor revokes those sessions.
+- All applicable Didit production gates in
+  [`POWEROTP_SIGNIN_AD_SERVICE_CONSENT_AND_VENDOR_GATES.md`](POWEROTP_SIGNIN_AD_SERVICE_CONSENT_AND_VENDOR_GATES.md)
+  must have evidence before activation. Provider credentials or completed adapter code are
+  insufficient.
+- Final legal copy and calendar retention periods remain counsel-approved inputs. Missing final
+  durations never authorize indefinite retention.
 
 ---
 
