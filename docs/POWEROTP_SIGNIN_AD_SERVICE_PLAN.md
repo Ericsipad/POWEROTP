@@ -5,6 +5,9 @@ sign-up, repeat sign-in, and optional hosted age/identity verification, with adv
 subsidize the hosted pages. This document describes intended direction only; it is not a record
 of what is deployed.
 
+P0-S1's normative glossary and executable-boundary mapping are recorded in
+[`POWEROTP_SIGNIN_AD_SERVICE_BOUNDARIES.md`](POWEROTP_SIGNIN_AD_SERVICE_BOUNDARIES.md).
+
 ## Product boundary — do not conflate these services
 
 The **Project card** is the client website administrator's control panel. One project represents

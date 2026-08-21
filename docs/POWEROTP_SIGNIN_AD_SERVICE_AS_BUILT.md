@@ -13,7 +13,8 @@ Do not mark a phase/step implemented, deployed, remote-green, or certified witho
 - Latest canonical completion — 2026-08-21 05:44 UTC, polling/realms/mobile/PWA roadmap
 - Latest coherence correction — 2026-08-21 05:55 UTC
 - Final review correction — 2026-08-21 06:00 UTC, terminal-result TTL
-- P0-S1 through P15-S6 — not started
+- P0-S1 — completed 2026-08-21 19:09 UTC, hosted-auth glossary and executable boundaries
+- P0-S2 through P15-S6 — not started
 
 Update this index after every execution step with a link to that step's latest timestamped entry.
 
@@ -231,3 +232,68 @@ Verification:
 Next step:
 
 - P0-S1 remains the first implementation step.
+
+## 2026-08-21 19:09 UTC — P0-S1: Hosted-auth glossary and product boundaries
+
+Status and scope:
+
+- P0-S1 is complete. This step implemented only the hosted-auth glossary, product separation,
+  private person-root/auth-profile model, and exact `authx`/`authz` realm isolation.
+- Identifier formats, persistence, request state machines, provider custody details, and browser/API
+  flows remain assigned to later steps.
+
+Evidence and implemented contracts:
+
+- Added `hosted-auth-boundaries.ts` to `@powerotp/contracts` with strict Zod contracts for:
+  - immutable `powerotp_pii` and `didit_pii` mode names;
+  - exact mode-to-origin-to-RP-ID mappings;
+  - one private person root with no more than one profile per mode;
+  - realm-profile isolation of passkeys, user handles, and cookies;
+  - project-scoped client identity, fresh proof per request, no cross-client SSO, and explicit
+    Passport/BotBlocker separation.
+- Added reject-by-construction tests covering cross-realm combinations, duplicate profiles, shared
+  profile material, global client identity, SSO, Passport/BotBlocker conflation, and undeclared
+  sensitive exposure fields.
+- Added the normative glossary and boundary document and linked it from the canonical plan.
+
+Affected files:
+
+- `backend/packages/contracts/src/hosted-auth-boundaries.ts`
+- `backend/packages/contracts/src/hosted-auth-boundaries.test.ts`
+- `backend/packages/contracts/src/index.ts`
+- `docs/POWEROTP_SIGNIN_AD_SERVICE_BOUNDARIES.md`
+- `docs/POWEROTP_SIGNIN_AD_SERVICE_PLAN.md`
+- `docs/POWEROTP_SIGNIN_AD_SERVICE_AS_BUILT.md`
+
+Findings and directional changes:
+
+- No canonical direction changed. P0-S1 converted the already-locked plan boundaries into named,
+  strict executable contracts without pulling later identifier or storage design into this step.
+- The existing untracked `apps/web/instrumentation.ts` is byte-identical to the tracked
+  `backend/apps/server/instrumentation.ts`, belongs to no current workspace, and is unrelated to
+  hosted auth. It was inspected and intentionally left untouched/uncommitted.
+
+Security, privacy, compatibility, and migration impact:
+
+- Invalid cross-realm RP/origin combinations and shared realm-profile credential material now fail
+  schema validation.
+- The product manifest cannot validate if it claims cross-client SSO, global client identity,
+  Passport identity equivalence, or BotBlocker service equivalence.
+- This additive contracts-package change has no database, route, environment, deployment, PWA,
+  Passport, or BotBlocker migration impact.
+
+Focused verification:
+
+- `npm run test -w @powerotp/contracts` — passed.
+- No full-monorepo verification was run because only the contracts package and documentation were
+  changed.
+
+Commit, push, and remote check:
+
+- The coherent P0-S1 commit contains this entry. Its final hash, push confirmation, and one remote
+  result check are reported in the post-push session handoff.
+
+Next step:
+
+- P0-S2 — lock data classification, contact custody, trust boundaries, abuse cases, retention, and
+  deletion owners without beginning P0-S3 consent/vendor wording or P0-S4 threat-model changes.

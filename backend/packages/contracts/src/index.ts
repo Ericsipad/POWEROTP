@@ -19,6 +19,7 @@ export * from "./botblocker-site.js";
 export * from "./challenges.js";
 export * from "./fingerprint-components.js";
 export * from "./fingerprint.js";
+export * from "./hosted-auth-boundaries.js";
 export * from "./modal-sessions.js";
 export * from "./nodes.js";
 export * from "./projects.js";
