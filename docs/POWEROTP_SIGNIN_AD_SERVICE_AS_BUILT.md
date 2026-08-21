@@ -14,7 +14,7 @@ Do not mark a phase/step implemented, deployed, remote-green, or certified witho
 - Latest coherence correction — 2026-08-21 05:55 UTC
 - Final review correction — 2026-08-21 06:00 UTC, terminal-result TTL
 - P0-S1 — completed 2026-08-21 19:09 UTC, hosted-auth glossary and executable boundaries
-- P0-S2 — completed 2026-08-21 19:22 UTC, data governance and trust boundaries
+- P0-S2 — completed 2026-08-21 19:26 UTC, data governance and trust boundaries
 - P0-S3 through P15-S6 — not started
 
 Update this index after every execution step with a link to that step's latest timestamped entry.
@@ -399,3 +399,26 @@ Next step:
 
 - P0-S3 — lock consent purposes, certification wording, Didit/vendor gates, and prohibited claims
   without beginning P0-S4 hosted-auth threat-model changes.
+
+## 2026-08-21 19:26 UTC — P0-S2 remote verification correction
+
+Finding and correction:
+
+- The first pushed P0-S2 Verify run failed during TypeScript verification because the canonical
+  data-class map inferred its keys as a literal union while strict schema parsing exposes an
+  untrusted `dataClass` lookup as `string`.
+- Widened only the internal map lookup key to `string`; canonical values, strict validation,
+  completeness checks, and every P0-S2 boundary remain unchanged.
+
+Focused verification:
+
+- `npm run typecheck -w @powerotp/contracts` — passed.
+
+Commit, push, and remote check:
+
+- The correction is included in a P0-S2 follow-up commit. Final push and replacement Verify result
+  are reported in the post-push session handoff.
+
+Next step:
+
+- P0-S3 remains unchanged.

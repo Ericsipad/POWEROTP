@@ -213,7 +213,10 @@ export const hostedAuthDataClasses = [
   },
 ] as const;
 
-const canonicalByClass = new Map(
+const canonicalByClass = new Map<
+  string,
+  (typeof hostedAuthDataClasses)[number]
+>(
   hostedAuthDataClasses.map((entry) => [entry.dataClass, entry]),
 );
 
