@@ -6,6 +6,9 @@ import {
   type HostedIdentityPool,
 } from "./hosted-identity-database.js";
 
+const certificateAuthority =
+  "-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----";
+
 function fakePool(
   row: { current_user: string; can_use_schema: boolean },
   queryError?: Error,
@@ -39,9 +42,13 @@ describe("connectHostedIdentityDatabase", () => {
       can_use_schema: true,
     });
     const database = await connectHostedIdentityDatabase(
-      { HOSTED_AUTH_DATABASE_URL: expectedUrl },
-      (url) => {
+      {
+        HOSTED_AUTH_DATABASE_URL: expectedUrl,
+        HOSTED_AUTH_DATABASE_CA_CERT: certificateAuthority,
+      },
+      (url, ca) => {
         assert.equal(url, expectedUrl);
+        assert.equal(ca, certificateAuthority);
         return fake.pool;
       },
     );
@@ -58,6 +65,7 @@ describe("connectHostedIdentityDatabase", () => {
         {
           HOSTED_AUTH_DATABASE_URL:
             "postgresql://postgres:secret@db.example.com:5432/postgres",
+          HOSTED_AUTH_DATABASE_CA_CERT: certificateAuthority,
         },
         () => fake.pool,
       ),

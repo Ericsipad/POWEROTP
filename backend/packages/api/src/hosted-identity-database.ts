@@ -18,15 +18,24 @@ export interface HostedIdentityPool {
   end(): Promise<void>;
 }
 
-type PoolFactory = (connectionString: string) => HostedIdentityPool;
+type PoolFactory = (
+  connectionString: string,
+  certificateAuthority: string,
+) => HostedIdentityPool;
 
-function createPool(connectionString: string): HostedIdentityPool {
+function createPool(
+  connectionString: string,
+  certificateAuthority: string,
+): HostedIdentityPool {
   return new Pool({
     connectionString,
     application_name: "powerotp-hosted-identity",
     connectionTimeoutMillis: 10_000,
     max: 5,
-    ssl: { rejectUnauthorized: true },
+    ssl: {
+      ca: certificateAuthority,
+      rejectUnauthorized: true,
+    },
   });
 }
 
@@ -44,14 +53,23 @@ async function checkReady(pool: HostedIdentityPool): Promise<boolean> {
 }
 
 export async function connectHostedIdentityDatabase(
-  config: Pick<ProductionConfig, "HOSTED_AUTH_DATABASE_URL">,
+  config: Pick<
+    ProductionConfig,
+    "HOSTED_AUTH_DATABASE_URL" | "HOSTED_AUTH_DATABASE_CA_CERT"
+  >,
   poolFactory: PoolFactory = createPool,
 ): Promise<HostedIdentityDatabase> {
-  if (!config.HOSTED_AUTH_DATABASE_URL) {
+  if (
+    !config.HOSTED_AUTH_DATABASE_URL ||
+    !config.HOSTED_AUTH_DATABASE_CA_CERT
+  ) {
     throw new Error("Hosted identity database is not configured");
   }
 
-  const pool = poolFactory(config.HOSTED_AUTH_DATABASE_URL);
+  const pool = poolFactory(
+    config.HOSTED_AUTH_DATABASE_URL,
+    config.HOSTED_AUTH_DATABASE_CA_CERT,
+  );
   try {
     if (!(await checkReady(pool))) {
       throw new Error("Hosted identity database role or schema grant is invalid");

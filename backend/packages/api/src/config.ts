@@ -28,6 +28,15 @@ const ProductionConfigSchema = z.object({
    */
   HOSTED_AUTH_DATABASE_URL: PostgresConnectionUrlSchema.optional(),
   /**
+   * Supabase project CA certificate used for verify-full TLS. Kept separate
+   * from the URL so disabling certificate verification is never a fallback.
+   */
+  HOSTED_AUTH_DATABASE_CA_CERT: z
+    .string()
+    .startsWith("-----BEGIN CERTIFICATE-----")
+    .endsWith("-----END CERTIFICATE-----")
+    .optional(),
+  /**
    * Independent BotBlocker Ed25519 trust domain. The active private key is
    * PKCS#8 DER encoded as canonical base64. A previous key carries public
    * SPKI DER only and is accepted strictly before its overlap deadline.

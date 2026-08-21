@@ -22,6 +22,7 @@ Do not mark a phase/step implemented, deployed, remote-green, or certified witho
 - P1-S3 — completed 2026-08-21 21:30 UTC, provider and balance-operation interfaces
 - P1-S4 — completed 2026-08-21 22:09 UTC, protocol/TTL/idempotency/PWA route contracts
 - P2-S1 — completed 2026-08-21 22:40 UTC, production Supabase identity schema and RLS
+- P2-S1 TLS correction — 2026-08-21 22:56 UTC, verified pooler login and CA trust
 - P2-S2 through P15-S6 — not started
 
 Update this index after every execution step with a link to that step's latest timestamped entry.
@@ -962,3 +963,17 @@ Next step:
 - P2-S2 — add only the minimal MongoDB hot auth-request repository, active/terminal TTL behavior,
   encrypted terminal result, and poll-token hashing without beginning durable retention or later
   identity-saga work.
+
+## 2026-08-21 22:56 UTC — P2-S1 production connection TLS correction
+
+- The production Session Pooler connection authenticated successfully as the dedicated
+  `POTP_backenduser` and read the empty `hosted_auth.person_identities` table.
+- The first strict TLS attempt correctly failed because Node's default CA store does not include
+  Supabase's project CA. A diagnostic encrypted connection confirmed the credential and grants;
+  certificate verification was not disabled in application code.
+- Added `HOSTED_AUTH_DATABASE_CA_CERT` and require the downloaded Supabase project CA when creating
+  the PostgreSQL pool. The connector retains `rejectUnauthorized: true` rather than accepting a
+  self-signed chain without verification.
+- `npm run test -w @powerotp/api` and `npm run typecheck -w @powerotp/api` passed.
+- The production environment still needs `HOSTED_AUTH_DATABASE_CA_CERT` copied from the POTP
+  Database Settings SSL Configuration panel before hosted-identity connectivity is enabled.

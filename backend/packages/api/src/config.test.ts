@@ -85,15 +85,27 @@ describe("loadConfig", () => {
       ...requiredEnv,
       HOSTED_AUTH_DATABASE_URL:
         "postgresql://POTP_backenduser:secret@db.example.com:5432/postgres",
+      HOSTED_AUTH_DATABASE_CA_CERT:
+        "-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----",
     });
     assert.equal(
       configuration.HOSTED_AUTH_DATABASE_URL,
       "postgresql://POTP_backenduser:secret@db.example.com:5432/postgres",
     );
+    assert.match(
+      configuration.HOSTED_AUTH_DATABASE_CA_CERT ?? "",
+      /BEGIN CERTIFICATE/,
+    );
     assert.throws(() =>
       loadConfig({
         ...requiredEnv,
         HOSTED_AUTH_DATABASE_URL: "https://db.example.com",
+      }),
+    );
+    assert.throws(() =>
+      loadConfig({
+        ...requiredEnv,
+        HOSTED_AUTH_DATABASE_CA_CERT: "not-a-certificate",
       }),
     );
   });
