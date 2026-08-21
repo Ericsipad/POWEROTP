@@ -17,7 +17,8 @@ Do not mark a phase/step implemented, deployed, remote-green, or certified witho
 - P0-S2 — completed 2026-08-21 19:26 UTC, data governance and trust boundaries
 - P0-S3 — completed 2026-08-21 19:40 UTC, consent, vendor gates, and claims policy
 - P0-S4 — completed 2026-08-21 19:59 UTC, hosted-auth threat model
-- P1-S1 through P15-S6 — not started
+- P1-S1 — completed 2026-08-21 20:39 UTC, purpose-specific hosted-auth identifiers
+- P1-S2 through P15-S6 — not started
 
 Update this index after every execution step with a link to that step's latest timestamped entry.
 
@@ -564,3 +565,72 @@ Next step:
 
 - P1-S1 — add person/profile/project-binding/Didit/auth-request/poll-token identifier schemas while
   preserving all Phase 0 boundaries.
+
+## 2026-08-21 20:39 UTC — P1-S1: Purpose-specific hosted-auth identifiers
+
+Status and scope:
+
+- P1-S1 is complete. This step added only person, profile, project-binding, Didit, auth-request,
+  and poll-token identifier contracts.
+- P1-S2 state machines were not started. All Phase 0 product, realm, custody, consent, vendor,
+  threat, client-exposure, Passport, and BotBlocker boundaries remain unchanged.
+
+Evidence and implemented contracts:
+
+- Added strict, purpose-branded Zod schemas for private `hostedPersonIdentityId`,
+  realm-specific `hostedAuthProfileId`, internal `projectIdentityBindingId`, client-visible pairwise
+  `projectUserId`, permanent `potpDiditId`, provider-owned `diditInternalId`, public
+  `authRequestId`, and shown-once server-only `pollToken`.
+- Every POWEROTP-generated value has a distinct fixed prefix and exactly one canonical unpadded
+  base64url encoding of 256 random or keyed bits. Schemas reject wrong prefixes, truncation,
+  padding, invalid alphabets, and non-canonical trailing bits.
+- `diditInternalId` accepts only a lowercase canonical random UUID v4. Zod brands prevent
+  cross-purpose assignment at compile time while distinct representations reject substitution at
+  runtime.
+- Identifier schemas validate representation. Future construction must use a CSPRNG, except
+  `projectUserId`, whose 256-bit body comes from the already-specified versioned keyed
+  person/project derivation.
+
+Affected files:
+
+- `backend/packages/contracts/src/hosted-auth-identifiers.ts`
+- `backend/packages/contracts/src/hosted-auth-identifiers.test.ts`
+- `backend/packages/contracts/src/index.ts`
+- `docs/POWEROTP_SIGNIN_AD_SERVICE_AS_BUILT.md`
+
+Findings and directional changes:
+
+- P1-S1 names an internal `projectIdentityBindingId` separately from the only binding identifier
+  exposed to a client, `projectUserId`. This makes the Phase 0 client-exposure boundary explicit
+  rather than permitting one identifier to serve both purposes.
+- The plan's generic Didit UUID is narrowed to canonical UUID v4 so provider IDs remain
+  non-enumerable and cannot be confused with any prefixed POWEROTP identifier.
+- No route, payload, persistence, lifecycle, transition, retry, cancellation, or provider adapter
+  behavior was introduced.
+
+Security, privacy, compatibility, and migration impact:
+
+- Runtime prefix separation and compile-time brands reject person/profile/binding/provider/request/
+  poll cross-type substitution. The poll credential remains distinct from the non-authorizing
+  request correlation ID and is explicitly server-only.
+- Private person, profile, internal binding, and Didit identifiers gain no client exposure.
+  `projectUserId` remains pairwise and the only identity identifier clients receive.
+- This additive contracts change requires no database migration, environment value, provider
+  credential, deployment, Passport change, or BotBlocker change.
+
+Focused verification:
+
+- `npm run test -w @powerotp/contracts` — passed.
+- `npm run typecheck -w @powerotp/contracts` — passed, including branded-type substitution checks.
+- No full-monorepo verification was run because only the contracts package and documentation were
+  changed.
+
+Commit, push, and remote check:
+
+- The coherent P1-S1 commit contains this entry. Its final hash, push confirmation, and one remote
+  result check are reported in the post-push session handoff.
+
+Next step:
+
+- P1-S2 — add auth-request, polling, WebAuthn, contact, recovery, credential-grant, and verification
+  state machines without beginning P1-S3 provider interfaces.

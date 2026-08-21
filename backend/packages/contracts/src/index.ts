@@ -23,6 +23,7 @@ export * from "./hosted-auth-boundaries.js";
 export * from "./hosted-auth-consent-and-vendor-gates.js";
 export * from "./hosted-auth-data-classes.js";
 export * from "./hosted-auth-data-governance.js";
+export * from "./hosted-auth-identifiers.js";
 export * from "./modal-sessions.js";
 export * from "./nodes.js";
 export * from "./projects.js";
