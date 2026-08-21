@@ -20,7 +20,8 @@ Do not mark a phase/step implemented, deployed, remote-green, or certified witho
 - P1-S1 — completed 2026-08-21 20:39 UTC, purpose-specific hosted-auth identifiers
 - P1-S2 — completed 2026-08-21 21:02 UTC, hosted-auth state machines
 - P1-S3 — completed 2026-08-21 21:30 UTC, provider and balance-operation interfaces
-- P1-S4 through P15-S6 — not started
+- P1-S4 — completed 2026-08-21 22:09 UTC, protocol/TTL/idempotency/PWA route contracts
+- P2-S1 through P15-S6 — not started
 
 Update this index after every execution step with a link to that step's latest timestamped entry.
 
@@ -802,3 +803,73 @@ Next step:
 
 - P1-S4 — add stable errors, active/result TTLs, API idempotency, compatibility versions, and
   PWA-safe route contracts without beginning Phase 2 persistence or runtime implementation.
+
+## 2026-08-21 22:09 UTC — P1-S4: Stable hosted-auth protocol and route contracts
+
+Status and scope:
+
+- P1-S4 is complete. This step added only stable errors, active/result TTLs, API idempotency,
+  compatibility versions, and PWA-safe route contracts.
+- Phase 2 persistence/runtime work, provider adapters and credentials, `.env`, Passport, and
+  BotBlocker plans and behavior were not started or modified.
+
+Evidence and implemented contracts:
+
+- Added one exact API compatibility version and one hosted-browser protocol version. Unknown
+  versions and enum values fail strict validation.
+- Added stable machine-readable API errors and terminal failure reasons covering the canonical
+  project, service, return URL, request/result, poll-token, idempotency, verification, signup,
+  balance, recovery-delay, content-conflict, authentication, and rate-limit cases.
+- Locked active request lifetime to a client-selected 300–86,400 seconds with a 1,800-second
+  default. Every terminal result expires exactly 180 seconds after `completedAt`; the exact expiry
+  boundary is unavailable.
+- Added strict idempotency claims bound to compatibility version, key, operation, exact
+  project/realm/flow scope, and lowercase SHA-256 request hash. Exact replay is repeatable; changed
+  payload or scope returns `idempotency_conflict`.
+- Added a no-store route manifest separating project-backend, hosted-browser, and signed-provider
+  authorities. Browser navigation supports ordinary tabs, standalone PWAs, and mobile handoff using
+  request-bound server context and configured redirects, never opener, history, or referrer
+  authority. Browser return hints remain minimal and non-authoritative.
+
+Affected files:
+
+- `backend/packages/contracts/src/hosted-auth-protocol.ts`
+- `backend/packages/contracts/src/hosted-auth-route-contracts.ts`
+- `backend/packages/contracts/src/hosted-auth-protocol.test.ts`
+- `backend/packages/contracts/src/index.ts`
+- `docs/POWEROTP_SIGNIN_AD_SERVICE_AS_BUILT.md`
+
+Findings and directional changes:
+
+- No Phase 0 or P1-S1 through P1-S3 boundary changed. Custody mode remains represented by the exact
+  realm object, while flow and project scope remain mandatory in navigation and idempotency claims.
+- Compatibility versions describe wire contracts and remain separate from P1-S2 optimistic
+  transition versions.
+- The contracts describe route/auth/cache/navigation behavior only. They add no route handlers,
+  persistence records, TTL indexes, hashing implementation, provider SDK payload, or runtime side
+  effect.
+
+Security, privacy, compatibility, and migration impact:
+
+- Hosted browser contracts reject project API keys, poll tokens, client identity results, unknown
+  launch surfaces, and undeclared fields. All declared hosted-auth routes are `no_store`.
+- This additive contracts step requires no database migration, environment value, provider
+  credential, deployment, Passport change, or BotBlocker change.
+
+Focused verification:
+
+- `npm run test -w @powerotp/contracts` — passed.
+- `npm run typecheck -w @powerotp/contracts` — passed.
+- No full-monorepo verification was run because only the contracts package and documentation were
+  changed.
+
+Commit, push, and remote check:
+
+- The coherent P1-S4 commit contains this entry. Its final hash, push confirmation, and one remote
+  result check are reported in the post-push session handoff.
+
+Next step:
+
+- P2-S1 — add the per-environment Supabase bootstrap, migration pipeline, connectivity,
+  RLS/service roles, and person/profile/credential/contact/consent/verification schema without
+  beginning P2-S2 runtime persistence.
