@@ -80,6 +80,24 @@ describe("loadConfig", () => {
     assert.throws(() => loadConfig({ ...requiredEnv, MONGODB_URI: "" }));
   });
 
+  it("accepts only a server-side PostgreSQL URL for hosted identity", () => {
+    const configuration = loadConfig({
+      ...requiredEnv,
+      HOSTED_AUTH_DATABASE_URL:
+        "postgresql://POTP_backenduser:secret@db.example.com:5432/postgres",
+    });
+    assert.equal(
+      configuration.HOSTED_AUTH_DATABASE_URL,
+      "postgresql://POTP_backenduser:secret@db.example.com:5432/postgres",
+    );
+    assert.throws(() =>
+      loadConfig({
+        ...requiredEnv,
+        HOSTED_AUTH_DATABASE_URL: "https://db.example.com",
+      }),
+    );
+  });
+
   it("requires complete, distinct BotBlocker active and previous key groups", () => {
     assert.throws(() =>
       loadConfig({

@@ -21,7 +21,8 @@ Do not mark a phase/step implemented, deployed, remote-green, or certified witho
 - P1-S2 — completed 2026-08-21 21:02 UTC, hosted-auth state machines
 - P1-S3 — completed 2026-08-21 21:30 UTC, provider and balance-operation interfaces
 - P1-S4 — completed 2026-08-21 22:09 UTC, protocol/TTL/idempotency/PWA route contracts
-- P2-S1 through P15-S6 — not started
+- P2-S1 — completed 2026-08-21 22:40 UTC, production Supabase identity schema and RLS
+- P2-S2 through P15-S6 — not started
 
 Update this index after every execution step with a link to that step's latest timestamped entry.
 
@@ -874,3 +875,90 @@ Next step:
 - P2-S1 — add the per-environment Supabase bootstrap, migration pipeline, connectivity,
   RLS/service roles, and person/profile/credential/contact/consent/verification schema without
   beginning P2-S2 runtime persistence.
+
+## 2026-08-21 22:40 UTC — P2-S1: Production Supabase identity schema and RLS
+
+Status and scope:
+
+- P2-S1 is complete for POWEROTP's actual production-only deployment model. The new production
+  Supabase project is named `POTP`, project ref `ozfufuxpdrsfbamopszb`, in `us-east-1`.
+- The migration is one version-controlled initial schema applied directly through Supabase's
+  migration history. No custom migration pipeline, staging project, development/test database,
+  or CI database deployment machinery was introduced.
+- Existing MongoDB remains unchanged and continues to own normal application data. P2-S2 hot
+  auth-request persistence, TTLs, encrypted poll results, and poll-token hashing were not started.
+
+Evidence and implemented data:
+
+- Added the private `hosted_auth` PostgreSQL schema with seven P2-S1 tables:
+  `person_identities`, `auth_profiles`, `webauthn_credentials`,
+  `encrypted_identity_attributes`, `contacts`, `consent_records`, and
+  `identity_verifications`.
+- Database constraints enforce canonical private identifiers, no more than one profile per
+  person/custody mode, exact `powerotp_pii`/`authx.powerotp.com` and
+  `didit_pii`/`authz.powerotp.com` realm mappings, profile-scoped credentials, paired permanent
+  Didit identifiers, and complete encrypted-field groups.
+- Recoverable contact attributes can exist only for `powerotp_pii`. A `didit_pii` contact requires
+  a Didit reference and cannot reference POWEROTP encrypted contact storage.
+- WebAuthn storage contains only public credential material and authenticator metadata. Consent
+  stores the exact purpose/version/decision/evidence digest, and verification stores normalized
+  outcomes and minimal evidence digests without documents, selfies, media, or raw provider
+  evidence.
+
+RLS, roles, connectivity, and client exposure:
+
+- RLS is enabled and forced on every hosted-auth table. `PUBLIC`, `anon`, `authenticated`, and
+  Supabase's generic `service_role` have no schema or table access.
+- Added the NOLOGIN `potp_hosted_auth_service` and `potp_identity_admin` authorization roles plus
+  the dedicated `POTP_backenduser` production login. Its generated password is not stored in git.
+- Added optional server-only `HOSTED_AUTH_DATABASE_URL` validation and a bounded PostgreSQL pool
+  connectivity check that accepts only the dedicated login with `hosted_auth` schema access.
+  Missing configuration fails closed and never falls back to MongoDB.
+- The production deployment environment still needs `HOSTED_AUTH_DATABASE_URL` installed manually;
+  `.env` and provider credentials were not read or modified.
+- No public/client API or route was added. Clients still receive no PII, private/global identity
+  ID, credential material, provider reference, consent evidence, or verification evidence.
+
+Findings and directional changes:
+
+- The incoming roadmap wording assumed four Supabase environments and an automated migration
+  pipeline. The owner clarified that POWEROTP currently operates one production system and does
+  not use staging, development, or test databases. P2-S1 therefore provisions only production and
+  keeps one auditable initial migration rather than building unused infrastructure.
+- One production Supabase project costs $10/month; the owner explicitly confirmed that recurring
+  cost before creation.
+- Phase 0 and P1 boundaries remain unchanged. Passport and BotBlocker plans and behavior were not
+  modified.
+
+Affected files:
+
+- `supabase/migrations/20260821223500_p2_s1_hosted_identity.sql`
+- `backend/packages/api/src/config.ts`
+- `backend/packages/api/src/config.test.ts`
+- `backend/packages/api/src/hosted-identity-database.ts`
+- `backend/packages/api/src/hosted-identity-database.test.ts`
+- `backend/packages/api/src/hosted-identity-migration.test.ts`
+- `backend/packages/api/package.json`
+- `backend/package-lock.json`
+- `docs/POWEROTP_SIGNIN_AD_SERVICE_AS_BUILT.md`
+
+Focused verification:
+
+- `npm run test -w @powerotp/api` — passed.
+- `npm run typecheck -w @powerotp/api` — passed.
+- Production catalog inspection found exactly seven `hosted_auth` tables, all with forced RLS,
+  seven internal-only policies, denied public/client/generic-service access, and the expected
+  backend membership/schema grant.
+- Transactional production checks rejected a wrong-realm profile, a duplicate same-mode profile,
+  and a `didit_pii` contact without Didit custody; the transaction was rolled back.
+
+Commit, push, and remote check:
+
+- The coherent P2-S1 commit contains this entry. Its final hash, push confirmation, and one remote
+  Verify result check are reported in the post-push session handoff.
+
+Next step:
+
+- P2-S2 — add only the minimal MongoDB hot auth-request repository, active/terminal TTL behavior,
+  encrypted terminal result, and poll-token hashing without beginning durable retention or later
+  identity-saga work.

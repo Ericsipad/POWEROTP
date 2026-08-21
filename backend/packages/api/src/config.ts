@@ -9,11 +9,24 @@ const CanonicalBase64Schema = z
     "Expected canonical base64",
   );
 const BotBlockerKeyIdSchema = z.string().min(1).max(128);
+const PostgresConnectionUrlSchema = z
+  .string()
+  .url()
+  .refine(
+    (value) => ["postgres:", "postgresql:"].includes(new URL(value).protocol),
+    "Expected a PostgreSQL connection URL",
+  );
 
 const ProductionConfigSchema = z.object({
   PORT: z.coerce.number().int().positive().default(3001),
   MONGODB_URI: z.string().startsWith("mongodb"),
   VALKEY_URL: z.string().startsWith("rediss://"),
+  /**
+   * Server-only connection to the dedicated Supabase hosted-identity store.
+   * Optional until its production secret is installed; hosted-auth persistence
+   * must fail closed rather than falling back to MongoDB when it is absent.
+   */
+  HOSTED_AUTH_DATABASE_URL: PostgresConnectionUrlSchema.optional(),
   /**
    * Independent BotBlocker Ed25519 trust domain. The active private key is
    * PKCS#8 DER encoded as canonical base64. A previous key carries public
