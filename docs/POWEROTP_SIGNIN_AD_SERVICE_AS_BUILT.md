@@ -1,0 +1,233 @@
+# POWEROTP Sign-In as a Service — AS-BUILT record
+
+Append-only implementation record for
+[`POWEROTP_SIGNIN_AD_SERVICE_PLAN.md`](POWEROTP_SIGNIN_AD_SERVICE_PLAN.md).
+
+This file records what has actually been completed and verified. The plan describes intended work.
+Do not mark a phase/step implemented, deployed, remote-green, or certified without evidence.
+
+## Phase/step index
+
+- Planning baseline — 2026-08-21 00:42 UTC
+- Latest planning direction — 2026-08-21 02:46 UTC, immutable email custody modes
+- Latest canonical completion — 2026-08-21 05:44 UTC, polling/realms/mobile/PWA roadmap
+- Latest coherence correction — 2026-08-21 05:55 UTC
+- Final review correction — 2026-08-21 06:00 UTC, terminal-result TTL
+- P0-S1 through P15-S6 — not started
+
+Update this index after every execution step with a link to that step's latest timestamped entry.
+
+## Entry format
+
+Use:
+
+`## YYYY-MM-DD HH:mm UTC — P{phase}-S{step}: <title>`
+
+Every implementation entry must record:
+
+- Status and scope
+- Evidence and affected files
+- Implemented contracts/routes/data/UI
+- Findings and directional changes with rationale
+- Security, privacy, compatibility, and migration impact
+- Intentional deviations and known limitations
+- Focused verification commands and results
+- Commit, push, and remote-check status
+- Exact next dependency step
+
+Never rewrite or silently remove an older finding or decision. Add a new timestamped correction.
+
+## 2026-08-21 00:42 UTC — Planning baseline established
+
+Status: documentation design completed; implementation has not started.
+
+Recorded direction:
+
+- Hosted sign-up/sign-in uses top-level POWEROTP redirects and one private hosted-auth identity with
+  multiple discoverable passkeys.
+- Clients receive only stable project-scoped IDs and never receive PII, encrypted PII, decryption
+  keys, WebAuthn material, Didit evidence, or global identity IDs.
+- Hosted-auth identity remains separate from Passport, with only a deferred future linkage.
+- Supabase is the authoritative encrypted identity/PII store; MongoDB stores operational records and
+  wrapped DEKs; KMS/HSM retains usable key authority.
+- Recovery is authorized centrally by POWEROTP. Clients may initiate but cannot authorize it.
+- Native WebAuthn hybrid transport supplies cross-device QR.
+- Template 1 is the only MVP template, with separate sign-up/sign-in entities, six alternating
+  image/rich-text rows, six independently toggleable collapsing ad positions, and item-level edits.
+- Images are validated, re-encoded, stored on POWEROTP's Bunny-backed CDN, and atomically replaced
+  before old assets are deleted.
+- The existing POWEROTP MCP remains public, anonymous, credential-free, project-unaware, and
+  read-only. It supplies hosted-auth instructions/examples only; project management uses the normal
+  authenticated project API.
+- Implementation is divided into P0-S1 through P14-S4 execution steps, each scoped to no more than
+  20% of a fresh session's expected context.
+
+Evidence:
+
+- [`POWEROTP_SIGNIN_AD_SERVICE_PLAN.md`](POWEROTP_SIGNIN_AD_SERVICE_PLAN.md)
+- [`PRODUCT_SPEC.md`](PRODUCT_SPEC.md)
+- [`PASSPORT_BUSINESS_AND_LEGAL_PLAN.md`](PASSPORT_BUSINESS_AND_LEGAL_PLAN.md)
+
+Verification:
+
+- Documentation-only planning update; no build, test, deployment, commit, push, or remote CI check
+  was performed.
+
+Next step:
+
+- P0-S1 — lock the product, relying-party origin, identity, Passport, and BotBlocker boundaries in
+  executable contracts/documentation before implementation.
+
+## 2026-08-21 02:46 UTC — Planning direction: immutable email custody modes
+
+Status: canonical plan updated; implementation has not started.
+
+Directional changes:
+
+- Every project now requires immutable `identityDataMode` at creation:
+  - `didit_pii`: Didit is the email/contact custodian and handles contact email authentication.
+  - `powerotp_pii`: POWEROTP encrypts the email in Supabase and uses its existing Brevo service for
+    sign-up verification, email-code login, notifications, and recovery.
+- Changing custody mode requires a new project. The mode cannot be edited in place.
+- Both modes use the same POWEROTP identity, WebAuthn credentials, authorization-code exchange, and
+  project-scoped client IDs. WebAuthn does not call Didit or Brevo.
+- Didit identity linkage is now exact:
+  - POWEROTP generates opaque `potpDiditId` and sends it as `vendor_data`.
+  - `POST /v3/users/create/` returns stable `diditInternalId`.
+  - POWEROTP stores `hostedIdentityId → potpDiditId → diditInternalId`.
+- Sign-up first attempts POWEROTP session/passkey recognition, then keyed email lookup, before
+  creating an identity or Didit User.
+- Valid age/KYC claims are reusable across client projects while current. Biometric authentication
+  remains a fresh liveness/face-match event.
+- Didit process-and-purge applies when biometric authentication is not enabled. Enabling biometric
+  authentication intentionally retains an approved face on the persistent Didit User under its own
+  consent and retention policy.
+- The Didit phase now includes explicit configuration, permanent User mapping, separate capability
+  adapters, reusable-claim charging, and media-retention enforcement.
+
+Evidence:
+
+- Didit Management API documents `POST /v3/users/create/`, caller-supplied `vendor_data`, and returned
+  stable `didit_internal_id`.
+- Didit User documentation records persistent approved emails/phones, feature status, DOB, and
+  biometric references under the User entity.
+- Didit biometric-authentication documentation resolves an approved stored face by `vendor_data`
+  and performs a fresh liveness/face-match session.
+- [`POWEROTP_SIGNIN_AD_SERVICE_PLAN.md`](POWEROTP_SIGNIN_AD_SERVICE_PLAN.md)
+
+Verification:
+
+- Documentation-only planning update; no build, test, environment change, deployment, commit, push,
+  or remote CI check was performed.
+
+Next step:
+
+- P0-S1 remains the first implementation step.
+
+## 2026-08-21 06:00 UTC — Final review correction: terminal-result TTL
+
+Status: final material contradiction found by read-only review and corrected.
+
+Correction:
+
+- Every terminal auth-request outcome (`succeeded`, `failed`, `canceled`, or `expired`) is
+  idempotently pollable for exactly three minutes after `completedAt`.
+- The durable redacted retention record is written before any terminal poll result becomes visible.
+- The runtime record, poll-token hash, and sensitive result payload are deleted after that window.
+
+Verification:
+
+- Final read-only review found no other material blocker in the requested areas.
+- Documentation-only work; no build, runtime test, environment change, deployment, commit, push, or
+  remote CI check was performed.
+
+Next step:
+
+- P0-S1 remains the first implementation step.
+
+## 2026-08-21 05:44 UTC — Planning direction: polling, realm profiles, mobile, and PWA
+
+Status: canonical plan completed and dependency roadmap reordered; implementation has not started.
+
+Directional changes:
+
+- Replaced authorization-code exchange with server polling:
+  - Project backend receives shown-once `pollToken` and keeps it out of the browser.
+  - Client selects active request lifetime within 5 minutes–24 hours.
+  - Successful result is idempotently pollable for exactly three minutes.
+  - Runtime request/token/result are then deleted while a separate redacted retention row remains.
+- Added separate runtime and durable retention data stores so polling can remain minimal/portable
+  without losing audit, billing, or support evidence.
+- Defined one private person root with two realm-isolated authentication profiles:
+  - `authx.powerotp.com` for `powerotp_pii`.
+  - `authz.powerotp.com` for `didit_pii`.
+  - Profiles have separate RP IDs, user handles, passkeys, and cookies while sharing person-level
+    Didit mapping and reusable age/KYC claims.
+- Removed cross-project POWEROTP SSO. Every client auth request requires fresh proof. Clients own
+  their sessions, refresh tokens, expiry, and logout.
+- Recovery is a signin-state branch. Recovery proof must complete before a one-time passkey
+  registration grant is issued.
+- Added native WebAuthn hybrid QR and a separate single-use POWEROTP mobile handoff QR.
+- Added the complete separate Template 1 mobile renderer and retained shared security/state logic.
+- Added exact signup/signin/failure/recovery/restart project URLs.
+- Added simple prepaid balance checks linked to existing Brevo/SMS/voice/Didit interactions; no new
+  spend-control subsystem.
+- Moved Didit contact/User/webhook integration before signup and split optional age/KYC/liveness/
+  biometric assurance into later steps.
+- Reordered Phases 0–14 by dependency and added Phase 15 as the final installable PWA/Web Push phase.
+  Earlier browser phases include PWA-safe routing and strict no-cache/service-worker boundaries.
+
+Verification:
+
+- Documentation-only planning update; no build, test, environment change, deployment, commit, push,
+  or remote CI check was performed.
+
+Next step:
+
+- P0-S1 — lock the glossary, product boundaries, person/profile model, RP realms, and separation from
+  Passport/BotBlocker before implementation.
+
+## 2026-08-21 05:55 UTC — Planning correction after completeness review
+
+Status: documentation reviewed and corrected; implementation has not started.
+
+This entry explicitly supersedes older planning statements without deleting history:
+
+- Authorization-code exchange is retracted. The canonical client contract is authenticated polling
+  with a shown-once server-only poll token and a three-minute terminal-result window.
+- Shared WebAuthn credentials across custody modes are retracted. `authx` and `authz` profiles have
+  separate RP IDs, user handles, credentials, and cookies under one private person root.
+- `hostedIdentityId` is replaced by `hostedPersonIdentityId`.
+- Signup does not authenticate from a prior POWEROTP identity session. It performs fresh
+  realm-specific WebAuthn/contact proof; remembered-account cookies are UI-only.
+- Runtime request data and durable retained audit data are separate. The hot runtime store is a
+  dedicated portable repository; the retained redacted record survives hot-result deletion.
+- The roadmap extends through P15-S6, with the PWA as the last phase.
+
+Completeness corrections added:
+
+- Exact browser routing for signup/signin/failure/recovery/restart and UX-only return hints.
+- Terminal poll response contracts and three-minute purge for success/failure/cancel/expiry.
+- Deterministic cross-mode profile linking requiring target contact proof plus existing-profile proof;
+  email equality alone never merges person roots.
+- Mode-specific email/SMS/voice contact alternatives, credential-management grants, and pending
+  credential rollback after failed required assurance.
+- Supabase, authx/authz, Bunny, Didit, KMS, and deployment prerequisites in dependency order.
+- Didit age/KYC/liveness adapters moved before signup; biometric authentication remains later.
+- Recovery-code issuance, mobile handoff, exact recovery return routing, and post-proof passkey
+  registration.
+- POWEROTP evergreen content, education carousel, manually reviewed MVP creative serving, and
+  fill-sensitive ad slots.
+- Baseline lookup/recovery limits, secret redaction, CSP, and service-worker no-cache rules before
+  public auth flows.
+- Public MCP guidance moved after recovery/assurance APIs are complete.
+
+Verification:
+
+- Two independent read-only plan reviews were completed and their actionable findings were applied.
+- Documentation-only work; no build, runtime test, environment change, deployment, commit, push, or
+  remote CI check was performed.
+
+Next step:
+
+- P0-S1 remains the first implementation step.
