@@ -18,7 +18,8 @@ Do not mark a phase/step implemented, deployed, remote-green, or certified witho
 - P0-S3 — completed 2026-08-21 19:40 UTC, consent, vendor gates, and claims policy
 - P0-S4 — completed 2026-08-21 19:59 UTC, hosted-auth threat model
 - P1-S1 — completed 2026-08-21 20:39 UTC, purpose-specific hosted-auth identifiers
-- P1-S2 through P15-S6 — not started
+- P1-S2 — completed 2026-08-21 21:02 UTC, hosted-auth state machines
+- P1-S3 through P15-S6 — not started
 
 Update this index after every execution step with a link to that step's latest timestamped entry.
 
@@ -634,3 +635,90 @@ Next step:
 
 - P1-S2 — add auth-request, polling, WebAuthn, contact, recovery, credential-grant, and verification
   state machines without beginning P1-S3 provider interfaces.
+
+## 2026-08-21 21:02 UTC — P1-S2: Hosted-auth state machines
+
+Status and scope:
+
+- P1-S2 is complete. This step added only the auth-request, polling, WebAuthn, contact, recovery,
+  credential-management grant, and verification lifecycle contracts.
+- P1-S3 provider interfaces, P1-S4 errors/TTLs/idempotency/routes, storage, runtime orchestration,
+  Passport, and BotBlocker plans and behavior were not started or modified.
+
+Evidence and implemented contracts:
+
+- Added one pure optimistic-concurrency reducer shared by seven declarative state machines. Every
+  command carries the exact project, realm, and flow scope plus an expected machine version.
+- A matching immediately repeated event at its prior version is an idempotent duplicate. A
+  different stale event is rejected, observation-only polls do not mutate state, and no fresh
+  command can mutate a terminal state.
+- Auth requests define activation, WebAuthn/contact/recovery branches, proof completion, optional
+  assurance, result publication, retries, cancellation, failure, expiry, and four immutable
+  terminal outcomes. Recovery is rejected outside a signin flow.
+- Polling defines repeatable pending reads, one terminal-result publication, repeatable terminal
+  reads, and final purge. The terminal result cannot be replaced or returned to an active state.
+- WebAuthn and contact machines consume one submitted proof at a time. Rejected or failed attempts
+  retry only by entering a newly issued challenge/operation path; replay cannot revive consumed
+  material.
+- Recovery requires proof or the explicit delayed branch before issuing a credential grant.
+  Credential grants are one-time and bind the project, realm, flow, auth profile, exact
+  add/name/revoke action, and fresh-authentication or completed-recovery authorization source.
+- Contact and verification scopes use explicit vendor-neutral provider purposes. Verification
+  defines fresh operation, decision, retryable failure, satisfied, not-satisfied, indeterminate,
+  declined, canceled, and expired paths without introducing a provider adapter.
+
+Affected files:
+
+- `backend/packages/contracts/src/hosted-auth-state-machine-core.ts`
+- `backend/packages/contracts/src/hosted-auth-ceremony-scopes.ts`
+- `backend/packages/contracts/src/hosted-auth-request-state-machines.ts`
+- `backend/packages/contracts/src/hosted-auth-proof-state-machines.ts`
+- `backend/packages/contracts/src/hosted-auth-recovery-state-machines.ts`
+- `backend/packages/contracts/src/hosted-auth-state-machines.test.ts`
+- `backend/packages/contracts/src/index.ts`
+- `docs/POWEROTP_SIGNIN_AD_SERVICE_AS_BUILT.md`
+
+Findings and directional changes:
+
+- No Phase 0 or P1-S1 boundary changed. Exact realm objects are retained in every machine scope so
+  origin, RP ID, and custody mode cannot be independently substituted.
+- Machine versions define transition replay/concurrency behavior only. They do not preempt P1-S4's
+  API idempotency-key, compatibility-version, TTL, stable-error, or route contracts.
+- A retry is a named transition that advances machine version and represents fresh challenge or
+  provider-operation material; it never reopens an immutable terminal state.
+- Provider purposes are fixed now so later adapters cannot silently change custody or capability,
+  but provider request/response interfaces and balance operations remain wholly assigned to P1-S3.
+
+Security, privacy, compatibility, and migration impact:
+
+- Focused reject-by-construction tests cover illegal ordering, terminal mutation, exact replay,
+  changed stale events, consumed grant reuse, signup recovery, purpose/flow mismatch, and
+  cross-project, cross-realm, cross-flow, cross-profile, and cross-grant-action substitution.
+- Client exposure remains limited to the P1-S1 project-scoped identifier contract. No PII, global
+  identity, credential material, provider evidence, API key, poll token, or new client session
+  contract was added.
+- This additive contracts step requires no database migration, environment value, provider
+  credential, deployment, Passport change, or BotBlocker change.
+
+Intentional limits and deviations:
+
+- No deviation from P1-S2 was made. The contracts intentionally do not assign calendar TTLs,
+  stable failure reasons, HTTP routes, provider payloads, persistence, or runtime side effects;
+  those belong to later dependency steps.
+
+Focused verification:
+
+- `npm run test -w @powerotp/contracts` — passed.
+- `npm run typecheck -w @powerotp/contracts` — passed.
+- No full-monorepo verification was run because only the contracts package and documentation were
+  changed.
+
+Commit, push, and remote check:
+
+- The coherent P1-S2 commit contains this entry. Its final hash, push confirmation, and one remote
+  result check are reported in the post-push session handoff.
+
+Next step:
+
+- P1-S3 — add vendor-neutral email, phone, and Didit interfaces plus the balance-operation contract
+  while preserving these state, scope, custody, consent, and identifier boundaries.
