@@ -58,7 +58,7 @@ selects one isolated authentication realm:
 - `powerotp_pii` → RP/origin `https://authx.powerotp.com`
 - `didit_pii` → RP/origin `https://authz.powerotp.com`
 
-Each project receives separate hosted entry paths on its realm:
+Each customer project receives separate hosted entry paths on its realm:
 
 - `https://{realm}/signup/{projectName}/{identifierString}`
 - `https://{realm}/signin/{projectName}/{identifierString}`
@@ -243,7 +243,7 @@ These decisions are canonical for this service:
 6. Clients receive and store only their stable project-scoped user ID and their own local account
    mapping. They never receive PII, encrypted PII, decryption keys, credential material, Didit
    evidence, or POWEROTP's internal identity ID.
-7. Every project chooses one immutable `identityDataMode` at creation:
+7. Every customer project chooses one immutable `identityDataMode` at creation:
    - `didit_pii`: Didit is the email/contact custodian; POWEROTP stores keyed lookup values and the
      permanent Didit mapping but no recoverable email/phone plaintext.
    - `powerotp_pii`: POWEROTP is the email/contact custodian and stores recoverable PII encrypted in
@@ -721,7 +721,7 @@ tokens.
 
 ### Project authentication settings and URLs
 
-- Project creation requires immutable `identityDataMode`.
+- Customer project creation requires immutable `identityDataMode`.
 - `GET|PATCH /v1/projects/{projectSlug}/auth-settings`
 - `GET|PUT /v1/projects/{projectSlug}/auth-return-urls`
 - Settings include signup/signin enablement, method policy, age/KYC/liveness/biometric policy, and
@@ -921,8 +921,9 @@ Steps:
   history; template controls remain disabled until Phase 5 supplies them.
 
 Acceptance: exact production HTTPS URLs only; sign-up/sign-in/BotBlocker/Didit remain independent;
-serverless clients can operate without IP restrictions; every project has exactly one immutable
-contact-custody mode.
+serverless clients can operate without IP restrictions; every customer project has exactly one
+immutable contact-custody mode. The internal landing-page verification demo is not a customer
+project or hosted-auth service.
 
 Focused tests: URL canonicalization bypasses, fragments/userinfo/ports, IPv4/IPv6 CIDRs, project
 authorization, and setting-isolation tests.
@@ -1141,23 +1142,22 @@ execute code or obscure credentials.
 Focused tests: distributed limits, log scan, CSP violations, malicious content/creative, audit
 tampering, support denial, and network-allowlist failures.
 
-### Phase 14 — Rollout, migration, and evidence readiness
+### Phase 14 — Rollout and evidence readiness
 
 Steps:
 
 - P14-S1: desktop/mobile browser, authenticator, both-realm, method, polling, recovery, and
   assurance compatibility matrix.
-- P14-S2: legacy projects remain hosted-auth-disabled until the administrator chooses a new immutable
-  mode/URLs; generate identifiers without silently migrating users, then run an allowlisted canary
-  with synthetic data before regulated production PII.
+- P14-S2: create fresh synthetic projects in both custody modes and run an allowlisted canary before
+  regulated production PII.
 - P14-S3: backup/restore/rollback/key-rotation rehearsal.
 - P14-S4: operational evidence and release-readiness review.
 
 Acceptance: existing dashboard auth, verification APIs, accounting, and BotBlocker remain unchanged;
 rollback does not orphan people/profiles/requests/results; production claims use approved wording.
 
-Focused tests: staging end-to-end matrix, migration dry run, load/races, regional/network failure,
-backup restore, canary rollback, and evidence review.
+Focused tests: staging end-to-end matrix, fresh-project provisioning, load/races, regional/network
+failure, backup restore, canary rollback, and evidence review.
 
 ### Phase 15 — Installable PWA and push approval
 

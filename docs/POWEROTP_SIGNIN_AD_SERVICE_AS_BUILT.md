@@ -39,6 +39,7 @@ Do not mark a phase/step implemented, deployed, remote-green, or certified witho
 - P3-S0 health correction — 2026-08-22 04:02 UTC, direct host-proxy health response
 - P3-S0 ingress correction — 2026-08-22 04:10 UTC, explicit authority-aware health route
 - P3-S1 — completed 2026-08-22 04:23 UTC, immutable project custody/realm identifiers and hosted URLs
+- P3-S1 correction — 2026-08-22 04:33 UTC, removed nonexistent legacy-project compatibility
 - P3-S2 through P15-S6 — not started
 
 Update this index after every execution step with a link to that step's latest timestamped entry.
@@ -1932,7 +1933,7 @@ Next step:
 
 Status and scope:
 
-- P3-S1 is complete. Every newly created project now requires an explicit immutable
+- P3-S1 is complete. Every newly created customer project now requires an explicit immutable
   `identityDataMode`, receives a canonical 256-bit opaque `identifierString`, and stores its exact
   environment-specific auth realm, RP ID, and generated signup/signin hosted entry URLs.
 - P3-S2 return URLs and assurance settings, hosted credential handlers, provider adapters, Passport,
@@ -1949,12 +1950,11 @@ Implemented contracts, data, and behavior:
   test projects receive only their matching environment realm.
 - Project creation persists `identityDataMode`, `identifierString`, `authRealm`, `rpId`,
   `signupHostedUrl`, and `signinHostedUrl` in the same transaction as the existing project/API-key/
-  BotBlocker setup. A partial unique MongoDB index enforces identifier uniqueness while permitting
-  pre-P3-S1 legacy documents to remain untouched.
+  BotBlocker setup. A sparse unique MongoDB index enforces identifier uniqueness for every customer
+  project while excluding the internal landing-page demo.
 - Both the dashboard create-project form and rapid account-signup form require the custody choice.
   The rapid signup route passes that exact choice into creation rather than assigning a hidden
-  default. General project responses keep hosted-auth fields optional only for legacy rows; the
-  create response requires all six fields.
+  default. Every customer project response requires all six hosted-auth fields.
 
 Authorization, immutability, and migration impact:
 
@@ -1963,8 +1963,9 @@ Authorization, immutability, and migration impact:
 - Names remain mutable branding while slugs, identifiers, custody mode, realm/RP ID, and generated
   hosted paths remain unchanged. The opaque identifier, not the readable slug, is the future hosted
   resolver authority.
-- Existing projects are not silently assigned a custody mode or moved between realms. Their optional
-  response fields preserve the Phase 14 explicit legacy activation/migration boundary.
+- No legacy-project compatibility branch exists: this application has no customer project data to
+  migrate. Every customer project document and response requires one complete hosted-auth
+  configuration; the separate internal landing-page verification demo remains unchanged.
 
 Findings and corrections:
 
@@ -1992,3 +1993,25 @@ Next step:
 
 - P3-S2 — add exact signup/signin/failure/recovery/restart return URLs and method/assurance settings,
   preserving the immutable P3-S1 custody and realm configuration.
+
+## 2026-08-22 04:33 UTC — P3-S1 correction: remove nonexistent legacy-project handling
+
+Correction:
+
+- POWEROTP is a new application with no customer project population. The Phase 14 legacy-project
+  migration premise was invalid and has been removed from the roadmap.
+- The public customer-project contract and frontend customer-project type require
+  `identityDataMode`, `identifierString`, `authRealm`, `rpId`, `signupHostedUrl`, and
+  `signinHostedUrl`. The persistence layer enforces that complete subtype before returning any
+  customer project, and the identifier index is sparse/unique.
+- The fixed operator-owned landing-page verification demo is not a customer project or hosted-auth
+  demo. Its provisioning and UI-trigger behavior remain unchanged and no opaque hosted-auth
+  identifier, custody mode, realm, RP ID, or hosted URL is generated for it.
+- No return URL, assurance, provider, hosted-handler, Passport, MCP, BotBlocker, or `.env` work was
+  introduced.
+
+Focused verification:
+
+- Contracts tests passed (264) and API tests passed (474), including an explicit regression test
+  that repeated landing-page demo provisioning creates no hosted-auth configuration.
+- Backend production build and frontend production build passed.

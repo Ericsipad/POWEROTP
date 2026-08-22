@@ -71,6 +71,31 @@ function fixture(
             Object.assign(document, update.$set);
             return document;
           },
+          updateOne: async (
+            filter: Record<string, unknown>,
+            update: {
+              $set: Partial<ProjectDocument>;
+              $setOnInsert?: Partial<ProjectDocument>;
+            },
+            options?: { upsert?: boolean },
+          ) => {
+            const document = [...projects.values()].find((candidate) =>
+              Object.entries(filter).every(
+                ([key, value]) =>
+                  (candidate as unknown as Record<string, unknown>)[key] === value,
+              ),
+            );
+            if (document) {
+              Object.assign(document, update.$set);
+              return;
+            }
+            if (options?.upsert && update.$setOnInsert?._id) {
+              projects.set(update.$setOnInsert._id, {
+                ...update.$setOnInsert,
+                ...update.$set,
+              } as ProjectDocument);
+            }
+          },
         };
       }
       return {
@@ -263,6 +288,31 @@ describe("ProjectService hosted-auth project configuration", () => {
       (error: unknown) =>
         error instanceof Error && error.message === "project_not_found",
     );
+  });
+
+  it("leaves the internal landing-page demo outside hosted auth", async () => {
+    const { service, projects } = fixture(undefined, "production");
+    const first = await service.ensureDemoProject(
+      "demo",
+      "https://powerotp.com",
+      "usr_platform_admin",
+    );
+    const original = [...projects.values()][0]!;
+
+    assert.deepEqual(first, { slug: "demo" });
+    assert.equal(original.identityDataMode, undefined);
+    assert.equal(original.identifierString, undefined);
+    assert.equal(original.authRealm, undefined);
+    assert.equal(original.rpId, undefined);
+    assert.equal(original.signupHostedUrl, undefined);
+    assert.equal(original.signinHostedUrl, undefined);
+
+    await service.ensureDemoProject(
+      "demo",
+      "https://powerotp.com",
+      "usr_platform_admin",
+    );
+    assert.equal([...projects.values()][0]!._id, original._id);
   });
 });
 

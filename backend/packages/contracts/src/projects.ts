@@ -117,12 +117,12 @@ export const ProjectSchema = z.object({
   brandLogoUrl: BrandLogoUrlSchema.optional(),
   brandReplyToEmail: BrandReplyToEmailSchema.optional(),
   brandHtmlTemplate: BrandHtmlTemplateSchema.optional(),
-  identityDataMode: HostedAuthIdentityDataModeSchema.optional(),
-  identifierString: ProjectIdentifierStringSchema.optional(),
-  authRealm: z.string().url().optional(),
-  rpId: z.string().min(1).max(253).optional(),
-  signupHostedUrl: z.string().url().optional(),
-  signinHostedUrl: z.string().url().optional(),
+  identityDataMode: HostedAuthIdentityDataModeSchema,
+  identifierString: ProjectIdentifierStringSchema,
+  authRealm: z.string().url(),
+  rpId: z.string().min(1).max(253),
+  signupHostedUrl: z.string().url(),
+  signinHostedUrl: z.string().url(),
   stats: ProjectStatsSchema,
 });
 
@@ -145,14 +145,7 @@ export const BotBlockerProjectSetupSchema = z
   .strict();
 
 export const ProjectCreatedSchema = z.object({
-  project: ProjectSchema.extend({
-    identityDataMode: HostedAuthIdentityDataModeSchema,
-    identifierString: ProjectIdentifierStringSchema,
-    authRealm: z.string().url(),
-    rpId: z.string().min(1).max(253),
-    signupHostedUrl: z.string().url(),
-    signinHostedUrl: z.string().url(),
-  }),
+  project: ProjectSchema,
   apiKey: z.string().min(32),
   callbackSigningSecret: z.string().min(32).optional(),
   botBlocker: BotBlockerProjectSetupSchema,

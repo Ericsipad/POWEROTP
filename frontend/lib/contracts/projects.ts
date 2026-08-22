@@ -19,12 +19,12 @@ export interface Project {
   brandLogoUrl?: string;
   brandReplyToEmail?: string;
   brandHtmlTemplate?: string;
-  identityDataMode?: IdentityDataMode;
-  identifierString?: string;
-  authRealm?: string;
-  rpId?: string;
-  signupHostedUrl?: string;
-  signinHostedUrl?: string;
+  identityDataMode: IdentityDataMode;
+  identifierString: string;
+  authRealm: string;
+  rpId: string;
+  signupHostedUrl: string;
+  signinHostedUrl: string;
   stats: {
     total: number;
     succeeded: number;

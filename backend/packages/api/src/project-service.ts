@@ -1,6 +1,7 @@
 import type {
   BotBlockerProjectSetup,
   CreateProject,
+  HostedAuthIdentityDataMode,
   Project,
   ProjectCreated,
   UpdateProject,
@@ -23,6 +24,7 @@ import {
   PLATFORM_ADMIN_USER_ID,
   type ApiKeyDocument,
   type AuditDocument,
+  type CustomerProjectDocument,
   type ProjectDocument,
 } from "./persistence.js";
 import { projectVerificationUrl } from "./public-urls.js";
@@ -83,32 +85,17 @@ export class ProjectService {
   async create(customerId: string, input: CreateProject, ip?: string) {
     const now = new Date();
     const slug = createSlug(input.name);
-    const identifierString = ProjectIdentifierStringSchema.parse(
-      `pai_${createSecret()}`,
+    const hostedAuth = createHostedAuthProjectConfiguration(
+      this.hostedAuthEnvironment,
+      input.identityDataMode,
+      slug,
     );
-    const realm =
-      HOSTED_AUTH_DEPLOYMENTS[this.hostedAuthEnvironment][input.identityDataMode];
-    const project: ProjectDocument = {
+    const project: CustomerProjectDocument = {
       _id: createId("prj"),
       customerId,
       name: input.name,
       slug,
-      identityDataMode: input.identityDataMode,
-      identifierString,
-      authRealm: realm.origin,
-      rpId: realm.rpId,
-      signupHostedUrl: hostedAuthEntryUrl(
-        realm.origin,
-        "signup",
-        slug,
-        identifierString,
-      ),
-      signinHostedUrl: hostedAuthEntryUrl(
-        realm.origin,
-        "signin",
-        slug,
-        identifierString,
-      ),
+      ...hostedAuth,
       enabledMethods: input.enabledMethods,
       allowedOrigins: input.allowedOrigins,
       callbackUrl: input.callbackUrl,
@@ -207,7 +194,11 @@ export class ProjectService {
       .find({ customerId })
       .sort({ createdAt: -1 })
       .toArray();
-    return Promise.all(projects.map((project) => this.#toResponse(project)));
+    return Promise.all(
+      projects.map((project) =>
+        this.#toResponse(this.#requireCustomerProject(project)),
+      ),
+    );
   }
 
   async update(
@@ -265,7 +256,7 @@ export class ProjectService {
     );
     if (!project) throw new ProjectError("project_not_found", 404);
     await this.#audit(customerId, "project.updated", "project", projectId, ip);
-    return this.#toResponse(project);
+    return this.#toResponse(this.#requireCustomerProject(project));
   }
 
   async rotateApiKey(customerId: string, projectId: string, ip?: string) {
@@ -363,13 +354,13 @@ export class ProjectService {
     const project = await this.#projects.findOne({ slug });
     if (!project) throw new ProjectError("project_not_found", 404);
     await this.#audit(actorId, "demo_project.ensured", "project", project._id);
-    return this.#toResponse(project);
+    return { slug: project.slug };
   }
 
   async #ownedProject(customerId: string, projectId: string) {
     const project = await this.#projects.findOne({ _id: projectId, customerId });
     if (!project) throw new ProjectError("project_not_found", 404);
-    return project;
+    return this.#requireCustomerProject(project);
   }
 
   #newApiKey(project: ProjectDocument, customerId: string) {
@@ -389,7 +380,7 @@ export class ProjectService {
   }
 
   #toNewProjectResponse(
-    project: ProjectDocument,
+    project: CustomerProjectDocument,
     key: ApiKeyDocument,
   ): ProjectCreated["project"] {
     return {
@@ -411,12 +402,12 @@ export class ProjectService {
       brandLogoUrl: project.brandLogoUrl,
       brandReplyToEmail: project.brandReplyToEmail,
       brandHtmlTemplate: project.brandHtmlTemplate,
-      identityDataMode: project.identityDataMode!,
-      identifierString: project.identifierString!,
-      authRealm: project.authRealm!,
-      rpId: project.rpId!,
-      signupHostedUrl: project.signupHostedUrl!,
-      signinHostedUrl: project.signinHostedUrl!,
+      identityDataMode: project.identityDataMode,
+      identifierString: project.identifierString,
+      authRealm: project.authRealm,
+      rpId: project.rpId,
+      signupHostedUrl: project.signupHostedUrl,
+      signinHostedUrl: project.signinHostedUrl,
       stats: {
         total: 0,
         succeeded: 0,
@@ -426,7 +417,7 @@ export class ProjectService {
     };
   }
 
-  async #toResponse(project: ProjectDocument): Promise<Project> {
+  async #toResponse(project: CustomerProjectDocument): Promise<Project> {
     const key = await this.#apiKeys.findOne(
       { projectId: project._id, revokedAt: { $exists: false } },
       { sort: { createdAt: -1 } },
@@ -505,6 +496,51 @@ export class ProjectService {
     }
     return secret;
   }
+
+  #requireCustomerProject(
+    project: ProjectDocument,
+  ): CustomerProjectDocument {
+    if (
+      !project.identityDataMode ||
+      !project.identifierString ||
+      !project.authRealm ||
+      !project.rpId ||
+      !project.signupHostedUrl ||
+      !project.signinHostedUrl
+    ) {
+      throw new ProjectError("project_configuration_invalid", 500);
+    }
+    return project as CustomerProjectDocument;
+  }
+}
+
+function createHostedAuthProjectConfiguration(
+  environment: HostedAuthDeploymentEnvironment,
+  identityDataMode: HostedAuthIdentityDataMode,
+  projectSlug: string,
+) {
+  const identifierString = ProjectIdentifierStringSchema.parse(
+    `pai_${createSecret()}`,
+  );
+  const realm = HOSTED_AUTH_DEPLOYMENTS[environment][identityDataMode];
+  return {
+    identityDataMode,
+    identifierString,
+    authRealm: realm.origin,
+    rpId: realm.rpId,
+    signupHostedUrl: hostedAuthEntryUrl(
+      realm.origin,
+      "signup",
+      projectSlug,
+      identifierString,
+    ),
+    signinHostedUrl: hostedAuthEntryUrl(
+      realm.origin,
+      "signin",
+      projectSlug,
+      identifierString,
+    ),
+  };
 }
 
 function hostedAuthEntryUrl(

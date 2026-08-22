@@ -92,7 +92,7 @@ export interface ProjectDocument {
   customerId: string;
   name: string;
   slug: string;
-  /** Absent only on projects created before hosted-auth project configuration shipped. */
+  /** Customer-project hosted auth configuration. Absent on the internal landing-page demo. */
   identityDataMode?: HostedAuthIdentityDataMode;
   identifierString?: ProjectIdentifierString;
   authRealm?: string;
@@ -123,6 +123,19 @@ export interface ProjectDocument {
   createdAt: Date;
   updatedAt: Date;
 }
+
+export type CustomerProjectDocument = ProjectDocument &
+  Required<
+    Pick<
+      ProjectDocument,
+      | "identityDataMode"
+      | "identifierString"
+      | "authRealm"
+      | "rpId"
+      | "signupHostedUrl"
+      | "signinHostedUrl"
+    >
+  >;
 
 export interface ApiKeyDocument {
   _id: string;
@@ -232,10 +245,7 @@ export async function ensureIndexes(db: Db) {
     ensureIndexStep("projects.identifierString", () =>
       db.collection<ProjectDocument>("projects").createIndex(
         { identifierString: 1 },
-        {
-          unique: true,
-          partialFilterExpression: { identifierString: { $type: "string" } },
-        },
+        { unique: true, sparse: true },
       ),
     ),
     ensureIndexStep("projects.customerId_createdAt", () =>
