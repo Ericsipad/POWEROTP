@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 
 import {
-  HostedAuthActiveTtlSecondsSchema,
+  HOSTED_AUTH_ACTIVE_TTL_SECONDS,
   HostedAuthActiveWindowSchema,
   HostedAuthMachineScopeSchema,
   HostedAuthPollTokenSchema,
@@ -105,19 +105,15 @@ export class HostedAuthRequestRepository {
     authRequestId: string;
     scope: HostedAuthMachineScope;
     pollToken: string;
-    requestExpiresInSeconds?: number;
     createdAt?: Date;
   }): Promise<Readonly<{ authRequestId: string; expiresAt: Date }>> {
     const authRequestId = HostedAuthRequestIdSchema.parse(input.authRequestId);
     const scope = HostedAuthMachineScopeSchema.parse(input.scope);
-    const requestExpiresInSeconds = HostedAuthActiveTtlSecondsSchema.parse(
-      input.requestExpiresInSeconds,
-    );
     const createdAt = input.createdAt ?? new Date();
     const window = HostedAuthActiveWindowSchema.parse({
       createdAtMs: createdAt.getTime(),
-      requestExpiresInSeconds,
-      expiresAtMs: createdAt.getTime() + requestExpiresInSeconds * 1_000,
+      expiresAtMs:
+        createdAt.getTime() + HOSTED_AUTH_ACTIVE_TTL_SECONDS * 1_000,
     });
     const expiresAt = new Date(window.expiresAtMs);
 

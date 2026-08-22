@@ -76,37 +76,25 @@ export const hostedAuthFailureReasons = [
 ] as const;
 export const HostedAuthFailureReasonSchema = z.enum(hostedAuthFailureReasons);
 
-export const HOSTED_AUTH_ACTIVE_TTL_SECONDS = {
-  minimum: 300,
-  default: 1_800,
-  maximum: 86_400,
-} as const;
+export const HOSTED_AUTH_ACTIVE_TTL_SECONDS = 600 as const;
 export const HOSTED_AUTH_RESULT_TTL_SECONDS = 180 as const;
-
-export const HostedAuthActiveTtlSecondsSchema = z
-  .number()
-  .int()
-  .min(HOSTED_AUTH_ACTIVE_TTL_SECONDS.minimum)
-  .max(HOSTED_AUTH_ACTIVE_TTL_SECONDS.maximum)
-  .default(HOSTED_AUTH_ACTIVE_TTL_SECONDS.default);
 
 const TimestampMillisecondsSchema = z.number().int().nonnegative();
 
 export const HostedAuthActiveWindowSchema = z
   .object({
     createdAtMs: TimestampMillisecondsSchema,
-    requestExpiresInSeconds: HostedAuthActiveTtlSecondsSchema,
     expiresAtMs: TimestampMillisecondsSchema,
   })
   .strict()
   .superRefine((window, context) => {
     if (
       window.expiresAtMs !==
-      window.createdAtMs + window.requestExpiresInSeconds * 1_000
+      window.createdAtMs + HOSTED_AUTH_ACTIVE_TTL_SECONDS * 1_000
     ) {
       context.addIssue({
         code: "custom",
-        message: "Active expiry must equal creation plus the selected TTL",
+        message: "Active expiry must equal creation plus ten minutes",
         path: ["expiresAtMs"],
       });
     }

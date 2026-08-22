@@ -93,10 +93,9 @@ opaque identifier and server-side project state, never on a guessable project-na
 5. The client backend polls the authoritative result. Success returns the same project-scoped user
    ID so the client can open the correct local account and issue its own session/refresh tokens.
 
-The active-request lifetime is client-selected within platform bounds. After any terminal outcome,
-the poll result is available idempotently for exactly three minutes. The poll-token hash and
-sensitive result payload are then deleted; a separate redacted retention record remains for audit
-and billing.
+The active request has one server-controlled ten-minute lifetime. After any terminal outcome, the
+poll result is available idempotently for exactly three minutes. The poll-token hash and sensitive
+result payload are then deleted; a separate redacted retention record remains for audit and billing.
 
 ## 3. Project card service controls
 
@@ -310,9 +309,8 @@ permanent identity mapping.
 - `hostedAuthRequests`: request ID, project, mode, flow, lifecycle state, selected method,
   browser-handle hash, poll-token hash, provider operation ID, internal binding/profile reference,
   created/active-expiry/completed/result-expiry timestamps, and encrypted result.
-- Active request lifetime is client-selected within platform bounds. Every terminal poll result
-  expires three minutes after `completedAt`. Poll-token hashes and result payloads are deleted with
-  the hot record.
+- Active requests expire ten minutes after creation. Every terminal poll result expires three
+  minutes after `completedAt`. Poll-token hashes and result payloads are deleted with the hot record.
 - Keep the schema minimal behind a repository interface so this store can move to an edge-compatible
   database without migrating the durable audit model.
 
@@ -383,8 +381,8 @@ identity ID, the pepper, or another project's binding.
 ### Client initiation and CSRF/state protection
 
 1. The client backend calls POWEROTP with its project API key and an idempotency key.
-2. The request chooses `signup` or `signin`, the client-requested active lifetime within platform
-   bounds, and no arbitrary return URL.
+2. The request chooses only `signup` or `signin` and no arbitrary return URL. POWEROTP assigns the
+   fixed ten-minute active lifetime.
 3. POWEROTP binds the request to the project's configured success/failure/recovery/restart URLs and
    returns `authRequestId`, `hostedUrl`, shown-once `pollToken`, `statusUrl`, and `expiresAt`.
 4. The client stores `pollToken` server-side and redirects the browser only to `hostedUrl`.
@@ -561,8 +559,8 @@ POWEROTP never issues or controls a client website session.
 
 ### Session separation
 
-- Hosted request session: client-selected active lifetime within bounds, one project/realm/flow,
-  unusable after terminal state except for the three-minute server poll-result window.
+- Hosted request session: fixed ten-minute active lifetime, one project/realm/flow, unusable after
+  terminal state except for the three-minute server poll-result window.
 - Credential-management grant: one-time and short-lived after fresh authentication/recovery, scoped
   only to adding/naming/revoking credentials in the current realm profile.
 - Remembered-account cookie: presentation only; never satisfies authentication.
@@ -631,8 +629,7 @@ Request:
 
 ```json
 {
-  "flow": "signup",
-  "requestExpiresInSeconds": 1800
+  "flow": "signup"
 }
 ```
 
@@ -648,8 +645,9 @@ Response:
 }
 ```
 
-`requestExpiresInSeconds` is client-selected from 300 through 86,400 seconds; default is 1,800.
-The response's poll token is server-only and never copied into the hosted URL or browser.
+POWEROTP sets `expiresAt` to exactly ten minutes after request creation. Clients cannot configure
+the active ceremony lifetime. The response's poll token is server-only and never copied into the
+hosted URL or browser.
 
 ### Poll authentication request
 
@@ -726,8 +724,8 @@ tokens.
 - Project creation requires immutable `identityDataMode`.
 - `GET|PATCH /v1/projects/{projectSlug}/auth-settings`
 - `GET|PUT /v1/projects/{projectSlug}/auth-return-urls`
-- Settings include signup/signin enablement, method policy, age/KYC/liveness/biometric policy,
-  request-lifetime bounds, and optional backend IP/CIDR allowlist.
+- Settings include signup/signin enablement, method policy, age/KYC/liveness/biometric policy, and
+  optional backend IP/CIDR allowlist.
 - Return settings contain exact HTTPS `signupReturnUrl`, `signinReturnUrl`, `failureReturnUrl`,
   `recoveryReturnUrl`, and `restartUrl`.
 
@@ -988,7 +986,7 @@ concurrent edits, template switching, and sign-up/sign-in modal isolation.
 
 Steps:
 
-- P6-S1: create-auth-request API, shown-once poll token, requested lifetime bounds, and idempotency.
+- P6-S1: create-auth-request API, shown-once poll token, fixed ten-minute lifetime, and idempotency.
 - P6-S2: realm/project/flow resolver and shared credential-card state-machine host.
 - P6-S3: Template 1 desktop/mobile mounting around the shared card host.
 - P6-S4: realm request cookie, browser handle, CSRF, and no-cache behavior.

@@ -7,7 +7,6 @@ import {
   HOSTED_AUTH_API_VERSION,
   HOSTED_AUTH_BROWSER_PROTOCOL_VERSION,
   HOSTED_AUTH_RESULT_TTL_SECONDS,
-  HostedAuthActiveTtlSecondsSchema,
   HostedAuthActiveWindowSchema,
   HostedAuthApiVersionSchema,
   HostedAuthBrowserProtocolVersionSchema,
@@ -76,32 +75,16 @@ describe("hosted-auth compatibility versions and stable errors", () => {
 });
 
 describe("hosted-auth active and terminal-result TTLs", () => {
-  it("accepts active lifetime limits and supplies the canonical default", () => {
-    assert.equal(
-      HostedAuthActiveTtlSecondsSchema.parse(undefined),
-      HOSTED_AUTH_ACTIVE_TTL_SECONDS.default,
-    );
-    assert.equal(
-      HostedAuthActiveTtlSecondsSchema.safeParse(
-        HOSTED_AUTH_ACTIVE_TTL_SECONDS.minimum - 1,
-      ).success,
-      false,
-    );
-    assert.equal(
-      HostedAuthActiveTtlSecondsSchema.safeParse(
-        HOSTED_AUTH_ACTIVE_TTL_SECONDS.maximum + 1,
-      ).success,
-      false,
-    );
+  it("uses one server-controlled ten-minute active lifetime", () => {
+    assert.equal(HOSTED_AUTH_ACTIVE_TTL_SECONDS, 600);
   });
 
   it("requires exact active and three-minute result expiries", () => {
     const createdAtMs = 1_700_000_000_000;
     const active = {
       createdAtMs,
-      requestExpiresInSeconds: HOSTED_AUTH_ACTIVE_TTL_SECONDS.minimum,
       expiresAtMs:
-        createdAtMs + HOSTED_AUTH_ACTIVE_TTL_SECONDS.minimum * 1_000,
+        createdAtMs + HOSTED_AUTH_ACTIVE_TTL_SECONDS * 1_000,
     };
     assert.deepEqual(HostedAuthActiveWindowSchema.parse(active), active);
     assert.equal(

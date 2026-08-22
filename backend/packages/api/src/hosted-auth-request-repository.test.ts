@@ -116,7 +116,7 @@ describe("HostedAuthRequestRepository", () => {
     ]);
   });
 
-  it("enforces the default and exact active-TTL boundaries", async () => {
+  it("enforces the fixed ten-minute active-TTL boundary", async () => {
     const createdAt = new Date("2026-08-21T23:00:00.000Z");
     const { repository: requests, collection } = repository();
     const created = await requests.create({
@@ -126,7 +126,7 @@ describe("HostedAuthRequestRepository", () => {
       createdAt,
     });
 
-    assert.equal(created.expiresAt.getTime(), createdAt.getTime() + 1_800_000);
+    assert.equal(created.expiresAt.getTime(), createdAt.getTime() + 600_000);
     assert.equal(
       (
         await requests.poll({
@@ -152,31 +152,6 @@ describe("HostedAuthRequestRepository", () => {
       "expired",
     );
     assert.equal(collection.documents.size, 0);
-  });
-
-  it("accepts only the 300 through 86,400 second active TTL range", async () => {
-    for (const requestExpiresInSeconds of [300, 86_400]) {
-      const { repository: requests } = repository();
-      await assert.doesNotReject(
-        requests.create({
-          authRequestId,
-          scope,
-          pollToken,
-          requestExpiresInSeconds,
-        }),
-      );
-    }
-    for (const requestExpiresInSeconds of [299, 86_401]) {
-      const { repository: requests } = repository();
-      await assert.rejects(
-        requests.create({
-          authRequestId,
-          scope,
-          pollToken,
-          requestExpiresInSeconds,
-        }),
-      );
-    }
   });
 
   it("persists only the poll-token hash and verifies project, flow, and token", async () => {
@@ -266,7 +241,6 @@ describe("HostedAuthRequestRepository", () => {
       authRequestId,
       scope,
       pollToken,
-      requestExpiresInSeconds: 300,
       createdAt,
     });
     const first = {
@@ -287,13 +261,12 @@ describe("HostedAuthRequestRepository", () => {
       authRequestId,
       scope,
       pollToken,
-      requestExpiresInSeconds: 300,
       createdAt,
     });
     assert.equal(
       await second.publishTerminal({
         ...first,
-        completedAt: new Date(createdAt.getTime() + 300_000),
+        completedAt: new Date(createdAt.getTime() + 600_000),
       }),
       false,
     );

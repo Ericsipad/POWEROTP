@@ -24,6 +24,7 @@ Do not mark a phase/step implemented, deployed, remote-green, or certified witho
 - P2-S1 — completed 2026-08-21 22:40 UTC, production Supabase identity schema and RLS
 - P2-S1 TLS correction — 2026-08-21 22:56 UTC, verified pooler login and CA trust
 - P2-S2 — completed 2026-08-22 00:49 UTC, MongoDB hot auth-request repository
+- P2-S2 timeout correction — 2026-08-22 01:02 UTC, fixed ten-minute active ceremony
 - P2-S3 through P15-S6 — not started
 
 Update this index after every execution step with a link to that step's latest timestamped entry.
@@ -1053,3 +1054,55 @@ Next step:
 - P2-S3 — add the separate durable redacted auth-request retention database and enforce
   write-before-publish without beginning project bindings, wrapped keys, KMS integration, identity
   sagas, providers, or runtime HTTP handlers.
+
+## 2026-08-22 01:02 UTC — P2-S2 correction: fixed active ceremony timeout
+
+Status and correction:
+
+- The owner rejected exposing active-request lifetime as a client-selected setting. The canonical
+  active hosted sign-up/sign-in ceremony now has one server-controlled ten-minute lifetime.
+- Removed the 300–86,400-second range, 1,800-second default, and
+  `requestExpiresInSeconds` repository/API-plan input. Older entries above remain historical and are
+  superseded by this correction.
+- The independent terminal-result rule is unchanged: completion replaces the active expiry with
+  `completedAt + 180 seconds`, after which the hot record, poll-token hash, and encrypted result are
+  unavailable and deleted.
+
+Implemented changes:
+
+- The P1-S4 executable contract now exposes `HOSTED_AUTH_ACTIVE_TTL_SECONDS = 600` and validates
+  `expiresAt = createdAt + 600 seconds` without accepting a caller-selected lifetime.
+- The P2-S2 repository no longer accepts a lifetime argument and always writes the fixed active
+  expiry. Tests cover availability immediately before the ten-minute boundary, unavailability at
+  the exact boundary, terminal replacement of that expiry, and rejection of publication at active
+  expiry.
+- The canonical create-request plan payload now contains only `flow`; project settings and the P6-S1
+  roadmap no longer advertise lifetime configuration.
+- Runtime HTTP handlers still do not exist. Mapping a missing or expired request to its final stable
+  HTTP response remains owned by P6 and was not introduced in this correction.
+
+Security and compatibility impact:
+
+- Clients cannot prolong abandoned or replayable ceremonies. Every incomplete request is bounded to
+  ten minutes under server policy.
+- Completed results remain independent of how much active time was unused and are retained for
+  exactly three minutes from completion.
+- No database migration, provider credential, `.env`, Supabase, Passport, or BotBlocker change is
+  required.
+
+Focused verification:
+
+- `npm run test -w @powerotp/contracts` — passed (262 tests).
+- `npm run typecheck -w @powerotp/contracts` — passed.
+- `npm run build -w @powerotp/contracts` — passed and refreshed the API's local workspace output.
+- `npm run test -w @powerotp/api` — passed (415 tests).
+- `npm run typecheck -w @powerotp/api` — passed.
+
+Commit, push, and remote check:
+
+- The correction commit contains this entry. Its final hash, push confirmation, and remote Verify
+  result are reported after push.
+
+Next step:
+
+- P2-S3 remains the next dependency step.
