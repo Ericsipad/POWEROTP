@@ -46,6 +46,15 @@ class MemoryWrappedKeyCollection {
     this.documents.set(filter._id, structuredClone(update.$setOnInsert));
     return { acknowledged: true, upsertedCount: 1 };
   }
+
+  async deleteOne(filter: { _id: string; status?: string }) {
+    const document = this.documents.get(filter._id);
+    if (!document || (filter.status && document.status !== filter.status)) {
+      return { acknowledged: true, deletedCount: 0 };
+    }
+    this.documents.delete(filter._id);
+    return { acknowledged: true, deletedCount: 1 };
+  }
 }
 
 class MemoryKeyAuthority implements HostedAuthIdentityKeyAuthority {
@@ -223,6 +232,21 @@ describe("hosted-auth per-person envelope encryption", () => {
       }),
       /KMS decrypt denied/,
     );
+  });
+
+  it("removes an active wrapped key when pending identity creation is compensated", async () => {
+    const fixture = testService();
+    await fixture.service.encryptField({
+      hostedPersonIdentityId: personA,
+      fieldName: "email",
+      schemaVersion: 1,
+      purpose: "contact_authentication",
+      plaintext: "person@example.test",
+    });
+
+    await fixture.service.compensatePendingIdentityKey(personA);
+
+    assert.equal(fixture.collection.documents.size, 0);
   });
 
   it("keeps Supabase ciphertext and MongoDB wrapped keys independently insufficient", async () => {

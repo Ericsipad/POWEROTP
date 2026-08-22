@@ -241,6 +241,14 @@ export class HostedAuthIdentityEncryptionService {
     }
   }
 
+  async compensatePendingIdentityKey(
+    hostedPersonIdentityId: string,
+  ): Promise<void> {
+    await this.keys.deleteActive(
+      HostedPersonIdentityIdSchema.parse(hostedPersonIdentityId),
+    );
+  }
+
   private async loadOrCreateDek(
     hostedPersonIdentityIdInput: string,
   ): Promise<Buffer> {

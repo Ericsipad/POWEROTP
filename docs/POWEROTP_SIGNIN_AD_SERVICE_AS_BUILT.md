@@ -29,7 +29,8 @@ Do not mark a phase/step implemented, deployed, remote-green, or certified witho
 - P2-S4 — completed 2026-08-22 01:28 UTC, durable hosted-auth supporting schemas
 - P2-S5 — completed 2026-08-22 01:38 UTC, per-person envelope encryption and KMS
 - P2-S6 — completed 2026-08-22 01:48 UTC, KMS-backed pairwise and lookup derivation rotation
-- P2-S7 through P15-S6 — not started
+- P2-S7 — completed 2026-08-22 02:07 UTC, person/profile/contact creation saga and compensation
+- P2-S8 through P15-S6 — not started
 
 Update this index after every execution step with a link to that step's latest timestamped entry.
 
@@ -1395,3 +1396,76 @@ Next step:
 
 - P2-S7 — add the person/profile/contact creation saga and compensation while preserving the
   P2-S1 through P2-S6 store, custody, cryptographic, immutable-binding, and rotation boundaries.
+
+## 2026-08-22 02:07 UTC — P2-S7: person/profile/contact creation saga and compensation
+
+Status and scope:
+
+- P2-S7 is complete. It adds only pending person, realm-profile, encrypted/contact-row creation,
+  idempotent duplicate reuse, transactional rollback, and wrapped-key compensation.
+- Reconciliation workers, provider adapters, MCP behavior, runtime HTTP handlers, `.env`, Passport,
+  and BotBlocker remain unchanged.
+
+Implemented data and behavior:
+
+- Added a custody-discriminated creation saga that canonicalizes email or E.164 phone input, derives
+  the current and retained prior mode/channel lookup candidates through the P2-S6 KMS service, and
+  reuses an existing same-mode contact before creating any new identity or encryption material.
+- New private person/profile IDs and WebAuthn user handles use 256 random bits. The profile RP ID is
+  selected only from the immutable custody mode: `authx.powerotp.com` for `powerotp_pii` and
+  `authz.powerotp.com` for `didit_pii`.
+- `powerotp_pii` uses the P2-S5 per-person envelope service and persists only ciphertext, nonce,
+  authentication tag, key version, purpose, lookup MAC/version, and masked destination in Supabase.
+  `didit_pii` persists no recoverable contact or encrypted attribute and requires an opaque
+  provider contact reference for the later real adapter to supply.
+- Person, profile, optional encrypted attribute, and contact rows are inserted in one PostgreSQL
+  transaction. Any row failure rolls back the complete Supabase unit.
+- The mode/channel/version/hash uniqueness constraint resolves concurrent duplicate creation to the
+  canonical persisted identity. A losing `powerotp_pii` attempt deletes its newly created active
+  wrapped DEK from the separate retention store. Compensation failure is surfaced as an aggregate
+  failure rather than hidden.
+- Equal contact values in different custody modes create separate person roots. This step does not
+  derive or act on the global contact-link domain and never merges person roots from contact
+  equality alone.
+
+Affected files:
+
+- `backend/packages/api/src/hosted-auth-identity-saga.ts`
+- `backend/packages/api/src/hosted-auth-identity-saga.test.ts`
+- `backend/packages/api/src/hosted-auth-identity-repository.ts`
+- `backend/packages/api/src/hosted-auth-identity-repository.test.ts`
+- `backend/packages/api/src/hosted-auth-identity-encryption.ts`
+- `backend/packages/api/src/hosted-auth-identity-encryption.test.ts`
+- `backend/packages/api/src/hosted-auth-durable-repository.ts`
+- `docs/POWEROTP_SIGNIN_AD_SERVICE_AS_BUILT.md`
+
+Security, compatibility, and migration impact:
+
+- Contact plaintext is transient and enters only the custody-compatible keyed derivation/encryption
+  boundary. It is absent from saga results, lookup rows, and the Didit-custody persistence path.
+- Lookup rotation remains additive: retained prior versions prevent duplicate roots after rotation,
+  while new contacts persist only the current version. Project bindings and pairwise IDs are not
+  created or changed by this saga.
+- The existing P2-S1/P2-S6 schema and constraints are sufficient; no migration, environment value,
+  provider credential, route, public/client response, or deployment configuration changed.
+
+Focused verification:
+
+- `npm run test -w @powerotp/api` — passed (448 tests), including success, idempotency, rotation
+  duplicate prevention, custody separation, no equality-based cross-mode merge, SQL rollback,
+  concurrent-loser cleanup, partial failure, and compensation-failure coverage.
+- `npm run lint -w @powerotp/api` — passed.
+- `npm run build -w @powerotp/api` — passed.
+- No full-monorepo verification was run locally; remote Verify remains the complete pushed check.
+
+Commit, push, and remote check:
+
+- The coherent P2-S7 commit contains this entry. Its final hash, push confirmation, and one remote
+  Verify result check are reported in the post-push session handoff.
+
+Known limits and next step:
+
+- Provider-owned Didit contact creation/validation remains assigned to Phase 4; P2-S7 accepts only
+  its opaque persistence reference and does not call a provider.
+- P2-S8 — add reconciliation workers and orphan detection for pending/partial identity artifacts
+  without beginning P2-S9 retention/deletion/Didit cleanup orchestration.

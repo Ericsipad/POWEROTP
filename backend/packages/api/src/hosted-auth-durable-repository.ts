@@ -1,4 +1,5 @@
 import type { Collection, Db } from "mongodb";
+import { HostedPersonIdentityIdSchema } from "@powerotp/contracts";
 
 import {
   HostedAuthSecurityEventRecordSchema,
@@ -96,7 +97,7 @@ export class ProjectIdentityBindingRepository {
 
 type WrappedKeyCollection = Pick<
   Collection<WrappedIdentityKeyDocument>,
-  "findOne" | "updateOne"
+  "deleteOne" | "findOne" | "updateOne"
 >;
 
 export class WrappedIdentityKeyRepository {
@@ -146,6 +147,14 @@ export class WrappedIdentityKeyRepository {
       throw new Error("Hosted-auth identity key is unavailable");
     }
     return { outcome: "existing", record: existing };
+  }
+
+  async deleteActive(hostedPersonIdentityId: string): Promise<boolean> {
+    const result = await this.keys.deleteOne({
+      _id: HostedPersonIdentityIdSchema.parse(hostedPersonIdentityId),
+      status: "active",
+    });
+    return result.deletedCount === 1;
   }
 }
 
