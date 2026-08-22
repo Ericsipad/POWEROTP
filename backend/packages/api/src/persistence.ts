@@ -1,4 +1,9 @@
-import type { AccountClass, VerificationType } from "@powerotp/contracts";
+import type {
+  AccountClass,
+  HostedAuthIdentityDataMode,
+  ProjectIdentifierString,
+  VerificationType,
+} from "@powerotp/contracts";
 import type { Db } from "mongodb";
 
 import { ensureAccountingIndexes } from "./accounting-persistence.js";
@@ -87,6 +92,13 @@ export interface ProjectDocument {
   customerId: string;
   name: string;
   slug: string;
+  /** Absent only on projects created before hosted-auth project configuration shipped. */
+  identityDataMode?: HostedAuthIdentityDataMode;
+  identifierString?: ProjectIdentifierString;
+  authRealm?: string;
+  rpId?: string;
+  signupHostedUrl?: string;
+  signinHostedUrl?: string;
   enabledMethods: VerificationType[];
   allowedOrigins: string[];
   callbackUrl?: string;
@@ -216,6 +228,15 @@ export async function ensureIndexes(db: Db) {
     ),
     ensureIndexStep("projects.slug", () =>
       db.collection<ProjectDocument>("projects").createIndex({ slug: 1 }, { unique: true }),
+    ),
+    ensureIndexStep("projects.identifierString", () =>
+      db.collection<ProjectDocument>("projects").createIndex(
+        { identifierString: 1 },
+        {
+          unique: true,
+          partialFilterExpression: { identifierString: { $type: "string" } },
+        },
+      ),
     ),
     ensureIndexStep("projects.customerId_createdAt", () =>
       db.collection<ProjectDocument>("projects").createIndex({ customerId: 1, createdAt: -1 }),

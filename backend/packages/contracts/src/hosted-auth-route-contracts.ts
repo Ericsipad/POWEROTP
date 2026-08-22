@@ -1,7 +1,10 @@
 import { z } from "zod";
 
 import { HostedAuthRealmSchema } from "./hosted-auth-boundaries.js";
-import { HostedAuthRequestIdSchema } from "./hosted-auth-identifiers.js";
+import {
+  HostedAuthRequestIdSchema,
+  ProjectIdentifierStringSchema,
+} from "./hosted-auth-identifiers.js";
 import {
   HostedAuthFlowSchema,
   HostedAuthMachineScopeSchema,
@@ -238,7 +241,7 @@ export const HostedAuthHostedEntrySchema = z
     realm: HostedAuthRealmSchema,
     flow: HostedAuthFlowSchema,
     projectSlug: z.string().min(1).max(100),
-    identifierString: z.string().min(32).max(256),
+    identifierString: ProjectIdentifierStringSchema,
   })
   .strict();
 

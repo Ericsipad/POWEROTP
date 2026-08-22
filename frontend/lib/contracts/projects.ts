@@ -1,5 +1,7 @@
 import type { VerificationType } from "./verification";
 
+export type IdentityDataMode = "powerotp_pii" | "didit_pii";
+
 export interface Project {
   id: string;
   name: string;
@@ -17,6 +19,12 @@ export interface Project {
   brandLogoUrl?: string;
   brandReplyToEmail?: string;
   brandHtmlTemplate?: string;
+  identityDataMode?: IdentityDataMode;
+  identifierString?: string;
+  authRealm?: string;
+  rpId?: string;
+  signupHostedUrl?: string;
+  signinHostedUrl?: string;
   stats: {
     total: number;
     succeeded: number;

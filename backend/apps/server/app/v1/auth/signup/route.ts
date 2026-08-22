@@ -49,6 +49,7 @@ export const POST = apiRoute(async (request) => {
 
   const created = await projects.create(userId, {
     name: "My Project",
+    identityDataMode: input.identityDataMode,
     enabledMethods: ["call_reachability", "voice_code", "voice_challenge", "sms_code"],
     allowedOrigins: [],
   });

@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import {
   BrandHtmlTemplateSchema,
   ChallengeSchema,
+  CreateProjectSchema,
   CreateVerificationSchema,
   CustomerRegistrationSchema,
   InteractionTokenClaimsSchema,
@@ -150,9 +151,44 @@ describe("Phase 2 contracts", () => {
       SignupSchema.safeParse({
         email: "customer@example.com",
         password: "Strong-password1",
+        identityDataMode: "powerotp_pii",
       }).success,
       true,
     );
+  });
+
+  it("requires an exact identity data mode for every project creation path", () => {
+    assert.equal(
+      CreateProjectSchema.safeParse({ name: "Project", identityDataMode: "powerotp_pii" })
+        .success,
+      true,
+    );
+    assert.equal(CreateProjectSchema.safeParse({ name: "Project" }).success, false);
+    assert.equal(
+      SignupSchema.safeParse({
+        email: "customer@example.com",
+        password: "Strong-password1",
+        identityDataMode: "other",
+      }).success,
+      false,
+    );
+  });
+
+  it("rejects attempts to patch immutable hosted-auth project fields", () => {
+    for (const field of [
+      "identityDataMode",
+      "identifierString",
+      "authRealm",
+      "rpId",
+      "signupHostedUrl",
+      "signinHostedUrl",
+    ]) {
+      assert.equal(
+        UpdateProjectSchema.safeParse({ name: "Renamed project", [field]: "changed" })
+          .success,
+        false,
+      );
+    }
   });
 
   it("rejects malformed HTTPS URLs without throwing", () => {

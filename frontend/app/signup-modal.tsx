@@ -23,13 +23,18 @@ export function SignupModal({ onClose }: SignupModalProps) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [identityDataMode, setIdentityDataMode] = useState("");
   const [step, setStep] = useState<Step>("form");
   const [error, setError] = useState("");
   const [result, setResult] = useState<SignupResponse>();
 
   const passwordsMatch = password.length > 0 && password === confirmPassword;
   const allRequirementsMet = PASSWORD_REQUIREMENTS.every((requirement) => requirement.test(password));
-  const canSubmit = allRequirementsMet && passwordsMatch && email.trim().length > 0;
+  const canSubmit =
+    allRequirementsMet &&
+    passwordsMatch &&
+    email.trim().length > 0 &&
+    identityDataMode.length > 0;
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -41,7 +46,12 @@ export function SignupModal({ onClose }: SignupModalProps) {
       const response = await apiFetch("/v1/auth/signup", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ email, password, referralCode: referralCodeFromCookie(document.cookie) }),
+        body: JSON.stringify({
+          email,
+          password,
+          identityDataMode,
+          referralCode: referralCodeFromCookie(document.cookie),
+        }),
       });
       const data = (await response.json().catch(() => undefined)) as
         | (SignupResponse & { error?: string })
@@ -114,6 +124,19 @@ export function SignupModal({ onClose }: SignupModalProps) {
                   required
                 />
               </label>
+              <label className="field">
+                Identity data custody for your first project
+                <select
+                  value={identityDataMode}
+                  onChange={(event) => setIdentityDataMode(event.target.value)}
+                  required
+                >
+                  <option value="" disabled>Select a permanent custody mode</option>
+                  <option value="powerotp_pii">POWEROTP stores encrypted contact data</option>
+                  <option value="didit_pii">Didit stores contact data</option>
+                </select>
+              </label>
+              <p>This choice sets the project&apos;s authentication realm and cannot be changed.</p>
               <ul className="passwordChecklist">
                 {PASSWORD_REQUIREMENTS.map((requirement) => {
                   const met = requirement.test(password);

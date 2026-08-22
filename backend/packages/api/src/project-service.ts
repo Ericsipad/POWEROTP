@@ -2,17 +2,23 @@ import type {
   BotBlockerProjectSetup,
   CreateProject,
   Project,
+  ProjectCreated,
   UpdateProject,
   VerificationType,
 } from "@powerotp/contracts";
 import {
   DEFAULT_BOTBLOCKER_SITE_CONFIGURATION,
+  ProjectIdentifierStringSchema,
 } from "@powerotp/contracts";
 import type { Db, MongoClient } from "mongodb";
 
 import type { BotBlockerSiteDocument } from "./botblocker-site-persistence.js";
 import { createBotBlockerWebhookId } from "./botblocker-webhook.js";
 import type { ProductionConfig } from "./config.js";
+import {
+  HOSTED_AUTH_DEPLOYMENTS,
+  type HostedAuthDeploymentEnvironment,
+} from "./hosted-auth-realms.js";
 import {
   PLATFORM_ADMIN_USER_ID,
   type ApiKeyDocument,
@@ -64,6 +70,7 @@ export class ProjectService {
     db: Db,
     private readonly client: Pick<MongoClient, "withSession">,
     private readonly config: ProductionConfig,
+    private readonly hostedAuthEnvironment: HostedAuthDeploymentEnvironment,
     private readonly stats?: ProjectStatsProvider,
   ) {
     this.#projects = db.collection<ProjectDocument>("projects");
@@ -75,11 +82,33 @@ export class ProjectService {
 
   async create(customerId: string, input: CreateProject, ip?: string) {
     const now = new Date();
+    const slug = createSlug(input.name);
+    const identifierString = ProjectIdentifierStringSchema.parse(
+      `pai_${createSecret()}`,
+    );
+    const realm =
+      HOSTED_AUTH_DEPLOYMENTS[this.hostedAuthEnvironment][input.identityDataMode];
     const project: ProjectDocument = {
       _id: createId("prj"),
       customerId,
       name: input.name,
-      slug: createSlug(input.name),
+      slug,
+      identityDataMode: input.identityDataMode,
+      identifierString,
+      authRealm: realm.origin,
+      rpId: realm.rpId,
+      signupHostedUrl: hostedAuthEntryUrl(
+        realm.origin,
+        "signup",
+        slug,
+        identifierString,
+      ),
+      signinHostedUrl: hostedAuthEntryUrl(
+        realm.origin,
+        "signin",
+        slug,
+        identifierString,
+      ),
       enabledMethods: input.enabledMethods,
       allowedOrigins: input.allowedOrigins,
       callbackUrl: input.callbackUrl,
@@ -362,7 +391,7 @@ export class ProjectService {
   #toNewProjectResponse(
     project: ProjectDocument,
     key: ApiKeyDocument,
-  ): Project {
+  ): ProjectCreated["project"] {
     return {
       id: project._id,
       name: project.name,
@@ -382,6 +411,12 @@ export class ProjectService {
       brandLogoUrl: project.brandLogoUrl,
       brandReplyToEmail: project.brandReplyToEmail,
       brandHtmlTemplate: project.brandHtmlTemplate,
+      identityDataMode: project.identityDataMode!,
+      identifierString: project.identifierString!,
+      authRealm: project.authRealm!,
+      rpId: project.rpId!,
+      signupHostedUrl: project.signupHostedUrl!,
+      signinHostedUrl: project.signinHostedUrl!,
       stats: {
         total: 0,
         succeeded: 0,
@@ -415,6 +450,12 @@ export class ProjectService {
       brandLogoUrl: project.brandLogoUrl,
       brandReplyToEmail: project.brandReplyToEmail,
       brandHtmlTemplate: project.brandHtmlTemplate,
+      identityDataMode: project.identityDataMode,
+      identifierString: project.identifierString,
+      authRealm: project.authRealm,
+      rpId: project.rpId,
+      signupHostedUrl: project.signupHostedUrl,
+      signinHostedUrl: project.signinHostedUrl,
       stats: this.stats
         ? await this.stats.projectStats(project._id)
         : { total: 0, succeeded: 0, failed: 0, byType: { ...emptyByType } },
@@ -464,4 +505,16 @@ export class ProjectService {
     }
     return secret;
   }
+}
+
+function hostedAuthEntryUrl(
+  origin: string,
+  flow: "signup" | "signin",
+  projectSlug: string,
+  identifierString: string,
+): string {
+  return new URL(
+    `/${flow}/${encodeURIComponent(projectSlug)}/${encodeURIComponent(identifierString)}`,
+    origin,
+  ).toString();
 }

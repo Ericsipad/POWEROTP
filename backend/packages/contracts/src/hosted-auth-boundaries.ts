@@ -15,6 +15,60 @@ export const HostedAuthIdentityDataModeSchema = z.enum(
   hostedAuthIdentityDataModes,
 );
 
+export const HOSTED_AUTH_DEPLOYMENTS = {
+  production: {
+    powerotp_pii: {
+      hostname: "authx.powerotp.com",
+      origin: "https://authx.powerotp.com",
+      rpId: "authx.powerotp.com",
+    },
+    didit_pii: {
+      hostname: "authz.powerotp.com",
+      origin: "https://authz.powerotp.com",
+      rpId: "authz.powerotp.com",
+    },
+  },
+  staging: {
+    powerotp_pii: {
+      hostname: "authx.staging.powerotp.com",
+      origin: "https://authx.staging.powerotp.com",
+      rpId: "authx.staging.powerotp.com",
+    },
+    didit_pii: {
+      hostname: "authz.staging.powerotp.com",
+      origin: "https://authz.staging.powerotp.com",
+      rpId: "authz.staging.powerotp.com",
+    },
+  },
+  development: {
+    powerotp_pii: {
+      hostname: "authx.localhost",
+      origin: "http://authx.localhost",
+      rpId: "authx.localhost",
+    },
+    didit_pii: {
+      hostname: "authz.localhost",
+      origin: "http://authz.localhost",
+      rpId: "authz.localhost",
+    },
+  },
+  test: {
+    powerotp_pii: {
+      hostname: "authx.test",
+      origin: "https://authx.test",
+      rpId: "authx.test",
+    },
+    didit_pii: {
+      hostname: "authz.test",
+      origin: "https://authz.test",
+      rpId: "authz.test",
+    },
+  },
+} as const;
+
+export type HostedAuthDeploymentEnvironment =
+  keyof typeof HOSTED_AUTH_DEPLOYMENTS;
+
 const PowerOtpPiiRealmSchema = z
   .object({
     identityDataMode: z.literal("powerotp_pii"),
@@ -43,13 +97,13 @@ export const HostedAuthRealmSchema = z.discriminatedUnion("identityDataMode", [
 export const hostedAuthRealms = {
   powerotp_pii: {
     identityDataMode: "powerotp_pii",
-    origin: "https://authx.powerotp.com",
-    rpId: "authx.powerotp.com",
+    origin: HOSTED_AUTH_DEPLOYMENTS.production.powerotp_pii.origin,
+    rpId: HOSTED_AUTH_DEPLOYMENTS.production.powerotp_pii.rpId,
   },
   didit_pii: {
     identityDataMode: "didit_pii",
-    origin: "https://authz.powerotp.com",
-    rpId: "authz.powerotp.com",
+    origin: HOSTED_AUTH_DEPLOYMENTS.production.didit_pii.origin,
+    rpId: HOSTED_AUTH_DEPLOYMENTS.production.didit_pii.rpId,
   },
 } as const;
 

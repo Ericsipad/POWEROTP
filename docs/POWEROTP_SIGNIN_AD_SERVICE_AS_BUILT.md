@@ -38,7 +38,8 @@ Do not mark a phase/step implemented, deployed, remote-green, or certified witho
 - P3-S0 runtime correction — 2026-08-22 03:51 UTC, single realm authority across runtimes
 - P3-S0 health correction — 2026-08-22 04:02 UTC, direct host-proxy health response
 - P3-S0 ingress correction — 2026-08-22 04:10 UTC, explicit authority-aware health route
-- P3-S1 through P15-S6 — not started
+- P3-S1 — completed 2026-08-22 04:23 UTC, immutable project custody/realm identifiers and hosted URLs
+- P3-S2 through P15-S6 — not started
 
 Update this index after every execution step with a link to that step's latest timestamped entry.
 
@@ -1926,3 +1927,68 @@ Commit, push, and remote check:
 Next step:
 
 - P3-S1 remains unchanged.
+
+## 2026-08-22 04:23 UTC — P3-S1: immutable project realm configuration
+
+Status and scope:
+
+- P3-S1 is complete. Every newly created project now requires an explicit immutable
+  `identityDataMode`, receives a canonical 256-bit opaque `identifierString`, and stores its exact
+  environment-specific auth realm, RP ID, and generated signup/signin hosted entry URLs.
+- P3-S2 return URLs and assurance settings, hosted credential handlers, provider adapters, Passport,
+  MCP, BotBlocker behavior, and `.env` remain unchanged.
+
+Implemented contracts, data, and behavior:
+
+- Added the branded `pai_` project authentication identifier and reused it in the hosted-entry route
+  contract. Project creation accepts only `powerotp_pii` or `didit_pii`; project PATCH is strict and
+  rejects all hosted-auth immutable fields, including when a mutable field is also present.
+- Centralized the P3-S0 deployment realm map in the shared hosted-auth boundary and API realm module.
+  Production remains exactly `powerotp_pii` → `https://authx.powerotp.com` / `authx.powerotp.com`
+  and `didit_pii` → `https://authz.powerotp.com` / `authz.powerotp.com`; staging, development, and
+  test projects receive only their matching environment realm.
+- Project creation persists `identityDataMode`, `identifierString`, `authRealm`, `rpId`,
+  `signupHostedUrl`, and `signinHostedUrl` in the same transaction as the existing project/API-key/
+  BotBlocker setup. A partial unique MongoDB index enforces identifier uniqueness while permitting
+  pre-P3-S1 legacy documents to remain untouched.
+- Both the dashboard create-project form and rapid account-signup form require the custody choice.
+  The rapid signup route passes that exact choice into creation rather than assigning a hidden
+  default. General project responses keep hosted-auth fields optional only for legacy rows; the
+  create response requires all six fields.
+
+Authorization, immutability, and migration impact:
+
+- Existing customer-session/CSRF project-create authorization and owner-scoped update filter remain
+  authoritative. Focused tests confirm another customer cannot update a project.
+- Names remain mutable branding while slugs, identifiers, custody mode, realm/RP ID, and generated
+  hosted paths remain unchanged. The opaque identifier, not the readable slug, is the future hosted
+  resolver authority.
+- Existing projects are not silently assigned a custody mode or moved between realms. Their optional
+  response fields preserve the Phase 14 explicit legacy activation/migration boundary.
+
+Findings and corrections:
+
+- Sharing the P3-S0 realm map through the contracts package exposed that the server test runtime also
+  resolves that ESM package through its CommonJS condition. Added the package's existing ESM entry as
+  its `require` export and kept the app-facing realm module as a thin re-export of the API-owned
+  implementation; this preserves one realm authority without duplicating deployment literals.
+
+Focused verification:
+
+- Contracts tests passed (264), including required exact modes, malformed-mode rejection, strict
+  immutable PATCH rejection, and canonical/cross-purpose `pai_` identifier checks.
+- API tests passed (456), including two-mode production realm/RP mapping, generated URL shape,
+  identifier uniqueness, update immutability, and cross-customer denial.
+- `npm run test -w @powerotp/backend` passed (25), preserving hosted realm health/proxy isolation.
+- `npm run build` in `backend` passed for contracts, signing, MCP, API, and the Next.js server.
+- `npm run build` in `frontend` passed.
+
+Commit, push, and remote check:
+
+- The coherent P3-S1 change is ready for commit and push. Final commit, push, and one remote Verify/
+  deployment result check are reported in the post-push handoff.
+
+Next step:
+
+- P3-S2 — add exact signup/signin/failure/recovery/restart return URLs and method/assurance settings,
+  preserving the immutable P3-S1 custody and realm configuration.

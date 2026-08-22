@@ -40,6 +40,13 @@ export const ProjectIdentityBindingIdSchema =
     "project identity binding ID",
   );
 
+/** Immutable project resolver embedded in hosted signup and signin paths. */
+export const ProjectIdentifierStringSchema =
+  opaque256Schema<"ProjectIdentifierString">(
+    "pai",
+    "project authentication identifier",
+  );
+
 /**
  * Stable pairwise subject exposed only to its owning project. The value is the
  * canonical encoding of the versioned project/person keyed derivation.
@@ -89,6 +96,9 @@ export type HostedPersonIdentityId = z.infer<
 export type HostedAuthProfileId = z.infer<typeof HostedAuthProfileIdSchema>;
 export type ProjectIdentityBindingId = z.infer<
   typeof ProjectIdentityBindingIdSchema
+>;
+export type ProjectIdentifierString = z.infer<
+  typeof ProjectIdentifierStringSchema
 >;
 export type ProjectUserId = z.infer<typeof ProjectUserIdSchema>;
 export type PotpDiditId = z.infer<typeof PotpDiditIdSchema>;

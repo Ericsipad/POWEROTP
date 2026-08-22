@@ -97,6 +97,7 @@ export default function DashboardPage() {
       method: "POST",
       body: JSON.stringify({
         name: form.get("name"),
+        identityDataMode: form.get("identityDataMode"),
         callbackUrl: callbackUrl || undefined,
         allowedOrigins: String(form.get("allowedOrigins") ?? "")
           .split(/[\n,]/)
@@ -216,6 +217,15 @@ export default function DashboardPage() {
               Name
               <input name="name" minLength={2} required />
             </label>
+            <label className="field">
+              Identity data custody
+              <select name="identityDataMode" required defaultValue="">
+                <option value="" disabled>Select a permanent custody mode</option>
+                <option value="powerotp_pii">POWEROTP stores encrypted contact data</option>
+                <option value="didit_pii">Didit stores contact data</option>
+              </select>
+            </label>
+            <p>This choice sets the project&apos;s authentication realm and cannot be changed.</p>
             <div className="methodOptions">
               {methods.map((method) => (
                 <label key={method.id}>

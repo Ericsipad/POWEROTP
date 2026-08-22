@@ -5,6 +5,7 @@ import {
   BotBlockerProjectSetupSchema,
   ProjectSchema,
 } from "./projects.js";
+import { HostedAuthIdentityDataModeSchema } from "./hosted-auth-boundaries.js";
 
 export const EmailSchema = z.string().trim().toLowerCase().email().max(254);
 export const PasswordSchema = z
@@ -52,6 +53,7 @@ export const CustomerRegistrationSchema = z.object({
  */
 export const SignupSchema = CustomerRegistrationSchema.extend({
   referralCode: ReferralCodeSchema.optional(),
+  identityDataMode: HostedAuthIdentityDataModeSchema,
 });
 
 export const SignupResponseSchema = z.object({

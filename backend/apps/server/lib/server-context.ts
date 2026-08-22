@@ -62,6 +62,8 @@ import {
 } from "@powerotp/api/verification-queue.js";
 import { VerificationService } from "@powerotp/api/verification-service.js";
 
+import { hostedAuthDeploymentEnvironment } from "./hosted-auth-realms";
+
 export interface ServerContext {
   config: ProductionConfig;
   dataStores: DataStores;
@@ -174,6 +176,7 @@ async function buildServerContext(): Promise<ServerContext> {
     dataStores.db,
     dataStores.client,
     config,
+    hostedAuthDeploymentEnvironment(),
     verifications,
   );
   const botBlockerSiteCredentials = new BotBlockerSiteCredentialService(
