@@ -14,6 +14,7 @@ Usage classes describe the route's callers, not its implementation status:
 
 | Route file | HTTP path | Methods | Auth | Usage class | Consumers | Expected production origin |
 | --- | --- | --- | --- | --- | --- | --- |
+| `app/health/hosted-auth/route.ts` | `/health/hosted-auth` | `GET` | Exact hosted-auth request authority | public | App Platform and hosted-auth uptime probes | `https://authx.powerotp.com`, `https://authz.powerotp.com` |
 | `app/health/route.ts` | `/health` | `GET` | None | public | App Platform and uptime probes | `https://api.powerotp.com` |
 | `app/mcp/route.ts` | `/mcp` | `GET, POST, DELETE` | None; anonymous read-only MCP | public | MCP-compatible AI clients | `https://api.powerotp.com` |
 | `app/ready/route.ts` | `/ready` | `GET` | None | public | App Platform and operators | `https://api.powerotp.com` |

@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { configuredBrowserOriginsForPath, corsHeaders } from "@/lib/cors";
 import {
+  hostedAuthHealthPayload,
   hostedAuthDeploymentEnvironment,
   isHostedAuthHostname,
   resolveHostedAuthRealm,
@@ -21,14 +22,7 @@ export function proxy(request: NextRequest): NextResponse {
       );
     }
     return NextResponse.json(
-      {
-        service: "powerotp-hosted-auth",
-        status: "ok",
-        environment: realm.environment,
-        identityDataMode: realm.identityDataMode,
-        realm: realm.hostname,
-        rpId: realm.rpId,
-      },
+      hostedAuthHealthPayload(realm),
       { headers: { "cache-control": "no-store" } },
     );
   }

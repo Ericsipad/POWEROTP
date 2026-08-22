@@ -37,6 +37,7 @@ Do not mark a phase/step implemented, deployed, remote-green, or certified witho
 - P3-S0 proxy correction — 2026-08-22 03:44 UTC, authenticated public-realm handoff
 - P3-S0 runtime correction — 2026-08-22 03:51 UTC, single realm authority across runtimes
 - P3-S0 health correction — 2026-08-22 04:02 UTC, direct host-proxy health response
+- P3-S0 ingress correction — 2026-08-22 04:10 UTC, explicit authority-aware health route
 - P3-S1 through P15-S6 — not started
 
 Update this index after every execution step with a link to that step's latest timestamped entry.
@@ -1888,6 +1889,39 @@ Commit, push, and remote check:
 
 - This correction is included in the final P3-S0 follow-up commit. Final push and replacement
   Verify/deployment status are reported in the post-push handoff.
+
+Next step:
+
+- P3-S1 remains unchanged.
+
+## 2026-08-22 04:10 UTC — P3-S0 correction: explicit authority-aware health route
+
+Finding and correction:
+
+- After the route was removed, production returned Next.js's static HTML `404` with no realm JSON.
+  This proves the deployment adapter does not invoke Proxy for an absent route-manifest path, so a
+  direct Proxy response alone cannot provide the infrastructure endpoint.
+- Restored the explicit dynamic route so `/health/hosted-auth` is present in the production route
+  manifest. The route resolves the realm from the public `x-forwarded-host`/`host` authorities that
+  App Platform supplies, with the reconstructed internal URL only as a final equivalent candidate.
+  It rejects comma-chained, unknown, and conflicting realm authorities.
+- Proxy remains the fail-closed hosted-content gate and can answer the same health payload when it
+  runs first. Both paths share one payload builder and immutable realm map, avoiding duplicate
+  response or custody mapping logic.
+
+Focused verification:
+
+- `npm run test -w @powerotp/backend` — passed (25 tests), including internal route URL with public
+  host, forwarded public authority, conflict/chaining rejection, exact mode mapping, and Proxy
+  isolation.
+- The first lint pass found a test-only inferred optional header type; adding an explicit
+  string-header map fixed it. `npm run lint -w @powerotp/backend` and
+  `npm run build -w @powerotp/backend` then passed with `/health/hosted-auth` in the route manifest.
+
+Commit, push, and remote check:
+
+- This correction is included in the final P3-S0 ingress follow-up commit. Final push and
+  replacement Verify/deployment status are reported in the post-push handoff.
 
 Next step:
 
