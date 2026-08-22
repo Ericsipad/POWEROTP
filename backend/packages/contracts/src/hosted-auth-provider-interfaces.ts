@@ -93,12 +93,14 @@ const contactProofFields = {
 export const HostedAuthEmailProofRequestSchema =
   ContactOperationBaseSchema.extend({
     provider: HostedAuthEmailProviderSchema,
+    destination: EmailDestinationSchema,
     ...contactProofFields,
   }).superRefine(enforceContactCustody);
 
 export const HostedAuthPhoneProofRequestSchema =
   ContactOperationBaseSchema.extend({
     provider: HostedAuthPhoneProviderSchema,
+    destination: PhoneDestinationSchema,
     ...contactProofFields,
   }).superRefine(enforceContactCustody);
 

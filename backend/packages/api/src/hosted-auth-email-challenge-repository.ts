@@ -25,6 +25,7 @@ interface HostedAuthEmailChallengeDocument {
   _id: string;
   authRequestId: string;
   scope: HostedAuthContactScope;
+  destinationHash: string;
   codeHash: string;
   evidenceReference: string;
   createdAt: Date;
@@ -84,6 +85,7 @@ export class HostedAuthEmailChallengeRepository {
   async issue(input: {
     authRequestId: string;
     scope: HostedAuthContactScope;
+    destination: string;
     code: string;
     now?: Date;
   }): Promise<HostedAuthProviderOperationId> {
@@ -104,6 +106,7 @@ export class HostedAuthEmailChallengeRepository {
       _id: providerOperationId,
       authRequestId,
       scope,
+      destinationHash: this.#hashDestination(input.destination),
       codeHash: this.#hashCode(providerOperationId, scope, input.code),
       evidenceReference,
       createdAt,
@@ -116,6 +119,7 @@ export class HostedAuthEmailChallengeRepository {
   async verifyAndConsume(input: {
     authRequestId: string;
     scope: HostedAuthContactScope;
+    destination: string;
     providerOperationId: string;
     proof: string;
     now?: Date;
@@ -130,6 +134,7 @@ export class HostedAuthEmailChallengeRepository {
       _id: providerOperationId,
       authRequestId,
       scope,
+      destinationHash: this.#hashDestination(input.destination),
       expiresAt: { $gt: now },
       consumedAt: { $exists: false },
     });
@@ -149,6 +154,7 @@ export class HostedAuthEmailChallengeRepository {
         _id: providerOperationId,
         authRequestId,
         scope,
+        destinationHash: this.#hashDestination(input.destination),
         codeHash: submittedHash,
         expiresAt: { $gt: now },
         consumedAt: { $exists: false },
@@ -184,6 +190,13 @@ export class HostedAuthEmailChallengeRepository {
       .update(scope.providerPurpose)
       .update("\0")
       .update(code)
+      .digest("base64url");
+  }
+
+  #hashDestination(destination: string): string {
+    return createHmac("sha256", this.hashSecret)
+      .update("powerotp-hosted-auth-email-destination-v1\0")
+      .update(destination.trim().toLowerCase())
       .digest("base64url");
   }
 }

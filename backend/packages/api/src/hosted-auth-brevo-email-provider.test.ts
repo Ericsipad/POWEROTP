@@ -174,6 +174,7 @@ describe("hosted-auth Brevo email provider", () => {
       authRequestId,
       scope: challengeScope,
       provider: "powerotp_email",
+      destination: "person@example.com",
       providerOperationId,
       proof: "12345",
     });
@@ -186,6 +187,7 @@ describe("hosted-auth Brevo email provider", () => {
     assert.deepEqual(verifiedInput, {
       authRequestId,
       scope: challengeScope,
+      destination: "person@example.com",
       providerOperationId,
       proof: "12345",
     });

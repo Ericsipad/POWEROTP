@@ -90,6 +90,7 @@ export function createHostedAuthPowerOtpPhoneProvider(
       const operation = await verifications.get(request.providerOperationId);
       if (
         !operation?.hostedAuthContact ||
+        operation.targetNumber !== request.destination ||
         operation.hostedAuthContact.authRequestId !== request.authRequestId ||
         operation.hostedAuthContact.provider !== provider ||
         !sameScope(operation.hostedAuthContact.scope, request.scope)

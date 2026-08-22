@@ -24,11 +24,13 @@ export interface HostedAuthEmailChallengeAuthority {
   issue(input: {
     authRequestId: string;
     scope: HostedAuthEmailChallengeRequest["scope"];
+    destination: string;
     code: string;
   }): Promise<HostedAuthProviderOperationId>;
   verifyAndConsume(input: {
     authRequestId: string;
     scope: HostedAuthEmailProofRequest["scope"];
+    destination: string;
     providerOperationId: string;
     proof: string;
   }): Promise<HostedAuthEmailProofVerification>;
@@ -100,6 +102,7 @@ export class HostedAuthBrevoEmailProvider implements HostedAuthEmailProvider {
     const providerOperationId = await this.challenges.issue({
       authRequestId: request.authRequestId,
       scope: request.scope,
+      destination: request.destination,
       code,
     });
     return HostedAuthContactChallengeStartedSchema.parse({
@@ -118,6 +121,7 @@ export class HostedAuthBrevoEmailProvider implements HostedAuthEmailProvider {
     const result = await this.challenges.verifyAndConsume({
       authRequestId: request.authRequestId,
       scope: request.scope,
+      destination: request.destination,
       providerOperationId: request.providerOperationId,
       proof: request.proof,
     });

@@ -181,6 +181,7 @@ describe("hosted-auth POWEROTP phone providers", () => {
     const challengeScope = scope("signin_contact_authentication");
     let submits = 0;
     const operation = {
+      targetNumber: "+15551234567",
       hostedAuthContact: {
         authRequestId,
         scope: challengeScope,
@@ -207,6 +208,7 @@ describe("hosted-auth POWEROTP phone providers", () => {
       authRequestId,
       scope: challengeScope,
       provider: "powerotp_sms" as const,
+      destination: "+15551234567",
       providerOperationId: interactionId,
       proof: "12345",
     };
@@ -233,10 +235,12 @@ describe("hosted-auth POWEROTP phone providers", () => {
       authRequestId,
       scope: challengeScope,
       provider: "powerotp_voice" as const,
+      destination: "+15551234567",
       providerOperationId: interactionId,
       proof: "12345",
     };
     const operation = {
+      targetNumber: "+15551234567",
       hostedAuthContact: {
         authRequestId,
         scope: challengeScope,

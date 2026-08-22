@@ -106,6 +106,7 @@ describe("hosted-auth email and phone provider interfaces", () => {
         authRequestId,
         scope: powerOtpSignupContactScope,
         provider: "powerotp_email",
+        destination: "person@example.com",
         providerOperationId,
         proof: "123456",
       }).success,
@@ -116,6 +117,17 @@ describe("hosted-auth email and phone provider interfaces", () => {
         authRequestId,
         scope: powerOtpSignupContactScope,
         provider: "powerotp_email",
+        destination: "+15551234567",
+        providerOperationId,
+        proof: "123456",
+      }).success,
+      false,
+    );
+    assert.equal(
+      HostedAuthPhoneProofRequestSchema.safeParse({
+        authRequestId,
+        scope: diditSigninContactScope,
+        provider: "didit_phone",
         providerOperationId,
         proof: "123456",
       }).success,

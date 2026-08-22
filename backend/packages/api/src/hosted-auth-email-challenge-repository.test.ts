@@ -27,6 +27,7 @@ type ChallengeDocument = {
   _id: string;
   authRequestId: string;
   scope: typeof signupScope;
+  destinationHash: string;
   codeHash: string;
   evidenceReference: string;
   createdAt: Date;
@@ -68,6 +69,8 @@ class MemoryChallengeCollection {
     return document &&
       document.authRequestId === filter.authRequestId &&
       JSON.stringify(document.scope) === JSON.stringify(filter.scope) &&
+      (filter.destinationHash === undefined ||
+        document.destinationHash === filter.destinationHash) &&
       (filter.codeHash === undefined || document.codeHash === filter.codeHash) &&
       (!expiry?.$gt || document.expiresAt > expiry.$gt) &&
       (!unconsumed || !document.consumedAt)
@@ -95,6 +98,7 @@ describe("hosted-auth email challenge repository", () => {
     const operationId = await challenges.issue({
       authRequestId,
       scope: signupScope,
+      destination: "person@example.com",
       code: "12345",
       now,
     });
@@ -106,6 +110,7 @@ describe("hosted-auth email challenge repository", () => {
           ...signupScope,
           projectId: "project_scope_0002",
         },
+        destination: "person@example.com",
         providerOperationId: operationId,
         proof: "12345",
         now,
@@ -116,6 +121,18 @@ describe("hosted-auth email challenge repository", () => {
       await challenges.verifyAndConsume({
         authRequestId,
         scope: signupScope,
+        destination: "other@example.com",
+        providerOperationId: operationId,
+        proof: "99999",
+        now,
+      }),
+      { status: "rejected" },
+    );
+    assert.deepEqual(
+      await challenges.verifyAndConsume({
+        authRequestId,
+        scope: signupScope,
+        destination: "person@example.com",
         providerOperationId: operationId,
         proof: "99999",
         now,
@@ -126,6 +143,7 @@ describe("hosted-auth email challenge repository", () => {
     const verified = await challenges.verifyAndConsume({
       authRequestId,
       scope: signupScope,
+      destination: "person@example.com",
       providerOperationId: operationId,
       proof: "12345",
       now,
@@ -135,6 +153,7 @@ describe("hosted-auth email challenge repository", () => {
       await challenges.verifyAndConsume({
         authRequestId,
         scope: signupScope,
+        destination: "person@example.com",
         providerOperationId: operationId,
         proof: "12345",
         now,
@@ -149,6 +168,7 @@ describe("hosted-auth email challenge repository", () => {
     const operationId = await challenges.issue({
       authRequestId,
       scope: signupScope,
+      destination: "person@example.com",
       code: "12345",
       now: createdAt,
     });
@@ -157,6 +177,7 @@ describe("hosted-auth email challenge repository", () => {
       await challenges.verifyAndConsume({
         authRequestId,
         scope: signupScope,
+        destination: "person@example.com",
         providerOperationId: operationId,
         proof: "12345",
         now: new Date(

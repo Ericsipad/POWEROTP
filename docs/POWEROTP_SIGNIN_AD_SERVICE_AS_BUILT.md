@@ -48,7 +48,8 @@ Do not mark a phase/step implemented, deployed, remote-green, or certified witho
 - P4-S2 — completed 2026-08-22 05:42 UTC, purpose-separated hosted-auth SMS/voice adapters
 - P4-S3 — completed 2026-08-22 07:14 UTC, atomic purpose-separated Didit environment validation
 - P4-S4 — completed 2026-08-22 07:25 UTC, crash-safe persistent Didit User person-root mapping
-- P4-S5 through P15-S6 — not started
+- P4-S5 — completed 2026-08-22 07:40 UTC, Didit email/phone OTP contact adapters
+- P4-S6 through P15-S6 — not started
 
 Update this index after every execution step with a link to that step's latest timestamped entry.
 
@@ -2550,3 +2551,73 @@ Known limits and next step:
 - P4-S5 — implement Didit email/phone contact verification APIs behind the existing vendor-neutral
   contracts and POWEROTP-branded UI contract, preserving strict `didit_pii` routing and this permanent
   person-root mapping.
+
+## 2026-08-22 07:40 UTC — P4-S5: Didit email/phone OTP contact adapters
+
+Status and scope:
+
+- P4-S5 is complete. Didit's standalone email and phone OTP APIs now implement the existing
+  vendor-neutral hosted-auth email/phone provider interfaces for the `didit_pii` realm.
+- Webhooks, polling, assurance adapters, hosted ceremonies, P4-S6+, Project controls, Passport, MCP,
+  BotBlocker, the landing-page demo, and `.env` were not changed.
+
+Implemented contracts and provider behavior:
+
+- Added Didit email `POST /v3/email/send/` and `POST /v3/email/check/` operations and phone
+  `POST /v3/phone/send/` and `POST /v3/phone/check/` operations. Both reject redirects, use the
+  server-only API key, enforce a ten-second timeout, and return only normalized vendor-neutral
+  challenge/proof results.
+- Email requests use six-digit numeric codes, English, and Didit's configured white-label
+  customization. Phone requests use six-digit SMS with an English locale. The user enters both code
+  types in POWEROTP's vendor-neutral UI contract; no Didit hosted page or SDK type is exposed.
+- Every send and check resolves the already-complete permanent person-root mapping and sends only
+  its opaque `potpDiditId` as `vendor_data`. Provider responses must echo that exact mapping.
+  Finalized proof responses must also carry the exact provider operation UUID returned by send.
+- Successful checks expose only that operation UUID as the minimal evidence reference. Declines,
+  invalid codes, missing/expired operations, rate limits, and provider outages are normalized without
+  a false-success path. Provider credentials and response bodies are never included in errors.
+- The standalone contact endpoints do not accept a workflow ID. The purpose-separated email/phone
+  workflow configuration validated in P4-S3 remains reserved for later workflow/session operations
+  and was neither repurposed nor removed.
+
+Destination-binding correction:
+
+- Didit's check endpoints locate pending OTP state by destination rather than by `request_id`.
+  Vendor-neutral email/phone proof requests therefore now repeat their schema-validated destination.
+  This permits a check without persisting recoverable `didit_pii` contact data.
+- Existing POWEROTP providers were tightened to the same corrected contract. Brevo challenges store
+  only a purpose-separated HMAC of the normalized email and require it at consumption; SMS/voice
+  proof compares the submitted destination with the already-stored interaction target. Destination
+  substitution therefore fails before proof consumption in every custody mode.
+
+Security and data impact:
+
+- `didit_pii` routing is enforced before mapping resolution or network work. The adapter never routes
+  through Brevo, POWEROTP SMS, or POWEROTP voice, and the existing POWEROTP adapters continue to
+  reject Didit custody.
+- POWEROTP transiently forwards the submitted contact to Didit but does not add recoverable
+  email/phone persistence. Client-facing results contain no destination, proof, person-root ID,
+  provider report, risk intelligence, or Didit internal ID.
+
+Focused verification:
+
+- Contracts package tests passed (267), including required proof destinations and immutable
+  custody-provider routing.
+- API package tests passed (514), including email/phone send payloads, white-label/SMS options,
+  permanent mapping and operation binding, normalized provider outcomes, destination substitution,
+  disabled configuration, and all existing API behavior.
+- Contracts and API package production builds passed. No full-monorepo verification was run locally;
+  remote Verify remains the complete pushed check.
+
+Commit, push, and remote check:
+
+- The coherent P4-S5 change is ready for commit and push. Final commit, push, and one remote Verify
+  result check are reported in the post-push handoff.
+
+Known limits and next step:
+
+- P4-S5 provides internal provider adapters only. Hosted browser routes, request orchestration,
+  billing linkage, and identity enrollment/signin consumers remain owned by their later roadmap
+  steps.
+- P4-S6 — implement minimum signed Didit webhook verification with timestamp, replay, and event-order
+  handling without beginning polling, assurance adapters, hosted ceremonies, or P4-S7+.
