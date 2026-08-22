@@ -34,6 +34,7 @@ Do not mark a phase/step implemented, deployed, remote-green, or certified witho
 - P2-S9 — completed 2026-08-22 02:30 UTC, retention and provider-cleanup deletion orchestration
 - P2-S10 — completed 2026-08-22 03:00 UTC, crypto-shredding and restore replay
 - P3-S0 — completed 2026-08-22 03:32 UTC, hosted-auth DNS/TLS/routing/deployment isolation
+- P3-S0 proxy correction — 2026-08-22 03:44 UTC, authenticated public-realm handoff
 - P3-S1 through P15-S6 — not started
 
 Update this index after every execution step with a link to that step's latest timestamped entry.
@@ -1796,3 +1797,34 @@ Next step:
 - P3-S1 — add required immutable `identityDataMode`, opaque `identifierString`, exact auth realm/RP
   ID, and generated hosted URLs on project creation without beginning P3-S2 return settings or
   assurance configuration.
+
+## 2026-08-22 03:44 UTC — P3-S0 correction: authenticated public-realm handoff
+
+Finding and correction:
+
+- The first pushed realm checks reached the newly deployed route but received
+  `hosted_auth_realm_unavailable`. DigitalOcean's reverse proxy preserves the public custom-domain
+  hostname at Next.js middleware, while the downstream route handler's reconstructed URL uses an
+  internal hostname.
+- The host-first middleware remains the sole realm authority. It now removes any caller-supplied
+  internal realm header, resolves the exact public hostname/environment, and forwards the validated
+  realm hostname to the health handler through a middleware-owned request header. The handler no
+  longer re-authorizes from its internal URL.
+- API-host requests have the internal header stripped, cross-environment realm hosts still fail
+  closed, and hosted realms still expose only the health route. Tests cover the trusted handoff,
+  caller-header stripping, missing handoff, both custody modes, and API-host preservation.
+
+Focused verification:
+
+- `npm run test -w @powerotp/backend` — passed (26 tests).
+- `npm run lint -w @powerotp/backend` — passed.
+- `npm run build -w @powerotp/backend` — passed.
+
+Commit, push, and remote check:
+
+- This correction is included in a P3-S0 follow-up commit. Final push and replacement Verify/
+  deployment status are reported in the post-push handoff.
+
+Next step:
+
+- P3-S1 remains unchanged.

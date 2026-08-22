@@ -49,6 +49,9 @@ export const HOSTED_AUTH_DEPLOYMENTS = {
   },
 } as const;
 
+export const HOSTED_AUTH_REALM_REQUEST_HEADER =
+  "x-powerotp-hosted-auth-realm";
+
 export type HostedAuthDeploymentEnvironment =
   keyof typeof HOSTED_AUTH_DEPLOYMENTS;
 export type HostedAuthIdentityDataMode = "powerotp_pii" | "didit_pii";
