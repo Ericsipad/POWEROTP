@@ -49,7 +49,8 @@ Do not mark a phase/step implemented, deployed, remote-green, or certified witho
 - P4-S3 — completed 2026-08-22 07:14 UTC, atomic purpose-separated Didit environment validation
 - P4-S4 — completed 2026-08-22 07:25 UTC, crash-safe persistent Didit User person-root mapping
 - P4-S5 — completed 2026-08-22 07:40 UTC, Didit email/phone OTP contact adapters
-- P4-S6 through P15-S6 — not started
+- P4-S6 — completed 2026-08-22 07:59 UTC, signed Didit webhook replay/order boundary
+- P4-S7 through P15-S6 — not started
 
 Update this index after every execution step with a link to that step's latest timestamped entry.
 
@@ -2621,3 +2622,56 @@ Known limits and next step:
   steps.
 - P4-S6 — implement minimum signed Didit webhook verification with timestamp, replay, and event-order
   handling without beginning polling, assurance adapters, hosted ceremonies, or P4-S7+.
+
+## 2026-08-22 07:59 UTC — P4-S6: signed Didit webhook replay/order boundary
+
+Status and scope:
+
+- P4-S6 is complete. The API package now has a minimum internal Didit session-webhook boundary for
+  `status.updated` and `data.updated`.
+- Provider polling, assurance adapters, hosted ceremonies, public routes, P4-S7+, and `.env` were not
+  changed.
+
+Implemented security and persistence:
+
+- Verification follows Didit's current recommended `X-Signature-V2` contract: recursively sorted,
+  compact, Unicode-preserving JSON; HMAC-SHA256 hex; and constant-time comparison with
+  `DIDIT_WEBHOOK_SECRET`.
+- `X-Timestamp` must be Unix seconds within 300 seconds of server time and must equal the signed
+  payload timestamp, preventing a fresh unsigned header from extending an old signed body.
+- The accepted envelope requires Didit event/application/session UUIDs, environment, supported event
+  type, status, provider creation time, and the opaque `potpDiditId`. Full provider decisions and
+  other passthrough data are authenticated but never persisted.
+- A Mongo transaction atomically records the stable `event_id` and advances the session cursor.
+  Refreshed retries are idempotent even though Didit re-stamps `timestamp`; conflicting reuse of an
+  event ID fails closed; events older than the session's provider `created_at` cursor are retained as
+  seen but cannot regress current state.
+- The webhook service remains disabled when `DIDIT_WEBHOOK_SECRET` is absent.
+
+Didit source validation:
+
+- The authenticated global Didit MCP was consulted for the active organization/application context.
+  Current official Didit webhook documentation confirmed V2 canonicalization, hex HMAC-SHA256,
+  five-minute timestamp freshness, stable retry `event_id`, refreshed retry timestamps, and
+  `created_at` as the underlying record update time.
+- No Didit destination was created or changed and no test webhook or OTP was sent.
+
+Focused verification:
+
+- API package tests passed (520), covering canonical Unicode signatures, forged bodies, stale/future
+  and mismatched timestamps, refreshed exact replay, conflicting replay, stale event order, minimal
+  persistence, transaction-backed cursor behavior, disabled configuration, and existing API behavior.
+- The API package production build passed. No full-monorepo verification was run locally; remote
+  Verify remains the complete pushed check.
+
+Commit, push, and remote check:
+
+- The coherent P4-S6 change is ready for commit and push. Final commit, push, and one remote Verify
+  result check are reported in the post-push handoff.
+
+Known limits and next step:
+
+- P4-S6 provides the authenticated, durable event boundary only. It does not create a public webhook
+  route or consume provider decisions for any ceremony.
+- P4-S7 — implement provider polling reconciliation and outage behavior without beginning assurance
+  adapters, hosted ceremonies, or P4-S8+.

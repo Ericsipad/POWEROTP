@@ -1,0 +1,12 @@
+---
+description: Use the installed Didit MCP alongside official documentation
+alwaysApply: true
+---
+
+# Didit MCP guidance
+
+- The global `user-didit` MCP server is installed and authenticated at `https://mcp.didit.me/mcp`.
+- For Didit implementation, configuration, schema, workflow, webhook, or operational questions, inspect the relevant live Didit MCP tools and schemas proactively.
+- Use MCP evidence alongside current official Didit documentation and the repository's existing contracts; do not rely only on memory.
+- Discover the exact MCP tool schema with `GetMcpTools` before every `CallMcpTool` invocation.
+- Prefer read-only MCP operations unless the requested task explicitly requires a remote Didit mutation.
