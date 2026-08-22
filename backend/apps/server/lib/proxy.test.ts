@@ -7,6 +7,8 @@ import { proxy } from "../proxy.js";
 
 const previousPublicAppUrl = process.env.PUBLIC_APP_URL;
 const previousBotBlockerRuntimeOrigin = process.env.BOTBLOCKER_RUNTIME_ORIGIN;
+const previousHostedAuthDeploymentEnvironment =
+  process.env.HOSTED_AUTH_DEPLOYMENT_ENVIRONMENT;
 
 afterEach(() => {
   if (previousPublicAppUrl === undefined) delete process.env.PUBLIC_APP_URL;
@@ -15,6 +17,12 @@ afterEach(() => {
     delete process.env.BOTBLOCKER_RUNTIME_ORIGIN;
   } else {
     process.env.BOTBLOCKER_RUNTIME_ORIGIN = previousBotBlockerRuntimeOrigin;
+  }
+  if (previousHostedAuthDeploymentEnvironment === undefined) {
+    delete process.env.HOSTED_AUTH_DEPLOYMENT_ENVIRONMENT;
+  } else {
+    process.env.HOSTED_AUTH_DEPLOYMENT_ENVIRONMENT =
+      previousHostedAuthDeploymentEnvironment;
   }
 });
 
@@ -73,5 +81,47 @@ describe("backend proxy CORS", () => {
     );
     assert.equal(denied.status, 403);
     assert.deepEqual(await denied.json(), { error: "origin_not_allowed" });
+  });
+});
+
+describe("backend hosted-auth host routing", () => {
+  it("allows only the realm health route before hosted handlers exist", async () => {
+    process.env.HOSTED_AUTH_DEPLOYMENT_ENVIRONMENT = "production";
+    const health = proxy(
+      new NextRequest("https://authx.powerotp.com/health/hosted-auth"),
+    );
+    const api = proxy(
+      new NextRequest("https://authx.powerotp.com/v1/auth/session"),
+    );
+
+    assert.equal(health.status, 200);
+    assert.equal(health.headers.get("x-middleware-next"), "1");
+    assert.equal(api.status, 404);
+    assert.equal(api.headers.get("cache-control"), "no-store");
+    assert.deepEqual(await api.json(), {
+      error: "hosted_auth_route_unavailable",
+    });
+  });
+
+  it("rejects a realm hostname from another environment", async () => {
+    process.env.HOSTED_AUTH_DEPLOYMENT_ENVIRONMENT = "staging";
+    const response = proxy(
+      new NextRequest("https://authz.powerotp.com/health/hosted-auth"),
+    );
+
+    assert.equal(response.status, 404);
+    assert.deepEqual(await response.json(), {
+      error: "hosted_auth_route_unavailable",
+    });
+  });
+
+  it("does not alter API-host routing", () => {
+    process.env.HOSTED_AUTH_DEPLOYMENT_ENVIRONMENT = "production";
+    const response = proxy(
+      new NextRequest("https://api.powerotp.com/v1/capabilities"),
+    );
+
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("x-middleware-next"), "1");
   });
 });

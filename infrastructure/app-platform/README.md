@@ -1,7 +1,8 @@
 # DigitalOcean App Platform setup
 
 Connect the same GitHub repository to two independently scalable App Platform
-components. There is no App Spec YAML. Each component uses its own self-contained
+components. The backend component serves the API and both isolated hosted-auth
+realm domains. There is no App Spec YAML. Each component uses its own self-contained
 source directory, manifest, lockfile, and dependencies.
 
 ## Repository selection
@@ -16,7 +17,8 @@ Configure the components exactly as follows:
 - Frontend (`powerotp.com`): source `frontend`, build `npm run build`, run
   `npm start`, health check `/api/health`
 - Backend (`api.powerotp.com`): source `backend`, build `npm run build`, run
-  `npm start`, health check `/health`
+  `npm start`, health check `/health`; attach `authx.powerotp.com` and
+  `authz.powerotp.com` to this same component
 - HTTP port: use App Platform's `PORT`; both Next.js processes read it automatically
 
 Source directories are relative to the repository root and must not have a leading
@@ -129,6 +131,11 @@ repository `.env` file.
 - `PUBLIC_API_URL=https://api.powerotp.com`
   The backend uses `PUBLIC_API_URL` for API links and `PUBLIC_APP_URL` for modal/widget,
   email, and Stripe return UI links.
+- `HOSTED_AUTH_DEPLOYMENT_ENVIRONMENT=production`: non-secret deployment selector for
+  hosted-auth host routing. Production is also the default when `NODE_ENV=production`,
+  but setting it explicitly makes the App Platform boundary auditable. A staging
+  deployment must use `staging`; development and tests use their own non-production
+  host maps. Never attach production realm domains to a non-production deployment.
 - `DEMO_PROJECT_SLUG`: optional; slug of the project backing the public "try it now"
   widget on the marketing site — use `demo`. After deploy, sign in at `/admin` and click
   "Provision demo project" once to create it at that exact slug. Leave the variable
@@ -188,10 +195,27 @@ repository `.env` file.
 
 ## Domains
 
-`powerotp.com` points to the frontend component. `api.powerotp.com` points to the
-backend component. `na1.powerotp.com` continues to point directly at the first
-telephony droplet. The browser backend permits credentialed CORS only from the exact
-`PUBLIC_APP_URL`; never use a wildcard origin with session cookies.
+`powerotp.com` points to the frontend component. `api.powerotp.com`,
+`authx.powerotp.com`, and `authz.powerotp.com` point to the backend component.
+App Platform owns certificate issuance and renewal for all three backend domains.
+`na1.powerotp.com` continues to point directly at the first telephony droplet. The
+browser backend permits credentialed CORS only from the exact `PUBLIC_APP_URL`; never
+use a wildcard origin with session cookies.
+
+Hosted-auth routing is host-first and fail-closed:
+
+- `authx.powerotp.com` is only the `powerotp_pii` realm and RP ID.
+- `authz.powerotp.com` is only the `didit_pii` realm and RP ID.
+- Before later hosted handlers ship, either realm serves only
+  `/health/hosted-auth`; API, MCP, Passport, BotBlocker, and unknown paths return a
+  no-store `404`.
+- Staging uses `authx.staging.powerotp.com` and `authz.staging.powerotp.com`.
+  Development uses `authx.localhost` and `authz.localhost`; tests use reserved
+  `.test` names. Databases, credentials, KMS keys, cookies, and provider projects
+  must remain environment-specific when those environments are provisioned.
+- A push to `main` deploys the one backend artifact to all attached backend domains.
+  The Verify workflow waits for both production realm TLS endpoints and validates
+  that each health response reports its exact custody mode.
 
 ## Release checks
 
@@ -200,6 +224,10 @@ App Platform should use Node 22. A deployment is healthy only when:
 - `https://powerotp.com/api/health` returns `200`
 - `https://api.powerotp.com/health` returns `200`
 - `https://api.powerotp.com/ready` returns `200` once Atlas and Valkey are reachable
+- `https://authx.powerotp.com/health/hosted-auth` returns `200` and reports
+  `powerotp_pii`
+- `https://authz.powerotp.com/health/hosted-auth` returns `200` and reports
+  `didit_pii`
 - `https://api.powerotp.com/v1/capabilities` returns the verification types/states (proves the API routes are
   actually being served, not falling through to the Next.js 404 page)
 - `https://powerotp.com/` returns the marketing site

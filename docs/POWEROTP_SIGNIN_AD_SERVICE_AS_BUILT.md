@@ -33,7 +33,8 @@ Do not mark a phase/step implemented, deployed, remote-green, or certified witho
 - P2-S8 — completed 2026-08-22 02:19 UTC, pending identity reconciliation and orphan detection
 - P2-S9 — completed 2026-08-22 02:30 UTC, retention and provider-cleanup deletion orchestration
 - P2-S10 — completed 2026-08-22 03:00 UTC, crypto-shredding and restore replay
-- P3-S0 through P15-S6 — not started
+- P3-S0 — completed 2026-08-22 03:32 UTC, hosted-auth DNS/TLS/routing/deployment isolation
+- P3-S1 through P15-S6 — not started
 
 Update this index after every execution step with a link to that step's latest timestamped entry.
 
@@ -1709,3 +1710,89 @@ Next step:
 
 - P3-S0 — provision `authx`/`authz` DNS, TLS, host routing/deployment configuration, health checks,
   environment separation, and CI deploy paths without beginning P3-S1 project schema behavior.
+
+## 2026-08-22 03:32 UTC — P3-S0: hosted-auth realm deployment foundation
+
+Status and scope:
+
+- P3-S0 is complete. It provisions the two production realm domains on the existing backend App
+  Platform component and adds exact host routing, realm health checks, environment separation, and
+  post-deployment CI health gates.
+- P3-S1 project identifiers, immutable project mode persistence, generated hosted URLs, return
+  settings, provider adapters, hosted credential handlers, `.env`, Passport, MCP, and BotBlocker
+  behavior were not started or modified.
+
+Implemented deployment and behavior:
+
+- `authx.powerotp.com` and `authz.powerotp.com` are CNAMEs to the existing
+  `powerotpbackend-giavr.ondigitalocean.app` backend. Both are attached as backend App Platform
+  custom domains; DigitalOcean terminates and renews TLS. Neither domain points to an Asterisk
+  droplet or the frontend application.
+- Added one immutable environment/realm map. Production binds `powerotp_pii` only to
+  `authx.powerotp.com` and `didit_pii` only to `authz.powerotp.com`; each origin, hostname, and RP ID
+  is unique. Staging, development, and test have distinct host maps and cannot resolve production
+  realms.
+- Added host-first middleware isolation. Until later hosted routes exist, a hosted realm permits
+  only `/health/hosted-auth`; API, MCP, Passport, BotBlocker, and unknown paths receive a no-store
+  `404`. Existing `api.powerotp.com` routing remains unchanged.
+- Added a no-store realm health response that reports the exact deployment environment, custody
+  mode, realm hostname, and RP ID. The API host and cross-environment hosts cannot use it.
+- Main-branch Verify now gates each production realm independently after the backend deploy. It
+  retries through App Platform deployment propagation and validates DNS/TLS, service status, exact
+  production realm/RP ID, and exact custody mode.
+
+Affected files:
+
+- `.github/workflows/verify.yml`
+- `backend/apps/server/app/health/hosted-auth/route.ts`
+- `backend/apps/server/app/health/hosted-auth/route.test.ts`
+- `backend/apps/server/lib/hosted-auth-realms.ts`
+- `backend/apps/server/lib/hosted-auth-realms.test.ts`
+- `backend/apps/server/lib/proxy.test.ts`
+- `backend/apps/server/package.json`
+- `backend/apps/server/proxy.ts`
+- `docs/API_ROUTE_INVENTORY.md`
+- `infrastructure/app-platform/README.md`
+- `docs/POWEROTP_SIGNIN_AD_SERVICE_AS_BUILT.md`
+
+Operational finding and correction:
+
+- The first backend restart exposed a pre-existing Atlas authorization gap from Phase 2:
+  the production `MONGODB_URI` user could access `powerotp` but could not create startup indexes in
+  `powerotp_auth_runtime`. The same narrowly scoped user now has `readWrite` on
+  `powerotp_auth_runtime` and `powerotp_auth_retention`, retaining its existing `powerotp` access
+  and cluster restriction. No cluster-wide role or credential change was introduced.
+- After the grant and backend restart, `api.powerotp.com/health`, the `authx` TLS route, and the
+  `authz` TLS route returned `200`. Public Google and Cloudflare resolvers returned both realm
+  CNAMEs to the backend; one local resolver temporarily retained the earlier negative DNS response
+  during normal propagation.
+
+Security, compatibility, and known limits:
+
+- Realm selection is derived from the exact deployment environment and request hostname, never
+  from a project, query, body, cookie, or caller-supplied custody claim. Cross-mode and
+  cross-environment hostname substitution fails closed.
+- The realm health route is public but contains no project, identity, credential, provider, store,
+  or secret data. It is explicitly non-cacheable.
+- Both realms reuse one backend artifact and App Platform deployment pipeline but remain separate
+  HTTP origins and future WebAuthn RP IDs. This step creates no cookie, credential, project, or
+  identity state.
+
+Focused verification:
+
+- `npm run test -w @powerotp/backend` — passed (25 tests), including realm mapping, environment
+  isolation, host routing, health responses, API-host preservation, and route inventory.
+- `npm run lint -w @powerotp/backend` — passed.
+- `npm run build -w @powerotp/backend` — passed and included `/health/hosted-auth` plus middleware.
+- Production DNS/TLS/backend probes passed after Atlas authorization correction and restart.
+
+Commit, push, and remote check:
+
+- The coherent P3-S0 commit contains this entry. Its final hash, push confirmation, and one remote
+  Verify/deployment result check are reported in the post-push handoff.
+
+Next step:
+
+- P3-S1 — add required immutable `identityDataMode`, opaque `identifierString`, exact auth realm/RP
+  ID, and generated hosted URLs on project creation without beginning P3-S2 return settings or
+  assurance configuration.

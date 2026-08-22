@@ -43,6 +43,44 @@ jobs:
           npm audit --prefix backend --omit=dev --audit-level=high
           npm audit --prefix frontend --omit=dev --audit-level=high
 
+  hosted-auth-production-health:
+    needs: verify
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - host: authx.powerotp.com
+            mode: powerotp_pii
+          - host: authz.powerotp.com
+            mode: didit_pii
+
+    steps:
+      - name: Wait for deployed realm and verify TLS routing
+        env:
+          HOST: ${{ matrix.host }}
+          MODE: ${{ matrix.mode }}
+        run: |
+          for attempt in {1..60}; do
+            if body="$(curl --fail --silent --show-error \
+              --connect-timeout 5 --max-time 10 \
+              "https://${HOST}/health/hosted-auth")" &&
+              jq -e --arg host "$HOST" --arg mode "$MODE" \
+                '.service == "powerotp-hosted-auth"
+                 and .status == "ok"
+                 and .environment == "production"
+                 and .realm == $host
+                 and .rpId == $host
+                 and .identityDataMode == $mode' <<<"$body" >/dev/null; then
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "Hosted-auth realm did not become healthy: ${HOST}" >&2
+          exit 1
+
   # Redeploys apps/telephony-agent on the Asterisk droplet after every push
   # to main, only once `verify` has passed — the droplet has no App
   # Platform-style webhook of its own, so this replicates that same
