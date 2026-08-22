@@ -37,6 +37,11 @@ const ProductionConfigSchema = z.object({
     .endsWith("-----END CERTIFICATE-----")
     .optional(),
   /**
+   * Dedicated server-only key for the three-minute hosted-auth terminal
+   * result. Optional until hosted-auth request handlers are enabled.
+   */
+  HOSTED_AUTH_RUNTIME_RESULT_ENCRYPTION_KEY: z.string().min(32).optional(),
+  /**
    * Independent BotBlocker Ed25519 trust domain. The active private key is
    * PKCS#8 DER encoded as canonical base64. A previous key carries public
    * SPKI DER only and is accepted strictly before its overlap deadline.

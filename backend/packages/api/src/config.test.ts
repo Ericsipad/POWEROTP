@@ -72,6 +72,7 @@ describe("loadConfig", () => {
         BOTBLOCKER_VISITOR_TOKEN_SECRET: "",
         BOTBLOCKER_INTELLIGENCE_HASH_SECRET: "",
         BOTBLOCKER_RUNTIME_ORIGIN: "",
+        HOSTED_AUTH_RUNTIME_RESULT_ENCRYPTION_KEY: "",
       }),
     );
   });
@@ -107,6 +108,22 @@ describe("loadConfig", () => {
         ...requiredEnv,
         HOSTED_AUTH_DATABASE_CA_CERT: "not-a-certificate",
       }),
+    );
+  });
+
+  it("validates the dedicated hosted-auth runtime result key", () => {
+    assert.throws(() =>
+      loadConfig({
+        ...requiredEnv,
+        HOSTED_AUTH_RUNTIME_RESULT_ENCRYPTION_KEY: "short",
+      }),
+    );
+    assert.equal(
+      loadConfig({
+        ...requiredEnv,
+        HOSTED_AUTH_RUNTIME_RESULT_ENCRYPTION_KEY: "r".repeat(32),
+      }).HOSTED_AUTH_RUNTIME_RESULT_ENCRYPTION_KEY,
+      "r".repeat(32),
     );
   });
 

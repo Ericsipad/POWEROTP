@@ -23,7 +23,8 @@ Do not mark a phase/step implemented, deployed, remote-green, or certified witho
 - P1-S4 — completed 2026-08-21 22:09 UTC, protocol/TTL/idempotency/PWA route contracts
 - P2-S1 — completed 2026-08-21 22:40 UTC, production Supabase identity schema and RLS
 - P2-S1 TLS correction — 2026-08-21 22:56 UTC, verified pooler login and CA trust
-- P2-S2 through P15-S6 — not started
+- P2-S2 — completed 2026-08-22 00:49 UTC, MongoDB hot auth-request repository
+- P2-S3 through P15-S6 — not started
 
 Update this index after every execution step with a link to that step's latest timestamped entry.
 
@@ -977,3 +978,78 @@ Next step:
 - `npm run test -w @powerotp/api` and `npm run typecheck -w @powerotp/api` passed.
 - The production environment still needs `HOSTED_AUTH_DATABASE_CA_CERT` copied from the POTP
   Database Settings SSL Configuration panel before hosted-identity connectivity is enabled.
+
+## 2026-08-22 00:49 UTC — P2-S2: MongoDB hot auth-request repository
+
+Status and scope:
+
+- P2-S2 is complete. This step added only the dedicated MongoDB hot auth-request repository,
+  active/terminal expiry behavior, encrypted terminal results, poll-token hashing, and startup
+  index creation.
+- Durable retention/write-before-publish, project bindings, wrapped keys/KMS, identity sagas,
+  provider adapters, and hosted-auth HTTP handlers were not started. Passport and BotBlocker plans
+  and behavior remain unchanged.
+
+Implemented data and behavior:
+
+- Added the `powerotp_auth_runtime` MongoDB database boundary and its minimal
+  `hostedAuthRequests` collection. It uses the existing MongoDB deployment/client but not the
+  primary `powerotp` application database or the Supabase identity store.
+- Active requests persist only a SHA-256 poll-token hash. Poll authorization binds request ID,
+  project, flow, and a constant-time token-hash comparison; the raw shown-once token is never
+  persisted.
+- Client-selected active lifetime is validated through the P1-S4 contract at 300–86,400 seconds
+  with a 1,800-second default. The active `purgeAt` is exactly `createdAt + selected TTL`.
+- A single atomic guarded update publishes one immutable terminal state only while the request is
+  active. Its JSON result is AES-256-GCM encrypted under a dedicated server-only key, and
+  `resultExpiresAt`/`purgeAt` are exactly 180 seconds after `completedAt`.
+- Poll reads enforce both expiry boundaries synchronously because MongoDB TTL cleanup is
+  asynchronous. At the exact boundary the result is unavailable and the repository opportunistically
+  deletes the matching record; the exact-date TTL index provides background cleanup.
+- Server startup creates the hot-store TTL and project/request lookup indexes against the dedicated
+  runtime database. No runtime route or repository consumer was added.
+- Added optional `HOSTED_AUTH_RUNTIME_RESULT_ENCRYPTION_KEY` validation. It remains inactive until a
+  later hosted-auth handler constructs the repository and must be installed as a distinct
+  production server secret before that handler is enabled; `.env` was not read or modified.
+
+Affected files:
+
+- `backend/packages/api/src/hosted-auth-request-repository.ts`
+- `backend/packages/api/src/hosted-auth-request-repository.test.ts`
+- `backend/packages/api/src/config.ts`
+- `backend/packages/api/src/config.test.ts`
+- `backend/packages/api/src/dependencies.ts`
+- `backend/apps/server/lib/server-context.ts`
+- `docs/POWEROTP_SIGNIN_AD_SERVICE_AS_BUILT.md`
+
+Security, compatibility, and migration impact:
+
+- Database reads expose neither a reusable poll token nor a plaintext terminal result. Wrong-project
+  and wrong-flow lookups do not locate a record, and token verification occurs before an authorized
+  caller receives expiry state.
+- The repository reuses the existing authenticated encryption primitive and keeps its result key
+  independent from PII, provider configuration, sessions, API keys, and BotBlocker secrets.
+- This is an additive MongoDB collection/index change on the existing deployment. It does not
+  change the P2-S1 Supabase schema, public/client contracts, routes, provider credentials, or `.env`.
+
+Focused verification:
+
+- `npm run build -w @powerotp/contracts` — passed as the local prerequisite that refreshed the
+  already-committed P1-S4 contract output.
+- `npm run test -w @powerotp/api` — passed (411 tests), including repository, TTL-boundary,
+  encryption-at-rest, terminal immutability, and token-hash tests.
+- `npm run typecheck -w @powerotp/api` — passed.
+- `npm run build -w @powerotp/api` followed by `npm run typecheck -w @powerotp/backend` — passed for
+  the server startup/database wiring.
+- No full-monorepo verification was run; remote Verify remains the complete pushed check.
+
+Commit, push, and remote check:
+
+- The coherent P2-S2 commit contains this entry. Its final hash, push confirmation, and one remote
+  Verify result check are reported in the post-push session handoff.
+
+Next step:
+
+- P2-S3 — add the separate durable redacted auth-request retention database and enforce
+  write-before-publish without beginning project bindings, wrapped keys, KMS integration, identity
+  sagas, providers, or runtime HTTP handlers.
