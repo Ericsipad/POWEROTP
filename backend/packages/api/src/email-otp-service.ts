@@ -1,3 +1,5 @@
+import type { HostedAuthContactPurpose } from "@powerotp/contracts";
+
 import type { ProductionConfig } from "./config.js";
 
 const CODE_PLACEHOLDER = "{{CODE}}";
@@ -18,7 +20,20 @@ export interface EmailOtpBranding {
 }
 
 export interface EmailOtpService {
-  sendOtpCode(targetEmail: string, code: string, branding?: EmailOtpBranding): Promise<void>;
+  sendOtpCode(
+    targetEmail: string,
+    code: string,
+    branding?: EmailOtpBranding,
+    context?: EmailOtpDeliveryContext,
+  ): Promise<void>;
+}
+
+export type EmailOtpPurpose =
+  | "verification_email_code"
+  | `hosted_auth_${HostedAuthContactPurpose}`;
+
+export interface EmailOtpDeliveryContext {
+  purpose: EmailOtpPurpose;
 }
 
 export class EmailOtpProviderError extends Error {
@@ -76,7 +91,7 @@ export function createBrevoEmailOtpService(
   fetchImpl: typeof fetch = fetch,
 ): EmailOtpService {
   return {
-    async sendOtpCode(targetEmail, code, branding) {
+    async sendOtpCode(targetEmail, code, branding, context) {
       const brandLabel = branding?.brandName?.trim() || "POWEROTP";
       const htmlContent = branding?.brandHtmlTemplate
         ? branding.brandHtmlTemplate.replaceAll(CODE_PLACEHOLDER, code)
@@ -93,6 +108,7 @@ export function createBrevoEmailOtpService(
           sender: { name: brandLabel, email: config.EMAIL_FROM },
           to: [{ email: targetEmail }],
           ...(branding?.brandReplyToEmail ? { replyTo: { email: branding.brandReplyToEmail } } : {}),
+          ...(context ? { tags: ["powerotp", context.purpose] } : {}),
           subject: `Your ${brandLabel} verification code`,
           htmlContent,
         }),

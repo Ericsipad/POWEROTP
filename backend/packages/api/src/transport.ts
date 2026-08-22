@@ -139,7 +139,12 @@ export function createEmailCodeTransport(
       }
 
       try {
-        await emailOtp.sendOtpCode(context.targetNumber, context.code, context.branding);
+        await emailOtp.sendOtpCode(
+          context.targetNumber,
+          context.code,
+          context.branding,
+          { purpose: "verification_email_code" },
+        );
       } catch (error) {
         const reasonCode =
           error instanceof EmailOtpProviderError ? error.reasonCode : "provider_unavailable";

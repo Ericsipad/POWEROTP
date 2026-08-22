@@ -80,6 +80,26 @@ describe("Brevo email OTP service", () => {
     assert.equal("replyTo" in body!, false);
   });
 
+  it("passes an explicit purpose tag to Brevo when delivery context is supplied", async () => {
+    let body: Record<string, unknown> | undefined;
+    const service = createBrevoEmailOtpService(config, async (_input, init) => {
+      body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return Response.json({});
+    });
+
+    await service.sendOtpCode(
+      "user@example.com",
+      "12345",
+      undefined,
+      { purpose: "hosted_auth_recovery_contact_proof" },
+    );
+
+    assert.deepEqual(body!.tags, [
+      "powerotp",
+      "hosted_auth_recovery_contact_proof",
+    ]);
+  });
+
   it("substitutes {{CODE}} into a customer's own full HTML template, unmodified otherwise", async () => {
     let body: Record<string, unknown> | undefined;
     const service = createBrevoEmailOtpService(config, async (_input, init) => {

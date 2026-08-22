@@ -36,11 +36,20 @@ import { createCallbackWorker } from "@powerotp/api/callback-worker.js";
 import { ChallengeService } from "@powerotp/api/challenge-service.js";
 import { loadConfig, type ProductionConfig } from "@powerotp/api/config.js";
 import { connectDataStores, type DataStores } from "@powerotp/api/dependencies.js";
+import { createBrevoEmailOtpService } from "@powerotp/api/email-otp-service.js";
 import { createBrevoEmailService } from "@powerotp/api/email.js";
+import {
+  createHostedAuthEmailBrandingResolver,
+  HostedAuthBrevoEmailProvider,
+} from "@powerotp/api/hosted-auth-brevo-email-provider.js";
 import {
   ensureHostedAuthDurableIndexes,
   ensureHostedAuthTemplateIndexes,
 } from "@powerotp/api/hosted-auth-durable-repository.js";
+import {
+  ensureHostedAuthEmailChallengeIndexes,
+  HostedAuthEmailChallengeRepository,
+} from "@powerotp/api/hosted-auth-email-challenge-repository.js";
 import { ensureHostedAuthRetentionIndexes } from "@powerotp/api/hosted-auth-retention-repository.js";
 import { ensureHostedAuthRequestIndexes } from "@powerotp/api/hosted-auth-request-repository.js";
 import { ModalSessionService } from "@powerotp/api/modal-session-service.js";
@@ -68,6 +77,7 @@ export interface ServerContext {
   config: ProductionConfig;
   dataStores: DataStores;
   auth: AuthService;
+  hostedAuthEmail: HostedAuthBrevoEmailProvider;
   projects: ProjectService;
   botBlockerSites: BotBlockerSiteService;
   botBlockerSiteCredentials: BotBlockerSiteCredentialService;
@@ -116,6 +126,7 @@ async function buildServerContext(): Promise<ServerContext> {
   await Promise.all([
     ensureIndexes(dataStores.db),
     ensureHostedAuthRequestIndexes(dataStores.authRuntimeDb),
+    ensureHostedAuthEmailChallengeIndexes(dataStores.authRuntimeDb),
     ensureHostedAuthRetentionIndexes(dataStores.authRetentionDb),
     ensureHostedAuthDurableIndexes(dataStores.authRetentionDb),
     ensureHostedAuthTemplateIndexes(dataStores.db),
@@ -137,6 +148,14 @@ async function buildServerContext(): Promise<ServerContext> {
 
   const emailService = createBrevoEmailService(config);
   const auth = new AuthService(dataStores.db, config, emailService);
+  const hostedAuthEmail = new HostedAuthBrevoEmailProvider(
+    createBrevoEmailOtpService(config),
+    new HostedAuthEmailChallengeRepository(
+      dataStores.authRuntimeDb,
+      config.API_KEY_HASH_SECRET,
+    ),
+    createHostedAuthEmailBrandingResolver(dataStores.db),
+  );
 
   const verifications = new VerificationService(
     dataStores.db,
@@ -285,6 +304,7 @@ async function buildServerContext(): Promise<ServerContext> {
     config,
     dataStores,
     auth,
+    hostedAuthEmail,
     projects,
     botBlockerSites,
     botBlockerSiteCredentials,

@@ -44,7 +44,8 @@ Do not mark a phase/step implemented, deployed, remote-green, or certified witho
 - P3-S3 — completed 2026-08-22 04:59 UTC, optional canonical backend IPv4/IPv6 CIDR allowlist
 - P3-S3 correction — 2026-08-22 05:08 UTC, enforced allowlists on non-slug result routes
 - P3-S4 — completed 2026-08-22 05:19 UTC, Project-card hosted-auth controls and audit visibility
-- P4-S1 through P15-S6 — not started
+- P4-S1 — completed 2026-08-22 05:32 UTC, purpose-separated hosted-auth Brevo adapter
+- P4-S2 through P15-S6 — not started
 
 Update this index after every execution step with a link to that step's latest timestamped entry.
 
@@ -2269,3 +2270,75 @@ Known limits and next step:
 - Template controls remain visibly disabled and have no backing API or persistence until Phase 5.
 - P4-S1 — add a purpose-separated hosted-auth adapter over the existing Brevo email service without
   changing custody-mode routing, customer Project controls, `.env`, or unrelated services.
+
+## 2026-08-22 05:32 UTC — P4-S1: purpose-separated hosted-auth Brevo adapter
+
+Status and scope:
+
+- P4-S1 is complete. The production dependency graph now owns a hosted-auth email adapter over the
+  existing Brevo OTP sender and a dedicated hot challenge repository.
+- P4-S2 SMS/voice adapters, Didit configuration/adapters, hosted ceremony routes, Project controls,
+  Passport, MCP, BotBlocker behavior, the landing-page demo, and `.env` were not changed.
+
+Implemented contracts, data, and behavior:
+
+- Added `HostedAuthBrevoEmailProvider`, implementing the P1-S3 vendor-neutral hosted-auth email
+  interface. Challenge start and proof verification retain the exact auth request, project, realm,
+  flow, and contact-provider purpose in their normalized results.
+- The adapter accepts only `provider=powerotp_email` with immutable `powerotp_pii` custody. A valid
+  `didit_pii`/`didit_email` request fails before project-branding lookup, challenge creation, or any
+  Brevo call, so this adapter cannot become a cross-custody fallback.
+- Reused `createBrevoEmailOtpService` rather than adding a second email implementation. Brevo sends
+  now carry `powerotp` plus the explicit hosted-auth contact purpose as provider tags. Existing
+  verification email sends are separately tagged `verification_email_code`.
+- Added a dedicated `hostedAuthEmailChallenges` collection in the existing hot hosted-auth runtime
+  database. It stores only a domain-separated keyed code hash, exact purpose scope, opaque provider
+  operation/evidence references, and timestamps; it stores neither destination email nor plaintext
+  code. Proofs are exact-scope, ten-minute, one-time operations and are consumed atomically.
+- Server startup creates the challenge TTL/request-purpose indexes and constructs the adapter with
+  the existing Brevo configuration, existing project-branding fields, runtime database, and
+  existing server secret. No new configuration value or provider credential was introduced.
+
+Affected files:
+
+- `backend/packages/api/src/email-otp-service.ts`
+- `backend/packages/api/src/email-otp-service.test.ts`
+- `backend/packages/api/src/transport.ts`
+- `backend/packages/api/src/hosted-auth-brevo-email-provider.ts`
+- `backend/packages/api/src/hosted-auth-brevo-email-provider.test.ts`
+- `backend/packages/api/src/hosted-auth-email-challenge-repository.ts`
+- `backend/packages/api/src/hosted-auth-email-challenge-repository.test.ts`
+- `backend/apps/server/lib/server-context.ts`
+- `docs/POWEROTP_SIGNIN_AD_SERVICE_AS_BUILT.md`
+
+Security, compatibility, and migration impact:
+
+- Challenge hashes are HMAC-SHA-256 domain-separated by operation ID, project, custody mode, flow,
+  and provider purpose. Wrong scope, wrong code, expiry, and replay all fail closed.
+- Consumed records become immediately TTL-eligible. The normalized evidence reference can be linked
+  to the durable auth-request retention record by later ceremony orchestration without retaining
+  contact data or a reusable proof.
+- This is an additive runtime collection/index change created through the existing startup index
+  path. Existing email content, project branding, verification transport, customer APIs, and
+  environment contracts remain compatible.
+
+Focused verification:
+
+- API package tests passed (491), including all four hosted-auth contact-purpose tags, strict
+  `didit_pii` rejection before side effects, normalized proof output, exact-scope proof checks,
+  wrong-code rejection, replay rejection, and the ten-minute expiry boundary.
+- API package production build passed.
+- Backend production build passed with the adapter and runtime indexes in the server dependency
+  graph.
+
+Commit, push, and remote check:
+
+- The coherent P4-S1 change is ready for commit and push. Final commit, push, and one remote Verify
+  result check are reported in the post-push handoff.
+
+Known limits and next step:
+
+- P4-S1 provides the real email-provider and proof-storage foundation but adds no hosted browser or
+  customer initiation route; those remain assigned to later ceremony phases.
+- P4-S2 — add purpose-separated hosted-auth adapters over the existing SMS and voice verification
+  infrastructure while preserving the same immutable custody and provider-purpose routing.
