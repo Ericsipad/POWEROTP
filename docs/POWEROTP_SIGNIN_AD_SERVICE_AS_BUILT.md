@@ -26,7 +26,8 @@ Do not mark a phase/step implemented, deployed, remote-green, or certified witho
 - P2-S2 — completed 2026-08-22 00:49 UTC, MongoDB hot auth-request repository
 - P2-S2 timeout correction — 2026-08-22 01:02 UTC, fixed ten-minute active ceremony
 - P2-S3 — completed 2026-08-22 01:17 UTC, durable redacted retention before publication
-- P2-S4 through P15-S6 — not started
+- P2-S4 — completed 2026-08-22 01:28 UTC, durable hosted-auth supporting schemas
+- P2-S5 through P15-S6 — not started
 
 Update this index after every execution step with a link to that step's latest timestamped entry.
 
@@ -1177,3 +1178,78 @@ Next step:
 
 - P2-S4 — add only project binding, wrapped-key metadata, hosted-auth template, and non-request
   security-event schemas without beginning per-person cryptography/KMS integration or identity sagas.
+
+## 2026-08-22 01:28 UTC — P2-S4: durable hosted-auth supporting schemas
+
+Status and scope:
+
+- P2-S4 is complete. It adds only strict project-binding, wrapped-key metadata, hosted-auth
+  Template 1, and non-request security-event storage schemas plus their uniqueness/lookup indexes.
+- Per-person DEK generation/encryption, KMS calls, key rotation, project-user-ID derivation, identity
+  sagas, provider adapters, MCP behavior, runtime HTTP handlers, Passport, and BotBlocker remain
+  unchanged.
+
+Implemented data and behavior:
+
+- Added strict project-binding records containing the internal binding ID, private person ID,
+  owning project, pairwise project user ID, lifecycle status, derivation version, and bounded
+  timestamps. Exact duplicate creation is idempotent; a changed replay for the same binding ID
+  fails instead of replacing the persisted project user ID.
+- Added wrapped-key metadata records containing only the private person reference, KMS key version,
+  wrapped-DEK ciphertext, lifecycle status, and crypto-shredding timestamp. Active records require
+  ciphertext; crypto-shredded records require ciphertext removal. No plaintext DEK, key generation,
+  unwrap operation, KMS client, or rotation behavior was added.
+- Added one strict per-project/page/Template 1 record with exactly Rows A–F, bounded structured text,
+  opaque Bunny asset references with required alt text, exactly six independent ad toggles,
+  optimistic revision metadata, and no raw HTML/CSS/script or remote-image URL field.
+- Added finite-retention, append-only non-request security events for credential, project auth
+  configuration, wrapped-key, identity-deletion, abuse, and privileged-support changes. Events
+  contain only canonical actor/target references, changed-field names, outcome/reason, correlation,
+  and timestamps; auth-request IDs, tokens/hashes, browser handles, PII, provider payloads, and
+  arbitrary detail objects have no accepted field.
+- Added unique indexes for `(projectId, hostedPersonIdentityId)`,
+  `(projectId, projectUserId)`, one wrapped-key record per person, and
+  `(projectId, pageType, templateType)`. Security events have project/time lookup and exact-date
+  finite-retention indexes.
+- Startup creates bindings, wrapped-key, and security-event indexes in
+  `powerotp_auth_retention`; template configuration uses the primary project-content database.
+  Supabase identity and `powerotp_auth_runtime` remain separate and unchanged.
+
+Affected files:
+
+- `backend/packages/api/src/hosted-auth-durable-schemas.ts`
+- `backend/packages/api/src/hosted-auth-durable-repository.ts`
+- `backend/packages/api/src/hosted-auth-durable-repository.test.ts`
+- `backend/apps/server/lib/server-context.ts`
+- `docs/POWEROTP_SIGNIN_AD_SERVICE_AS_BUILT.md`
+
+Security, compatibility, and migration impact:
+
+- Strict nested schemas and opaque references reject undeclared sensitive or executable fields.
+  Binding creation and event append paths expose no overwrite operation.
+- All changes are additive MongoDB collections/indexes on existing database connections. No
+  environment variable, `.env`, Supabase migration, provider credential, public route, client
+  response, Passport behavior, or BotBlocker behavior changed.
+- No legal retention duration was invented. Security-event callers must provide an approved finite
+  expiry; binding/template lifecycle deletion and wrapped-key crypto-shredding remain owned by their
+  later planned services.
+
+Focused verification:
+
+- `npm run test -w @powerotp/api` — passed (428 tests), including strict schema, redaction,
+  uniqueness/index, page isolation, immutable binding, and append-only security-event coverage.
+- `npm run lint -w @powerotp/api` — passed.
+- `npm run build -w @powerotp/api` followed by `npm run lint -w @powerotp/backend` — passed for
+  generated declarations and startup index wiring.
+- No full-monorepo verification was run locally; remote Verify remains the complete pushed check.
+
+Commit, push, and remote check:
+
+- The coherent P2-S4 commit contains this entry. Its final hash, push confirmation, and one remote
+  Verify result check are reported in the post-push session handoff.
+
+Next step:
+
+- P2-S5 — add per-person DEK generation, AEAD associated-data envelope encryption, KMS integration,
+  and wrapped-key persistence without beginning P2-S6 project-user-ID/lookup-secret derivation or
+  key rotation.
