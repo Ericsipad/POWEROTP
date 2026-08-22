@@ -47,7 +47,8 @@ Do not mark a phase/step implemented, deployed, remote-green, or certified witho
 - P4-S1 — completed 2026-08-22 05:32 UTC, purpose-separated hosted-auth Brevo adapter
 - P4-S2 — completed 2026-08-22 05:42 UTC, purpose-separated hosted-auth SMS/voice adapters
 - P4-S3 — completed 2026-08-22 07:14 UTC, atomic purpose-separated Didit environment validation
-- P4-S4 through P15-S6 — not started
+- P4-S4 — completed 2026-08-22 07:25 UTC, crash-safe persistent Didit User person-root mapping
+- P4-S5 through P15-S6 — not started
 
 Update this index after every execution step with a link to that step's latest timestamped entry.
 
@@ -2482,3 +2483,70 @@ Known limits and next step:
 - P4-S4 — implement persistent Didit User creation and the exact
   `hostedPersonIdentityId → potpDiditId → diditInternalId` person-root mapping without beginning
   contact verification, webhooks, polling, assurance adapters, hosted ceremonies, or P4-S5+.
+
+## 2026-08-22 07:25 UTC — P4-S4: crash-safe persistent Didit User person-root mapping
+
+Status and scope:
+
+- P4-S4 is complete. The API package now owns persistent Didit User creation and the exact
+  `hostedPersonIdentityId → potpDiditId → diditInternalId` person-root mapping.
+- Didit contact verification, webhooks, polling, assurance adapters, hosted ceremonies, P4-S5+,
+  Project controls, Passport, MCP, BotBlocker, the landing-page demo, and `.env` were not changed.
+
+Implemented contracts, data, and behavior:
+
+- Added a narrow Didit Management API User adapter for `POST /v3/users/create/`. It sends only the
+  POWEROTP-generated opaque `potpDiditId` as `vendor_data`, uses the server-only API key, rejects
+  redirects, applies a ten-second timeout, validates the returned vendor data and canonical
+  `didit_internal_id`, and returns only the existing vendor-neutral mapping contract.
+- Didit's create operation is documented as non-idempotent and returns HTTP 400 when `vendor_data`
+  already exists. That path performs an authenticated `GET /v3/users/{vendor_data}/` and accepts the
+  existing User only when its returned `vendor_data` exactly matches the reservation. Other HTTP,
+  malformed-body, mismatched-identity, and credential failures fail closed without exposing provider
+  response bodies or secrets.
+- Added a person-root mapping service and PostgreSQL repository. The repository row-locks the person,
+  persists one random 256-bit `potpDiditId` before the provider side effect, reuses that reservation
+  after failures or crashes, then holds the person lock across provider resolution and the conditional
+  `diditInternalId` write. Deletion therefore cannot overtake in-flight creation and clean a User
+  before it exists. Completed mappings are idempotent; different reservations/results and unavailable
+  identities are rejected.
+- Added migration `20260822073000_p4_s4_didit_user_mapping.sql`. It replaces the original all-or-none
+  mapping check with the ordered invariant `diditInternalId requires potpDiditId`, permitting the
+  durable pre-provider reservation while still forbidding an unrooted provider UUID.
+- Identity deletion now carries a reserved `potpDiditId` to provider cleanup even if creation failed
+  before `diditInternalId` was stored, so an abandoned partial provider identity cannot be silently
+  treated as provider-free.
+- The adapter factory remains disabled when `DIDIT_API_KEY` is absent. No live provider call or
+  database migration was executed in this step, and no credential was read, generated, logged, or
+  written.
+
+Security and migration impact:
+
+- The provider receives no hosted person ID, contact, project identifier, PII, or client-visible
+  identifier. Clients receive none of the person-root mapping values.
+- Reserving before the external write closes the duplicate-User window created by a process/database
+  failure between Didit success and local completion. The completion lock serializes creation against
+  deletion, and unique database constraints continue to protect both mapping values.
+- Existing complete mappings remain valid. Existing null/null identities can transition through
+  null/null → reserved/null → reserved/complete; the reverse invalid state remains prohibited.
+
+Focused verification:
+
+- API package tests passed (508), including durable reservation/retry, mapping mismatch, blocked
+  identity, duplicate Didit create resolution, strict provider response binding, disabled
+  configuration, migration invariant, and existing API behavior.
+- API package production build passed.
+- No full-monorepo verification was run locally; remote Verify remains the complete pushed check.
+
+Commit, push, and remote check:
+
+- The coherent P4-S4 change is ready for commit and push. Final commit, push, and one remote Verify
+  result check are reported in the post-push handoff.
+
+Known limits and next step:
+
+- P4-S4 exposes the persistent User foundation for later orchestration but intentionally adds no
+  public/customer route and no contact or verification session operation.
+- P4-S5 — implement Didit email/phone contact verification APIs behind the existing vendor-neutral
+  contracts and POWEROTP-branded UI contract, preserving strict `didit_pii` routing and this permanent
+  person-root mapping.

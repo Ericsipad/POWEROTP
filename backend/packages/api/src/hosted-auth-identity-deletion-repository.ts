@@ -95,10 +95,10 @@ export class PostgresHostedAuthIdentityDeletionRepository
     );
     return result.rows.map((row) => ({
       hostedPersonIdentityId: row.personId,
-      providerIdentityReferences:
-        row.potpDiditId && row.diditInternalId
-          ? [row.potpDiditId, row.diditInternalId]
-          : [],
+      providerIdentityReferences: [
+        ...(row.potpDiditId ? [row.potpDiditId] : []),
+        ...(row.diditInternalId ? [row.diditInternalId] : []),
+      ],
       providerContactReferences: row.contactReferences,
     }));
   }
