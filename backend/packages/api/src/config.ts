@@ -142,6 +142,7 @@ const ProductionConfigSchema = z.object({
    * incomplete or cross-purpose provider setup.
    */
   DIDIT_API_KEY: z.string().min(1).optional(),
+  DIDIT_ENVIRONMENT: z.enum(["live", "sandbox"]).optional(),
   DIDIT_EMAIL_WORKFLOW_ID: DiditWorkflowIdSchema.optional(),
   DIDIT_PHONE_WORKFLOW_ID: DiditWorkflowIdSchema.optional(),
   DIDIT_RECOVERY_WORKFLOW_ID: DiditWorkflowIdSchema.optional(),
@@ -301,6 +302,7 @@ const ProductionConfigSchema = z.object({
 }).superRefine((configuration, context) => {
   const diditConfiguration = [
     configuration.DIDIT_API_KEY,
+    configuration.DIDIT_ENVIRONMENT,
     configuration.DIDIT_EMAIL_WORKFLOW_ID,
     configuration.DIDIT_PHONE_WORKFLOW_ID,
     configuration.DIDIT_RECOVERY_WORKFLOW_ID,
@@ -312,7 +314,7 @@ const ProductionConfigSchema = z.object({
   ];
   requireAllOrNone(diditConfiguration, "Didit integration", context);
 
-  const diditWorkflowIds = diditConfiguration.slice(1, -1).filter(
+  const diditWorkflowIds = diditConfiguration.slice(2, -1).filter(
     (value): value is string => value !== undefined,
   );
   if (new Set(diditWorkflowIds).size !== diditWorkflowIds.length) {

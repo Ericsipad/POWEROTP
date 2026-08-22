@@ -22,6 +22,7 @@ const requiredEnv = {
 
 const diditEnv = {
   DIDIT_API_KEY: "didit-api-key",
+  DIDIT_ENVIRONMENT: "sandbox",
   DIDIT_EMAIL_WORKFLOW_ID: "11111111-1111-4111-8111-111111111111",
   DIDIT_PHONE_WORKFLOW_ID: "22222222-2222-4222-8222-222222222222",
   DIDIT_RECOVERY_WORKFLOW_ID: "33333333-3333-4333-8333-333333333333",
@@ -86,6 +87,7 @@ describe("loadConfig", () => {
         BOTBLOCKER_RUNTIME_ORIGIN: "",
         HOSTED_AUTH_RUNTIME_RESULT_ENCRYPTION_KEY: "",
         DIDIT_API_KEY: "",
+        DIDIT_ENVIRONMENT: "",
         DIDIT_EMAIL_WORKFLOW_ID: "",
         DIDIT_PHONE_WORKFLOW_ID: "",
         DIDIT_RECOVERY_WORKFLOW_ID: "",
@@ -151,6 +153,7 @@ describe("loadConfig", () => {
   it("requires one complete purpose-separated Didit configuration", () => {
     const configuration = loadConfig({ ...requiredEnv, ...diditEnv });
     assert.equal(configuration.DIDIT_API_KEY, diditEnv.DIDIT_API_KEY);
+    assert.equal(configuration.DIDIT_ENVIRONMENT, "sandbox");
     assert.equal(
       configuration.DIDIT_BIOMETRIC_AUTH_WORKFLOW_ID,
       diditEnv.DIDIT_BIOMETRIC_AUTH_WORKFLOW_ID,
@@ -187,6 +190,13 @@ describe("loadConfig", () => {
           DIDIT_PHONE_WORKFLOW_ID: diditEnv.DIDIT_EMAIL_WORKFLOW_ID,
         }),
       /Every Didit purpose must use a distinct workflow ID/,
+    );
+    assert.throws(() =>
+      loadConfig({
+        ...requiredEnv,
+        ...diditEnv,
+        DIDIT_ENVIRONMENT: "test",
+      }),
     );
   });
 

@@ -52,7 +52,8 @@ Do not mark a phase/step implemented, deployed, remote-green, or certified witho
 - P4-S5 — completed 2026-08-22 07:40 UTC, Didit email/phone OTP contact adapters
 - P4-S6 — completed 2026-08-22 07:59 UTC, signed Didit webhook replay/order boundary
 - P4-S7 — completed 2026-08-22 08:34 UTC, provider polling reconciliation and fail-closed outage behavior
-- P4-S8 through P15-S6 — not started
+- P4-S8 — completed 2026-08-22 09:47 UTC, purpose-specific Didit Sessions API adapters
+- P4-S9 through P15-S6 — not started
 
 Update this index after every execution step with a link to that step's latest timestamped entry.
 
@@ -2829,3 +2830,93 @@ Affected documentation:
 Next step:
 
 - P4-S8 remains the next implementation step under the corrected workflow/custody boundary.
+
+## 2026-08-22 09:47 UTC — P4-S8: purpose-specific Didit Sessions API adapters
+
+Status and scope:
+
+- P4-S8 is complete. The API package now validates and creates purpose-specific Didit Sessions API
+  operations for document age, no-IP basic KYC, and passive liveness.
+- Web SDK/browser ceremonies, public routes, reusable claim persistence/evaluation, DOB threshold
+  derivation, reuse charging, provider decision persistence, BotBlocker, and `.env` were not changed.
+
+Implemented provider behavior:
+
+- Added three distinct adapters mapped to `DIDIT_AGE_WORKFLOW_ID`, `DIDIT_KYC_WORKFLOW_ID`, and
+  `DIDIT_LIVENESS_WORKFLOW_ID`. Each validates its exact purpose before resolving the existing
+  person mapping and compares both `potpDiditId` and `diditInternalId` before a provider side effect.
+- Every session creation sends the resolved person-level `potpDiditId` as `vendor_data` and includes
+  only opaque auth-request/purpose/environment linkage in provider metadata. Both contact-custody
+  realms may use these optional assurance adapters; no contact-provider routing changes.
+- Startup construction authenticates `GET /v3/workflows/{workflowId}/` for all three workflows and
+  fails atomically unless each is a published, non-editable KYC version with its configured stable
+  workflow ID, exact linear graph, exact feature string, exact returned-data allowlist, and a
+  consistent provider-computed `total_price`/`max_price`.
+- Document age requires only `OCR` and returns only `date_of_birth` for later transient P4-S9
+  evaluation. Basic KYC requires exactly `OCR → LIVENESS(PASSIVE) → FACE_MATCH → Determine`.
+  Liveness requires exactly `LIVENESS(PASSIVE) → Determine`. Extra/unreachable nodes, wrong order,
+  branches, Device/IP Analysis, active liveness, and unexpected features fail closed.
+- Basic KYC and liveness return no feature attributes beyond Didit's unavoidable status, warnings,
+  and node identifier fields. A null/missing provider policy, which means return all PII/media, is
+  rejected. No Didit PII, DOB, document data, media, biometrics, or full decision is persisted or
+  returned.
+- The adapter validates the created session's workflow version, stable workflow ID, opaque person
+  mapping, and metadata. It returns only the operation ID, internal purpose scope, pending state,
+  and temporary session URL needed by the later P6-S11 SDK host; the separate session token, any
+  extra provider fields, and decision/evidence content are discarded.
+- Added required `DIDIT_ENVIRONMENT=live|sandbox` to the atomic Didit configuration. The environment
+  is bound into the validated workflow descriptor/session metadata and remains subject to the
+  existing exact environment checks on authenticated webhooks and reconciliation polls. Existing
+  deployments with Didit entirely absent remain disabled; a partial provider configuration fails
+  closed. No environment file or remote secret was read or modified.
+- Provider prices remain observed runtime configuration. The adapters expose each authenticated
+  workflow's computed price as a decimal string for later billing linkage and contain no hardcoded
+  product price or acceptance value.
+
+Didit source validation and live findings:
+
+- Authenticated Didit MCP inspection covered both the live and sandbox applications, the workflow
+  list with age annotations, a full workflow configuration, and a published graph/returned-data
+  policy. No Didit object or setting was changed.
+- Neither application currently has suitable P4-S8 workflows: the existing Free KYC workflows cost
+  USD 0.33, include Device/IP Analysis, provide no age assurance, remain drafts, and return all
+  feature data; the inspected published compliance workflow also includes IP Analysis and other
+  features and returns all data. These IDs must not be configured for the new adapters.
+- Current official Didit Sessions, workflow-management, sandbox, vendor-data, ID-report, liveness,
+  face-match, and decision documentation confirmed backend session creation, API-key/application
+  environment separation, per-version workflow pinning, opaque `vendor_data` entity linking,
+  plural feature reports, DOB inside ID verification, session-URL secrecy, and `response_attributes`
+  null/missing meaning all data is returned.
+
+Affected files:
+
+- `backend/packages/api/src/config.ts`
+- `backend/packages/api/src/config.test.ts`
+- `backend/packages/api/src/hosted-auth-didit-session-provider.ts`
+- `backend/packages/api/src/hosted-auth-didit-session-provider.test.ts`
+- `backend/packages/api/src/hosted-auth-didit-workflow-validation.ts`
+- `backend/packages/api/src/hosted-auth-didit-workflow-validation.test.ts`
+- `docs/POWEROTP_SIGNIN_AD_SERVICE_AS_BUILT.md`
+
+Focused verification:
+
+- API package tests passed: 534 tests across 136 suites. Coverage includes both custody realms,
+  exact purpose and person mapping, no provider call on binding failure, all three exact graphs,
+  passive liveness, no-IP KYC, returned-data minimization, dynamic provider prices, workflow/version
+  drift, created-session binding, secret/PII stripping, and disabled configuration.
+- API package production build passed.
+- No full-monorepo verification was run locally; remote Verify remains the complete pushed check.
+
+Commit, push, and remote check:
+
+- The coherent P4-S8 change is ready for commit and push. Final commit, push, and one remote Verify
+  result check are reported in the post-push handoff.
+
+Known limits and next step:
+
+- Correct published provider workflows and `DIDIT_ENVIRONMENT` still require environment-specific
+  operator provisioning before these adapters can activate. The adapters fail closed against every
+  currently inspected unsuitable workflow.
+- P4-S9 — implement provider-reference-backed reusable claim persistence/evaluation, transient DOB
+  threshold derivation, expiry/recheck policy, and per-project reuse charging without beginning
+  hosted Web SDK ceremonies or later phases.
