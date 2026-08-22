@@ -1,4 +1,9 @@
-import type { VerificationState, VerificationType } from "@powerotp/contracts";
+import type {
+  HostedAuthContactScope,
+  HostedAuthPhoneChallengeRequest,
+  VerificationState,
+  VerificationType,
+} from "@powerotp/contracts";
 import type { Db } from "mongodb";
 
 import type { InteractionChallenge } from "./challenge-service.js";
@@ -44,6 +49,17 @@ export interface VerificationRequestDocument {
   sequence: number;
   correlationId: string;
   browserResponse: boolean;
+  /**
+   * Present only when the existing SMS/voice interaction is serving a
+   * hosted-auth contact proof. The immutable scope/provider binding lets the
+   * hosted adapter reject cross-request, cross-realm, and cross-purpose proof
+   * attempts before the one-time verification response is consumed.
+   */
+  hostedAuthContact?: {
+    authRequestId: string;
+    scope: HostedAuthContactScope;
+    provider: HostedAuthPhoneChallengeRequest["provider"];
+  };
   /**
    * Authenticated-encrypted with `CONFIG_ENCRYPTION_KEY` (same primitive as
    * `ProjectDocument#callbackSecretEncrypted`), never plaintext — a

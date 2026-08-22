@@ -50,6 +50,7 @@ import {
   ensureHostedAuthEmailChallengeIndexes,
   HostedAuthEmailChallengeRepository,
 } from "@powerotp/api/hosted-auth-email-challenge-repository.js";
+import { createHostedAuthPowerOtpPhoneProvider } from "@powerotp/api/hosted-auth-powerotp-phone-provider.js";
 import { ensureHostedAuthRetentionIndexes } from "@powerotp/api/hosted-auth-retention-repository.js";
 import { ensureHostedAuthRequestIndexes } from "@powerotp/api/hosted-auth-request-repository.js";
 import { ModalSessionService } from "@powerotp/api/modal-session-service.js";
@@ -78,6 +79,8 @@ export interface ServerContext {
   dataStores: DataStores;
   auth: AuthService;
   hostedAuthEmail: HostedAuthBrevoEmailProvider;
+  hostedAuthSms: ReturnType<typeof createHostedAuthPowerOtpPhoneProvider>;
+  hostedAuthVoice: ReturnType<typeof createHostedAuthPowerOtpPhoneProvider>;
   projects: ProjectService;
   botBlockerSites: BotBlockerSiteService;
   botBlockerSiteCredentials: BotBlockerSiteCredentialService;
@@ -169,6 +172,16 @@ async function buildServerContext(): Promise<ServerContext> {
     (verification) => billingCharges.chargeCompletedInteraction(verification),
     (customerId, type) => usageQuotas.tryConsumeFreeQuota(customerId, type),
     (customerId) => auth.requireVerifiedEmail(customerId),
+  );
+  const hostedAuthSms = createHostedAuthPowerOtpPhoneProvider(
+    "powerotp_sms",
+    verifications,
+    dataStores.db,
+  );
+  const hostedAuthVoice = createHostedAuthPowerOtpPhoneProvider(
+    "powerotp_voice",
+    verifications,
+    dataStores.db,
   );
   const dispatchWorker = createDispatchWorker(
     queueConnection,
@@ -305,6 +318,8 @@ async function buildServerContext(): Promise<ServerContext> {
     dataStores,
     auth,
     hostedAuthEmail,
+    hostedAuthSms,
+    hostedAuthVoice,
     projects,
     botBlockerSites,
     botBlockerSiteCredentials,

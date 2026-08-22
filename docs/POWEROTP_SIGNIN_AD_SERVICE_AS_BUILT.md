@@ -45,7 +45,8 @@ Do not mark a phase/step implemented, deployed, remote-green, or certified witho
 - P3-S3 correction — 2026-08-22 05:08 UTC, enforced allowlists on non-slug result routes
 - P3-S4 — completed 2026-08-22 05:19 UTC, Project-card hosted-auth controls and audit visibility
 - P4-S1 — completed 2026-08-22 05:32 UTC, purpose-separated hosted-auth Brevo adapter
-- P4-S2 through P15-S6 — not started
+- P4-S2 — completed 2026-08-22 05:42 UTC, purpose-separated hosted-auth SMS/voice adapters
+- P4-S3 through P15-S6 — not started
 
 Update this index after every execution step with a link to that step's latest timestamped entry.
 
@@ -2342,3 +2343,77 @@ Known limits and next step:
   customer initiation route; those remain assigned to later ceremony phases.
 - P4-S2 — add purpose-separated hosted-auth adapters over the existing SMS and voice verification
   infrastructure while preserving the same immutable custody and provider-purpose routing.
+
+## 2026-08-22 05:42 UTC — P4-S2: purpose-separated hosted-auth SMS/voice adapters
+
+Status and scope:
+
+- P4-S2 is complete. Production now owns separate hosted-auth SMS and voice adapters over the
+  existing real verification service, queue, VoIP.ms SMS transport, and telephony-node voice path.
+- Didit configuration/adapters, hosted ceremony routes, P4-S3+, Project controls, Passport, MCP,
+  BotBlocker behavior, the landing-page demo, and `.env` were not changed.
+
+Implemented contracts, data, and behavior:
+
+- Added `createHostedAuthPowerOtpPhoneProvider`, implementing the existing vendor-neutral phone
+  provider contract as channel-bound `powerotp_sms` and `powerotp_voice` adapters.
+- Each adapter validates the strict contract and requires its exact POWEROTP provider plus the
+  `powerotp_pii` realm before project lookup or verification work. It also confirms the persisted
+  project custody mode before dispatch, so `didit_pii`, wrong-channel, and missing-project requests
+  cannot reach an SMS or voice side effect.
+- Hosted SMS maps only to the existing `sms_code` interaction and VoIP.ms sender. Hosted voice maps
+  only to the existing `voice_code` interaction and telephony-node/Asterisk path. Both continue to
+  use the existing account verification, free-quota/balance gate, encrypted code storage, queue,
+  timeout, completion billing, event, callback, and provider-reconciliation machinery.
+- Verification interactions created for hosted auth now carry an internal immutable binding to the
+  auth request, complete contact scope, and exact phone provider. Their idempotency hash includes
+  that binding, while the pre-existing public verification hash format is unchanged for retry
+  compatibility.
+- Proof submission checks the stored request, project, realm, flow, provider purpose, and channel
+  before calling the existing one-time `submitCode` path. Success exposes only the opaque
+  interaction ID as the minimal evidence reference; wrong scope/code and replay reject, while a
+  queued operation normalizes to `retryable_failure`.
+- The production server context constructs both adapters after the shared verification service,
+  without adding provider credentials, environment values, routes, or duplicated transports.
+
+Affected files:
+
+- `backend/packages/api/src/hosted-auth-powerotp-phone-provider.ts`
+- `backend/packages/api/src/hosted-auth-powerotp-phone-provider.test.ts`
+- `backend/packages/api/src/verification-service.ts`
+- `backend/packages/api/src/verification-persistence.ts`
+- `backend/apps/server/lib/server-context.ts`
+- `docs/POWEROTP_SIGNIN_AD_SERVICE_AS_BUILT.md`
+
+Security, compatibility, and migration impact:
+
+- Custody and provider-purpose checks occur before external work and exact-scope checks occur before
+  consuming a proof. The stored binding contains identifiers and routing scope but no phone number,
+  plaintext code, poll token, browser secret, or Didit data.
+- Phone codes retain the existing authenticated encryption and ten-minute interaction lifetime.
+  Interaction IDs remain unguessable and become the provider operation/evidence linkage rather than
+  introducing a second phone challenge store.
+- This is an additive optional field on existing verification documents. Existing customer
+  verification APIs, transports, reports, and persisted idempotency hashes remain compatible.
+
+Focused verification:
+
+- API package tests passed (495), including all four contact purposes across SMS and voice,
+  custody/channel rejection before side effects, exact-scope proof enforcement, normalized success,
+  queued-operation, wrong-code, and replay outcomes.
+- API package production build passed.
+- Backend production build passed with both adapters in the production dependency graph.
+
+Commit, push, and remote check:
+
+- The coherent P4-S2 change is ready for commit and push. Final commit, push, and one remote Verify
+  result check are reported in the post-push handoff.
+
+Known limits and next step:
+
+- The adapters intentionally add no hosted browser/customer initiation route; Phase 6 through Phase
+  10 ceremony orchestration will invoke them and publish authoritative auth-request results.
+- The existing verification balance gate/completion charge remains reused unchanged. P6-S5 still
+  owns hosted-auth-specific pre-provider debit/reservation and durable auth-request linkage.
+- P4-S3 — validate the complete Didit environment/configuration contract without changing `.env` or
+  beginning Didit User, contact, webhook, polling, assurance, ceremony, or later-phase work.

@@ -126,9 +126,16 @@ export class VerificationService {
     input: CreateVerification,
     idempotencyKey: string,
     correlationId: string,
+    hostedAuthContact?: VerificationRequestDocument["hostedAuthContact"],
   ) {
     const requestHash = createHash("sha256")
-      .update(JSON.stringify(input))
+      // Preserve the established public-operation hash exactly so retries
+      // created before this additive hosted-auth path remain compatible.
+      .update(
+        JSON.stringify(
+          hostedAuthContact ? { input, hostedAuthContact } : input,
+        ),
+      )
       .digest("base64url");
     const recordId = idempotencyRecordId(projectId, idempotencyKey);
 
@@ -204,6 +211,7 @@ export class VerificationService {
       sequence: 0,
       correlationId,
       browserResponse: input.browserResponse,
+      hostedAuthContact,
       expectedCodeEncrypted: code
         ? encryptString(code, this.config.CONFIG_ENCRYPTION_KEY)
         : undefined,
