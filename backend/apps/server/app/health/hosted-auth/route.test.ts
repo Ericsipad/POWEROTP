@@ -26,8 +26,8 @@ function realmRequest(hostname: string) {
 }
 
 describe("GET /health/hosted-auth", () => {
-  it("reports the powerotp_pii realm only on authx", async () => {
-    process.env.HOSTED_AUTH_DEPLOYMENT_ENVIRONMENT = "production";
+  it("reports the middleware-validated powerotp_pii realm on authx", async () => {
+    process.env.HOSTED_AUTH_DEPLOYMENT_ENVIRONMENT = "staging";
     const response = GET(realmRequest("authx.powerotp.com"));
 
     assert.equal(response.status, 200);
@@ -57,11 +57,11 @@ describe("GET /health/hosted-auth", () => {
     });
   });
 
-  it("rejects the API host and cross-environment hosts", async () => {
+  it("rejects non-realm middleware handoffs", async () => {
     process.env.HOSTED_AUTH_DEPLOYMENT_ENVIRONMENT = "production";
     for (const hostname of [
       "api.powerotp.com",
-      "authx.staging.powerotp.com",
+      "unknown.powerotp.com",
     ]) {
       const response = GET(realmRequest(hostname));
       assert.equal(response.status, 404);

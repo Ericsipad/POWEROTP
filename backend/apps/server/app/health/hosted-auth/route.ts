@@ -2,17 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 
 import {
   HOSTED_AUTH_REALM_REQUEST_HEADER,
-  hostedAuthDeploymentEnvironment,
-  resolveHostedAuthRealm,
+  resolveHostedAuthRealmFromValidatedHostname,
 } from "@/lib/hosted-auth-realms";
 
 const NO_STORE_HEADERS = { "cache-control": "no-store" };
 
 export function GET(request: NextRequest) {
-  const environment = hostedAuthDeploymentEnvironment();
-  const realm = resolveHostedAuthRealm(
+  const realm = resolveHostedAuthRealmFromValidatedHostname(
     request.headers.get(HOSTED_AUTH_REALM_REQUEST_HEADER) ?? "",
-    environment,
   );
   if (!realm) {
     return NextResponse.json(

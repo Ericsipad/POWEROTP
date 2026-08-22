@@ -97,6 +97,18 @@ export function resolveHostedAuthRealm(
   return null;
 }
 
+export function resolveHostedAuthRealmFromValidatedHostname(
+  hostname: string,
+): HostedAuthRealm | null {
+  for (const environment of Object.keys(
+    HOSTED_AUTH_DEPLOYMENTS,
+  ) as HostedAuthDeploymentEnvironment[]) {
+    const realm = resolveHostedAuthRealm(hostname, environment);
+    if (realm) return realm;
+  }
+  return null;
+}
+
 export function isHostedAuthHostname(hostname: string): boolean {
   const normalizedHostname = hostname.toLowerCase().replace(/\.$/, "");
   return Object.values(HOSTED_AUTH_DEPLOYMENTS).some((deployment) =>

@@ -35,6 +35,7 @@ Do not mark a phase/step implemented, deployed, remote-green, or certified witho
 - P2-S10 — completed 2026-08-22 03:00 UTC, crypto-shredding and restore replay
 - P3-S0 — completed 2026-08-22 03:32 UTC, hosted-auth DNS/TLS/routing/deployment isolation
 - P3-S0 proxy correction — 2026-08-22 03:44 UTC, authenticated public-realm handoff
+- P3-S0 runtime correction — 2026-08-22 03:51 UTC, single realm authority across runtimes
 - P3-S1 through P15-S6 — not started
 
 Update this index after every execution step with a link to that step's latest timestamped entry.
@@ -1824,6 +1825,36 @@ Commit, push, and remote check:
 
 - This correction is included in a P3-S0 follow-up commit. Final push and replacement Verify/
   deployment status are reported in the post-push handoff.
+
+Next step:
+
+- P3-S1 remains unchanged.
+
+## 2026-08-22 03:51 UTC — P3-S0 correction: single realm authority across runtimes
+
+Finding and correction:
+
+- The first proxy-handoff deployment proved the internal realm header reached the route, but the
+  route still returned unavailable because it independently selected a deployment environment in
+  the Node route runtime. Next.js middleware and route bundles do not provide a safe basis for
+  duplicating that runtime environment decision.
+- Removed the duplicate route-level environment selection. Middleware still validates the exact
+  hostname against the active deployment environment and strips caller-supplied internal headers.
+  The health handler now resolves only the middleware-validated hostname against the globally unique
+  immutable realm map. Because every environment/mode hostname is unique, this preserves exact
+  environment and custody identity without a second runtime-dependent authorization decision.
+
+Focused verification:
+
+- `npm run test -w @powerotp/backend` — passed (26 tests), including a route-runtime environment
+  mismatch case that still reports the exact middleware-authorized production realm.
+- `npm run lint -w @powerotp/backend` — passed.
+- `npm run build -w @powerotp/backend` — passed.
+
+Commit, push, and remote check:
+
+- This correction is included in a second P3-S0 follow-up commit. Final push and replacement
+  Verify/deployment status are reported in the post-push handoff.
 
 Next step:
 
