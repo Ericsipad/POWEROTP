@@ -46,7 +46,8 @@ Do not mark a phase/step implemented, deployed, remote-green, or certified witho
 - P3-S4 — completed 2026-08-22 05:19 UTC, Project-card hosted-auth controls and audit visibility
 - P4-S1 — completed 2026-08-22 05:32 UTC, purpose-separated hosted-auth Brevo adapter
 - P4-S2 — completed 2026-08-22 05:42 UTC, purpose-separated hosted-auth SMS/voice adapters
-- P4-S3 through P15-S6 — not started
+- P4-S3 — completed 2026-08-22 07:14 UTC, atomic purpose-separated Didit environment validation
+- P4-S4 through P15-S6 — not started
 
 Update this index after every execution step with a link to that step's latest timestamped entry.
 
@@ -2417,3 +2418,67 @@ Known limits and next step:
   owns hosted-auth-specific pre-provider debit/reservation and durable auth-request linkage.
 - P4-S3 — validate the complete Didit environment/configuration contract without changing `.env` or
   beginning Didit User, contact, webhook, polling, assurance, ceremony, or later-phase work.
+
+## 2026-08-22 07:14 UTC — P4-S3: atomic purpose-separated Didit environment validation
+
+Status and scope:
+
+- P4-S3 is complete. Server startup now validates the full Didit credential and purpose-workflow
+  contract through the existing production configuration loader.
+- Didit User creation, contact adapters, webhook handling, polling, assurance adapters, hosted
+  ceremonies, P4-S4+, Project controls, Passport, MCP, BotBlocker, the landing-page demo, and `.env`
+  were not changed.
+
+Implemented configuration behavior:
+
+- Added server-only `DIDIT_API_KEY`, `DIDIT_EMAIL_WORKFLOW_ID`, `DIDIT_PHONE_WORKFLOW_ID`,
+  `DIDIT_RECOVERY_WORKFLOW_ID`, `DIDIT_AGE_WORKFLOW_ID`, `DIDIT_KYC_WORKFLOW_ID`,
+  `DIDIT_LIVENESS_WORKFLOW_ID`, `DIDIT_BIOMETRIC_AUTH_WORKFLOW_ID`, and
+  `DIDIT_WEBHOOK_SECRET` fields to the existing production configuration contract.
+- Didit remains disabled when all nine values are absent or blank. If any one is configured, startup
+  requires the complete set, preventing a partially provisioned integration from reaching later
+  provider adapters.
+- Every workflow value must be a provider-shaped UUID, matching Didit's documented `workflow_id`
+  contract. All seven workflow IDs must be distinct so email, phone, recovery, age, KYC, liveness,
+  and biometric-authentication purposes cannot be silently routed through another purpose's
+  workflow.
+- The existing eager `loadConfig()` call in the production server context supplies fail-fast startup
+  validation. No network call, provider SDK, route, adapter, or runtime side effect was added.
+
+Affected files:
+
+- `backend/packages/api/src/config.ts`
+- `backend/packages/api/src/config.test.ts`
+- `docs/POWEROTP_SIGNIN_AD_SERVICE_AS_BUILT.md`
+
+Security, compatibility, and migration impact:
+
+- API and webhook secrets remain server-only and non-empty. Their provider-owned opaque formats are
+  not guessed or transformed; workflow IDs alone use Didit's documented UUID format.
+- Existing DigitalOcean blank-variable sanitization applies to the whole Didit set, while mixed
+  blank/configured values fail the atomic-set check. Existing deployments with no Didit variables
+  remain compatible.
+- No secret value was read, logged, committed, generated, or written to `.env`. Production,
+  staging, test, and development can provision independent complete Didit sets in their own secret
+  stores.
+
+Focused verification:
+
+- API package tests passed (497), including complete-set acceptance, every missing-field case,
+  blank-set disablement, malformed workflow UUID rejection, and duplicate-purpose workflow
+  rejection.
+- API package production build passed.
+- No full-monorepo verification was run locally; remote Verify remains the complete pushed check.
+
+Commit, push, and remote check:
+
+- The coherent P4-S3 change is ready for commit and push. Final commit, push, and one remote Verify
+  result check are reported in the post-push handoff.
+
+Known limits and next step:
+
+- P4-S3 validates local configuration shape and completeness only. It intentionally does not test
+  credentials against Didit, create a User, call a workflow, receive a webhook, or poll a result.
+- P4-S4 — implement persistent Didit User creation and the exact
+  `hostedPersonIdentityId → potpDiditId → diditInternalId` person-root mapping without beginning
+  contact verification, webhooks, polling, assurance adapters, hosted ceremonies, or P4-S5+.

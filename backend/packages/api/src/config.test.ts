@@ -20,6 +20,18 @@ const requiredEnv = {
   PUBLIC_API_URL: "https://api.powerotp.com",
 };
 
+const diditEnv = {
+  DIDIT_API_KEY: "didit-api-key",
+  DIDIT_EMAIL_WORKFLOW_ID: "11111111-1111-4111-8111-111111111111",
+  DIDIT_PHONE_WORKFLOW_ID: "22222222-2222-4222-8222-222222222222",
+  DIDIT_RECOVERY_WORKFLOW_ID: "33333333-3333-4333-8333-333333333333",
+  DIDIT_AGE_WORKFLOW_ID: "44444444-4444-4444-8444-444444444444",
+  DIDIT_KYC_WORKFLOW_ID: "55555555-5555-4555-8555-555555555555",
+  DIDIT_LIVENESS_WORKFLOW_ID: "66666666-6666-4666-8666-666666666666",
+  DIDIT_BIOMETRIC_AUTH_WORKFLOW_ID: "77777777-7777-4777-8777-777777777777",
+  DIDIT_WEBHOOK_SECRET: "whsec_didit-webhook-secret",
+};
+
 function encodedEd25519Keys() {
   const active = generateKeyPairSync("ed25519");
   const previous = generateKeyPairSync("ed25519");
@@ -73,6 +85,15 @@ describe("loadConfig", () => {
         BOTBLOCKER_INTELLIGENCE_HASH_SECRET: "",
         BOTBLOCKER_RUNTIME_ORIGIN: "",
         HOSTED_AUTH_RUNTIME_RESULT_ENCRYPTION_KEY: "",
+        DIDIT_API_KEY: "",
+        DIDIT_EMAIL_WORKFLOW_ID: "",
+        DIDIT_PHONE_WORKFLOW_ID: "",
+        DIDIT_RECOVERY_WORKFLOW_ID: "",
+        DIDIT_AGE_WORKFLOW_ID: "",
+        DIDIT_KYC_WORKFLOW_ID: "",
+        DIDIT_LIVENESS_WORKFLOW_ID: "",
+        DIDIT_BIOMETRIC_AUTH_WORKFLOW_ID: "",
+        DIDIT_WEBHOOK_SECRET: "",
       }),
     );
   });
@@ -124,6 +145,48 @@ describe("loadConfig", () => {
         HOSTED_AUTH_RUNTIME_RESULT_ENCRYPTION_KEY: "r".repeat(32),
       }).HOSTED_AUTH_RUNTIME_RESULT_ENCRYPTION_KEY,
       "r".repeat(32),
+    );
+  });
+
+  it("requires one complete purpose-separated Didit configuration", () => {
+    const configuration = loadConfig({ ...requiredEnv, ...diditEnv });
+    assert.equal(configuration.DIDIT_API_KEY, diditEnv.DIDIT_API_KEY);
+    assert.equal(
+      configuration.DIDIT_BIOMETRIC_AUTH_WORKFLOW_ID,
+      diditEnv.DIDIT_BIOMETRIC_AUTH_WORKFLOW_ID,
+    );
+
+    for (const field of Object.keys(diditEnv)) {
+      const incomplete = { ...diditEnv };
+      delete incomplete[field as keyof typeof incomplete];
+      assert.throws(
+        () => loadConfig({ ...requiredEnv, ...incomplete }),
+        /Every field for the Didit integration must be configured together/,
+      );
+    }
+  });
+
+  it("rejects malformed or reused Didit workflow IDs", () => {
+    for (const field of Object.keys(diditEnv).filter((name) =>
+      name.endsWith("_WORKFLOW_ID"),
+    )) {
+      assert.throws(() =>
+        loadConfig({
+          ...requiredEnv,
+          ...diditEnv,
+          [field]: "not-a-workflow-uuid",
+        }),
+      );
+    }
+
+    assert.throws(
+      () =>
+        loadConfig({
+          ...requiredEnv,
+          ...diditEnv,
+          DIDIT_PHONE_WORKFLOW_ID: diditEnv.DIDIT_EMAIL_WORKFLOW_ID,
+        }),
+      /Every Didit purpose must use a distinct workflow ID/,
     );
   });
 

@@ -16,6 +16,7 @@ const PostgresConnectionUrlSchema = z
     (value) => ["postgres:", "postgresql:"].includes(new URL(value).protocol),
     "Expected a PostgreSQL connection URL",
   );
+const DiditWorkflowIdSchema = z.uuid();
 
 const ProductionConfigSchema = z.object({
   PORT: z.coerce.number().int().positive().default(3001),
@@ -133,6 +134,22 @@ const ProductionConfigSchema = z.object({
    * secret in this app.
    */
   EMAIL_LOOKUP_HASH_SECRET: z.string().min(32),
+  /**
+   * Complete server-only Didit application configuration. The integration
+   * remains disabled while every field is absent. Configuring any field
+   * requires the API key, purpose-specific workflow UUIDs, and webhook
+   * signing secret together so later adapters cannot start with an
+   * incomplete or cross-purpose provider setup.
+   */
+  DIDIT_API_KEY: z.string().min(1).optional(),
+  DIDIT_EMAIL_WORKFLOW_ID: DiditWorkflowIdSchema.optional(),
+  DIDIT_PHONE_WORKFLOW_ID: DiditWorkflowIdSchema.optional(),
+  DIDIT_RECOVERY_WORKFLOW_ID: DiditWorkflowIdSchema.optional(),
+  DIDIT_AGE_WORKFLOW_ID: DiditWorkflowIdSchema.optional(),
+  DIDIT_KYC_WORKFLOW_ID: DiditWorkflowIdSchema.optional(),
+  DIDIT_LIVENESS_WORKFLOW_ID: DiditWorkflowIdSchema.optional(),
+  DIDIT_BIOMETRIC_AUTH_WORKFLOW_ID: DiditWorkflowIdSchema.optional(),
+  DIDIT_WEBHOOK_SECRET: z.string().min(1).optional(),
   /**
    * Platform admin identity lives entirely in environment variables, not
    * the database: a single email/password pair plus an IP allowlist,
@@ -282,6 +299,29 @@ const ProductionConfigSchema = z.object({
   BOTBLOCKER_IP_REPUTATION_VENDOR_URL: z.string().url().optional(),
   BOTBLOCKER_IP_REPUTATION_VENDOR_API_KEY: z.string().min(1).optional(),
 }).superRefine((configuration, context) => {
+  const diditConfiguration = [
+    configuration.DIDIT_API_KEY,
+    configuration.DIDIT_EMAIL_WORKFLOW_ID,
+    configuration.DIDIT_PHONE_WORKFLOW_ID,
+    configuration.DIDIT_RECOVERY_WORKFLOW_ID,
+    configuration.DIDIT_AGE_WORKFLOW_ID,
+    configuration.DIDIT_KYC_WORKFLOW_ID,
+    configuration.DIDIT_LIVENESS_WORKFLOW_ID,
+    configuration.DIDIT_BIOMETRIC_AUTH_WORKFLOW_ID,
+    configuration.DIDIT_WEBHOOK_SECRET,
+  ];
+  requireAllOrNone(diditConfiguration, "Didit integration", context);
+
+  const diditWorkflowIds = diditConfiguration.slice(1, -1).filter(
+    (value): value is string => value !== undefined,
+  );
+  if (new Set(diditWorkflowIds).size !== diditWorkflowIds.length) {
+    context.addIssue({
+      code: "custom",
+      message: "Every Didit purpose must use a distinct workflow ID",
+    });
+  }
+
   const active = [
     configuration.BOTBLOCKER_ED25519_ACTIVE_KEY_ID,
     configuration.BOTBLOCKER_ED25519_ACTIVE_PRIVATE_KEY_PKCS8_BASE64,
