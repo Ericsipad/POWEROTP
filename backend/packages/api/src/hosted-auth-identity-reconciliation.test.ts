@@ -285,4 +285,39 @@ describe("hosted-auth identity reconciliation worker", () => {
     );
     assert.equal(state.identities.artifacts.size, 2);
   });
+
+  it("hands provider-referenced partial artifacts to durable deletion cleanup", async () => {
+    const state = fixture();
+    const didit = complete(personB, profileB, "didit_pii");
+    state.identities.artifacts.set(personB, {
+      ...didit,
+      profiles: [
+        {
+          ...didit.profiles[0]!,
+          validCustodyContactCount: 0,
+        },
+      ],
+    });
+    const scheduled: string[] = [];
+    const worker = new HostedAuthIdentityReconciliationWorker(
+      state.identities,
+      state.keys,
+      { hasForPerson: async () => false },
+      async () => undefined,
+      () => now,
+      async (id) => {
+        scheduled.push(id);
+        return "scheduled";
+      },
+    );
+
+    assert.deepEqual(await worker.runOnce(), [
+      {
+        hostedPersonIdentityId: personB,
+        action: "provider_cleanup_scheduled",
+      },
+    ]);
+    assert.deepEqual(scheduled, [personB]);
+    assert.equal(state.identities.artifacts.has(personB), true);
+  });
 });

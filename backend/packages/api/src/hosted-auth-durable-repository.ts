@@ -21,7 +21,7 @@ export const AUTH_SECURITY_EVENTS_COLLECTION_NAME = "authSecurityEvents";
 
 type BindingCollection = Pick<
   Collection<ProjectIdentityBindingDocument>,
-  "findOne" | "updateOne"
+  "findOne" | "updateMany" | "updateOne"
 >;
 
 export class ProjectIdentityBindingRepository {
@@ -78,6 +78,18 @@ export class ProjectIdentityBindingRepository {
       ),
     });
     return document !== null;
+  }
+
+  async markDeletedForPerson(hostedPersonIdentityId: string): Promise<void> {
+    await this.bindings.updateMany(
+      {
+        hostedPersonIdentityId: HostedPersonIdentityIdSchema.parse(
+          hostedPersonIdentityId,
+        ),
+        status: { $ne: "deleted" },
+      },
+      { $set: { status: "deleted" } },
+    );
   }
 
   async createOrGet(

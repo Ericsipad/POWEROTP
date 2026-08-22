@@ -18,6 +18,7 @@ export type HostedAuthIdentityReconciliationResult = Readonly<{
     | "retried"
     | "partial_identity_cleaned"
     | "orphan_key_cleaned"
+    | "provider_cleanup_scheduled"
     | "skipped"
     | "failed";
   reason?: string;
@@ -42,6 +43,9 @@ export class HostedAuthIdentityReconciliationWorker {
     >,
     private readonly retryPendingIdentity: RetryPendingIdentity,
     private readonly now: () => Date = () => new Date(),
+    private readonly scheduleAbandonedProviderIdentity?: (
+      hostedPersonIdentityId: string,
+    ) => Promise<"scheduled" | "duplicate" | "completed">,
   ) {}
 
   async runOnce(
@@ -151,6 +155,13 @@ export class HostedAuthIdentityReconciliationWorker {
       };
     }
     if (artifact.profiles.some(({ providerReferenceCount }) => providerReferenceCount > 0)) {
+      if (this.scheduleAbandonedProviderIdentity) {
+        await this.scheduleAbandonedProviderIdentity(hostedPersonIdentityId);
+        return {
+          hostedPersonIdentityId,
+          action: "provider_cleanup_scheduled",
+        };
+      }
       return {
         hostedPersonIdentityId,
         action: "failed",

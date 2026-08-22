@@ -31,7 +31,8 @@ Do not mark a phase/step implemented, deployed, remote-green, or certified witho
 - P2-S6 — completed 2026-08-22 01:48 UTC, KMS-backed pairwise and lookup derivation rotation
 - P2-S7 — completed 2026-08-22 02:07 UTC, person/profile/contact creation saga and compensation
 - P2-S8 — completed 2026-08-22 02:19 UTC, pending identity reconciliation and orphan detection
-- P2-S9 through P15-S6 — not started
+- P2-S9 — completed 2026-08-22 02:30 UTC, retention and provider-cleanup deletion orchestration
+- P2-S10 through P15-S6 — not started
 
 Update this index after every execution step with a link to that step's latest timestamped entry.
 
@@ -1542,3 +1543,88 @@ Known limits and next step:
   fabricated in this infrastructure step.
 - P2-S9 — add retention/deletion/Didit cleanup orchestration while preserving P2-S8 claims,
   failure isolation, custody boundaries, immutable bindings, and cryptographic compensation.
+
+## 2026-08-22 02:30 UTC — P2-S9: retention and provider-cleanup deletion orchestration
+
+Status and scope:
+
+- P2-S9 is complete. It adds policy-scheduled identity deletion, immediate blocked/revoked state,
+  leased retries, runtime purge coordination, vendor-neutral Didit cleanup, evidence disposition,
+  binding deletion, and final local minimization.
+- P2-S10 crypto-shredding and backup/restore behavior, concrete provider adapters, MCP behavior,
+  runtime HTTP handlers, `.env`, Passport, and BotBlocker remain unchanged.
+
+Implemented data and behavior:
+
+- Added explicit `deletion_requested_at`, caller-supplied `deletion_eligible_at`, and leased
+  `deletion_claimed_at` state to hosted person identities. Scheduling immediately changes the
+  person/profiles to `deleting`, revokes credentials and contacts, and therefore blocks new
+  authentication while the approved retention date remains in force.
+- No calendar duration or default evidence policy was invented. The caller supplies the approved
+  eligibility date, and an injected policy supplies whether consent and minimal verification
+  evidence must be retained.
+- Eligible identities are claimed with `FOR UPDATE SKIP LOCKED` and a 15-minute lease. Exact
+  duplicate schedules and immediate duplicate worker runs are idempotent; changed eligibility is
+  rejected rather than silently rewriting the approved schedule.
+- The orchestrator purges identity-linked hot runtime data through an injected boundary, calls a
+  vendor-neutral provider cleanup boundary only when opaque provider references exist, then marks
+  project bindings deleted and atomically minimizes Supabase data.
+- Provider mappings/contact references remain stored while provider cleanup fails or any later
+  store step fails. Successful or already-absent provider deletion is retry-safe; local finalization
+  clears provider mappings, contact lookups/ciphertext, credentials, derived DOB ciphertext, and
+  provider operation references before recording the person/profile tombstone.
+- Required consent/minimal verification evidence can remain under the injected legal policy, while
+  unnecessary evidence is deleted. Neither deletion results nor failure results expose provider
+  references, PII, private/global IDs beyond the internal worker key, evidence, or key material.
+- P2-S8 provider-referenced malformed pending artifacts can now be handed to the durable deletion
+  schedule. The guarded repository accepts that zero-delay path only for a pending identity with a
+  retained provider contact reference; cleanup remains provider-first and does not discard the
+  reference.
+- Runtime, provider, policy, binding, and final-store failures are isolated per identity. A partial
+  run leaves the identity blocked and lease-retryable; no step reactivates an identity or changes
+  an immutable project-scoped user ID.
+
+Affected files and migration:
+
+- `backend/packages/api/src/hosted-auth-identity-deletion.ts`
+- `backend/packages/api/src/hosted-auth-identity-deletion-contracts.ts`
+- `backend/packages/api/src/hosted-auth-identity-deletion-repository.ts`
+- `backend/packages/api/src/hosted-auth-identity-deletion.test.ts`
+- `backend/packages/api/src/hosted-auth-identity-deletion-migration.test.ts`
+- `backend/packages/api/src/hosted-auth-identity-reconciliation.ts`
+- `backend/packages/api/src/hosted-auth-identity-reconciliation.test.ts`
+- `backend/packages/api/src/hosted-auth-durable-repository.ts`
+- `supabase/migrations/20260822023000_p2_s9_identity_deletion.sql`
+- `docs/POWEROTP_SIGNIN_AD_SERVICE_AS_BUILT.md`
+- Production Supabase migration `p2_s9_identity_deletion` was applied successfully to project
+  `ozfufuxpdrsfbamopszb`; the hosted-auth tables were empty before application.
+
+Security, compatibility, and known limits:
+
+- Didit-specific payloads and SDK types do not enter orchestration. The later Phase 4 adapter must
+  implement the injected idempotent provider boundary.
+- Deletion does not derive contact equality, merge roots, unwrap/delete wrapped keys, invoke KMS,
+  or begin P2-S10 crypto-shredding/backup behavior.
+- The migration is additive and preserves forced RLS and existing service roles. No environment
+  value, provider credential, public/client contract, route, deployment configuration, Passport
+  behavior, or BotBlocker behavior changed.
+
+Focused verification:
+
+- `npm run test -w @powerotp/api` — passed (464 tests), including blocked retention, provider
+  failure/reference preservation, duplicate lease runs, partial-store retry, evidence policy,
+  provider-free deletion, reconciliation handoff, and per-identity failure isolation.
+- `npm run lint -w @powerotp/api` — passed.
+- `npm run build -w @powerotp/api` — passed.
+- No full-monorepo verification was run locally; remote Verify remains the complete pushed check.
+
+Commit, push, and remote check:
+
+- The coherent P2-S9 commit contains this entry. Its final hash, push confirmation, and one remote
+  Verify result check are reported in the post-push session handoff.
+
+Next step:
+
+- P2-S10 — implement crypto-shredding and backup/restore behavior while preserving P2-S9 blocked
+  deletion, provider confirmation, legal-evidence retention, immutable binding, and retry
+  boundaries.
