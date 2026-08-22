@@ -32,7 +32,8 @@ Do not mark a phase/step implemented, deployed, remote-green, or certified witho
 - P2-S7 — completed 2026-08-22 02:07 UTC, person/profile/contact creation saga and compensation
 - P2-S8 — completed 2026-08-22 02:19 UTC, pending identity reconciliation and orphan detection
 - P2-S9 — completed 2026-08-22 02:30 UTC, retention and provider-cleanup deletion orchestration
-- P2-S10 through P15-S6 — not started
+- P2-S10 — completed 2026-08-22 03:00 UTC, crypto-shredding and restore replay
+- P3-S0 through P15-S6 — not started
 
 Update this index after every execution step with a link to that step's latest timestamped entry.
 
@@ -1628,3 +1629,83 @@ Next step:
 - P2-S10 — implement crypto-shredding and backup/restore behavior while preserving P2-S9 blocked
   deletion, provider confirmation, legal-evidence retention, immutable binding, and retry
   boundaries.
+
+## 2026-08-22 03:00 UTC — P2-S10: crypto-shredding and backup/restore behavior
+
+Status and scope:
+
+- P2-S10 is complete. It adds only irreversible wrapped-DEK shredding, authoritative lifecycle
+  guards, backup-restore replay, and integration into the P2-S9 deletion worker.
+- Provider adapters, KMS-key deletion, MCP behavior, runtime HTTP handlers, `.env`, Phase 3,
+  Passport, and BotBlocker remain unchanged.
+
+Implemented data and behavior:
+
+- Eligible deletion now durably records `provider_cleanup_satisfied_at` only after the deletion
+  worker has completed the required provider cleanup (or determined from the claimed candidate
+  that none exists). PostgreSQL rejects this marker before the caller-supplied
+  `deletion_eligible_at`.
+- The worker then atomically changes the MongoDB wrapped-key record from `active` to
+  `crypto_shredded`, removes `wrappedDekCiphertext` in the same update, records
+  `cryptoShreddedAt`, and durably mirrors completion as `crypto_shredded_at` on the authoritative
+  person row before final local minimization. Missing keys are treated as already non-decryptable;
+  store errors fail the identity closed and leave its leased deletion retryable.
+- Duplicate runs accept only the ciphertext-free tombstone. A failure after MongoDB removal but
+  before the PostgreSQL completion marker retries without recreating a key.
+- Encryption and decryption now require the authoritative person lifecycle to be `pending` or
+  `active` before key creation or unwrap. A deleting, deleted, missing, or crypto-shredded identity
+  cannot recreate or unwrap a DEK, including when an older MongoDB backup reintroduces active
+  wrapped ciphertext.
+- Restore processing pages through authoritative PostgreSQL crypto-shred markers and re-applies the
+  atomic MongoDB tombstone transition. A restored wrapped-key store must complete this replay before
+  serving identity cryptography; PostgreSQL deletion/shred history must be restored or replayed to
+  the recovery point before the older wrapped-key backup is admitted.
+- P2-S9 still performs runtime purge and provider cleanup first, evaluates the injected legal
+  evidence policy, crypto-shreds, marks immutable project bindings deleted, and finally removes PII
+  ciphertext/provider references. Retained consent/minimal verification evidence is redacted and
+  cannot decrypt retained PII after shredding.
+
+Affected files and migration:
+
+- `backend/packages/api/src/hosted-auth-identity-crypto-shredding.ts`
+- `backend/packages/api/src/hosted-auth-identity-crypto-shredding.test.ts`
+- `backend/packages/api/src/hosted-auth-identity-crypto-shredding-migration.test.ts`
+- `backend/packages/api/src/hosted-auth-identity-encryption.ts`
+- `backend/packages/api/src/hosted-auth-identity-encryption.test.ts`
+- `backend/packages/api/src/hosted-auth-identity-deletion.ts`
+- `backend/packages/api/src/hosted-auth-identity-deletion.test.ts`
+- `backend/packages/api/src/hosted-auth-durable-repository.ts`
+- `supabase/migrations/20260822030000_p2_s10_crypto_shredding.sql`
+- Production Supabase migration `p2_s10_crypto_shredding` was applied successfully to project
+  `ozfufuxpdrsfbamopszb`; the hosted-auth tables were empty before application.
+
+Security, compatibility, and known limits:
+
+- Wrapped-key deletion is an atomic ciphertext-removing tombstone, not a KMS key deletion. Shared
+  KMS key lifecycle remains outside this step; no KMS key material or provider evidence is exposed.
+- The authoritative PostgreSQL marker prevents an older wrapped-key backup from authorizing
+  decryption and supplies deterministic replay input. Restoring every store to a point before the
+  deletion record would also restore pre-deletion state, so recovery procedures must retain/replay
+  the deletion ledger through the selected recovery point rather than discarding it.
+- No counsel-owned duration was added. No public/client contract, route, provider credential,
+  environment value, project ID, binding derivation, custody rule, Passport behavior, or BotBlocker
+  behavior changed.
+
+Focused verification:
+
+- `npm run test -w @powerotp/api` — passed (471 tests), including atomic shredding, duplicate runs,
+  KMS-unwrap/recreation denial, restore replay, partial-store retry, migration ordering, and
+  per-identity failure isolation.
+- `npm run lint -w @powerotp/api` — passed.
+- `npm run build -w @powerotp/api` — passed.
+- No full-monorepo verification was run locally; remote Verify remains the complete pushed check.
+
+Commit, push, and remote check:
+
+- The coherent P2-S10 commit contains this entry. Its final hash, push confirmation, and one remote
+  Verify result check are reported in the post-push session handoff.
+
+Next step:
+
+- P3-S0 — provision `authx`/`authz` DNS, TLS, host routing/deployment configuration, health checks,
+  environment separation, and CI deploy paths without beginning P3-S1 project schema behavior.

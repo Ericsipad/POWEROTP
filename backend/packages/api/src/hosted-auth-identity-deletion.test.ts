@@ -103,6 +103,7 @@ function fixture(now = requestedAt) {
   const operations: string[] = [];
   const providerInputs: HostedAuthDeletionCandidate[] = [];
   let providerFails = false;
+  const shredFailures = new Set<string>();
   const worker = new HostedAuthIdentityDeletionOrchestrator(
     identities,
     {
@@ -127,6 +128,14 @@ function fixture(now = requestedAt) {
       retainConsentEvidence: true,
       retainVerificationEvidence: false,
     }),
+    {
+      shred: async ({ hostedPersonIdentityId }) => {
+        operations.push(`shred:${hostedPersonIdentityId}`);
+        if (shredFailures.has(hostedPersonIdentityId)) {
+          throw new Error("key store unavailable");
+        }
+      },
+    },
     () => now,
   );
   return {
@@ -136,6 +145,9 @@ function fixture(now = requestedAt) {
     worker,
     failProvider: () => {
       providerFails = true;
+    },
+    failShredFor: (hostedPersonIdentityId: string) => {
+      shredFailures.add(hostedPersonIdentityId);
     },
   };
 }
@@ -178,6 +190,7 @@ describe("hosted-auth identity deletion orchestration", () => {
     assert.deepEqual(state.operations, [
       `runtime:${personA}`,
       `provider:${personA}`,
+      `shred:${personA}`,
       `bindings:${personA}`,
     ]);
     assert.deepEqual(state.providerInputs[0], {
@@ -229,6 +242,7 @@ describe("hosted-auth identity deletion orchestration", () => {
 
     assert.deepEqual(state.operations, [
       `runtime:${personA}`,
+      `shred:${personA}`,
       `bindings:${personA}`,
     ]);
     assert.equal(
@@ -274,6 +288,28 @@ describe("hosted-auth identity deletion orchestration", () => {
     assert.equal(JSON.stringify(results).includes("provider_user"), false);
     assert.equal(state.identities.scheduled.has(personA), true);
     assert.equal(state.identities.scheduled.has(personB), false);
+  });
+
+  it("failure-isolates crypto-shredding store failures", async () => {
+    const state = fixture();
+    for (const hostedPersonIdentityId of [personA, personB]) {
+      state.identities.addCandidate({
+        hostedPersonIdentityId,
+        providerIdentityReferences: [],
+        providerContactReferences: [],
+      });
+    }
+    state.failShredFor(personA);
+
+    const results = await state.worker.runOnce();
+
+    assert.deepEqual(
+      results.map(({ action }) => action),
+      ["failed", "completed"],
+    );
+    assert.equal(state.identities.scheduled.has(personA), true);
+    assert.equal(state.identities.scheduled.has(personB), false);
+    assert.equal(state.operations.includes(`bindings:${personA}`), false);
   });
 
   it("schedules abandoned provider artifacts without an invented delay", async () => {

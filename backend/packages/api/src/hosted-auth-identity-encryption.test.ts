@@ -61,6 +61,7 @@ class MemoryKeyAuthority implements HostedAuthIdentityKeyAuthority {
   readonly kmsKeyVersion = "kek_v1";
   readonly wrapped = new Map<string, { person: string; dek: Uint8Array }>();
   wrapCalls = 0;
+  unwrapCalls = 0;
   denyWrap = false;
   denyUnwrap = false;
 
@@ -83,6 +84,7 @@ class MemoryKeyAuthority implements HostedAuthIdentityKeyAuthority {
     wrappedDekCiphertext: string;
   }) {
     if (this.denyUnwrap) throw new Error("KMS decrypt denied");
+    this.unwrapCalls += 1;
     const wrapped = this.wrapped.get(input.wrappedDekCiphertext);
     if (!wrapped || wrapped.person !== input.hostedPersonIdentityId) {
       throw new Error("KMS encryption-context mismatch");
@@ -91,12 +93,24 @@ class MemoryKeyAuthority implements HostedAuthIdentityKeyAuthority {
   }
 }
 
+class MemoryKeyLifecycle {
+  readonly unavailable = new Set<string>();
+
+  async assertKeyUsable(hostedPersonIdentityId: string) {
+    if (this.unavailable.has(hostedPersonIdentityId)) {
+      throw new Error("Hosted-auth identity key is permanently unavailable");
+    }
+  }
+}
+
 function testService(input?: {
   collection?: MemoryWrappedKeyCollection;
   authority?: MemoryKeyAuthority;
+  lifecycle?: MemoryKeyLifecycle;
 }) {
   const collection = input?.collection ?? new MemoryWrappedKeyCollection();
   const authority = input?.authority ?? new MemoryKeyAuthority();
+  const lifecycle = input?.lifecycle ?? new MemoryKeyLifecycle();
   const repository = new WrappedIdentityKeyRepository(
     {} as Db,
     collection as unknown as Collection<WrappedIdentityKeyDocument>,
@@ -104,8 +118,13 @@ function testService(input?: {
   return {
     authority,
     collection,
+    lifecycle,
     repository,
-    service: new HostedAuthIdentityEncryptionService(repository, authority),
+    service: new HostedAuthIdentityEncryptionService(
+      repository,
+      authority,
+      lifecycle,
+    ),
   };
 }
 
@@ -139,6 +158,7 @@ describe("hosted-auth per-person envelope encryption", () => {
     const restarted = new HostedAuthIdentityEncryptionService(
       fixture.repository,
       fixture.authority,
+      fixture.lifecycle,
     );
     assert.equal(
       await restarted.decryptField({
@@ -249,6 +269,39 @@ describe("hosted-auth per-person envelope encryption", () => {
     assert.equal(fixture.collection.documents.size, 0);
   });
 
+  it("never unwraps or recreates a key blocked by the authoritative lifecycle", async () => {
+    const fixture = testService();
+    const envelope = await fixture.service.encryptField({
+      hostedPersonIdentityId: personA,
+      fieldName: "email",
+      schemaVersion: 1,
+      purpose: "contact_authentication",
+      plaintext: "person@example.test",
+    });
+    fixture.lifecycle.unavailable.add(personA);
+    const wrapCalls = fixture.authority.wrapCalls;
+
+    await assert.rejects(
+      fixture.service.decryptField({
+        hostedPersonIdentityId: personA,
+        envelope,
+      }),
+      /permanently unavailable/,
+    );
+    await assert.rejects(
+      fixture.service.encryptField({
+        hostedPersonIdentityId: personA,
+        fieldName: "email",
+        schemaVersion: 1,
+        purpose: "contact_authentication",
+        plaintext: "replacement@example.test",
+      }),
+      /permanently unavailable/,
+    );
+    assert.equal(fixture.authority.unwrapCalls, 0);
+    assert.equal(fixture.authority.wrapCalls, wrapCalls);
+  });
+
   it("keeps Supabase ciphertext and MongoDB wrapped keys independently insufficient", async () => {
     const collection = new MemoryWrappedKeyCollection();
     const requestedCollections: string[] = [];
@@ -262,6 +315,7 @@ describe("hosted-auth per-person envelope encryption", () => {
     const service = new HostedAuthIdentityEncryptionService(
       new WrappedIdentityKeyRepository(retentionDb),
       authority,
+      new MemoryKeyLifecycle(),
     );
     const supabaseRow = await service.encryptField({
       hostedPersonIdentityId: personA,

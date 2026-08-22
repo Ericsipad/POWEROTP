@@ -178,6 +178,36 @@ export class WrappedIdentityKeyRepository {
     return result.deletedCount === 1;
   }
 
+  async cryptoShred(
+    hostedPersonIdentityId: string,
+    cryptoShreddedAt: Date,
+  ): Promise<"shredded" | "duplicate" | "absent"> {
+    const identityId = HostedPersonIdentityIdSchema.parse(
+      hostedPersonIdentityId,
+    );
+    if (Number.isNaN(cryptoShreddedAt.getTime())) {
+      throw new Error("A valid hosted-auth crypto-shredding timestamp is required");
+    }
+    const result = await this.keys.updateOne(
+      { _id: identityId, status: "active" },
+      {
+        $set: { status: "crypto_shredded", cryptoShreddedAt },
+        $unset: { wrappedDekCiphertext: "" },
+      },
+    );
+    if (result.modifiedCount === 1) return "shredded";
+
+    const existing = await this.keys.findOne({ _id: identityId });
+    if (!existing) return "absent";
+    const { _id, ...record } = existing;
+    if (_id !== record.hostedPersonIdentityId) {
+      throw new Error("Hosted-auth wrapped-key identity mismatch");
+    }
+    const parsed = WrappedIdentityKeyRecordSchema.parse(record);
+    if (parsed.status === "crypto_shredded") return "duplicate";
+    throw new Error("Hosted-auth wrapped key could not be crypto-shredded");
+  }
+
   async listActiveBefore(
     before: Date,
     limit: number,

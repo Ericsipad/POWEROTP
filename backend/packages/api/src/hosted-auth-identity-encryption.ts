@@ -14,6 +14,7 @@ import { HostedPersonIdentityIdSchema } from "@powerotp/contracts";
 import { z } from "zod";
 
 import { WrappedIdentityKeyRepository } from "./hosted-auth-durable-repository.js";
+import type { HostedAuthIdentityKeyLifecycleAuthority } from "./hosted-auth-identity-crypto-shredding.js";
 
 const DEK_BYTES = 32;
 const NONCE_BYTES = 12;
@@ -170,6 +171,10 @@ export class HostedAuthIdentityEncryptionService {
   constructor(
     private readonly keys: WrappedIdentityKeyRepository,
     private readonly keyAuthority: HostedAuthIdentityKeyAuthority,
+    private readonly keyLifecycle: Pick<
+      HostedAuthIdentityKeyLifecycleAuthority,
+      "assertKeyUsable"
+    >,
   ) {
     CanonicalCodeSchema.parse(keyAuthority.kmsKeyVersion);
   }
@@ -184,6 +189,7 @@ export class HostedAuthIdentityEncryptionService {
     if (!input.plaintext) {
       throw new Error("Hosted-auth encrypted fields cannot be empty");
     }
+    await this.keyLifecycle.assertKeyUsable(input.hostedPersonIdentityId);
     const dek = await this.loadOrCreateDek(input.hostedPersonIdentityId);
     try {
       const nonce = randomBytes(NONCE_BYTES);
@@ -214,6 +220,7 @@ export class HostedAuthIdentityEncryptionService {
     const envelope = HostedAuthEncryptedFieldEnvelopeSchema.parse(
       input.envelope,
     );
+    await this.keyLifecycle.assertKeyUsable(input.hostedPersonIdentityId);
     const dek = await this.loadDek(input.hostedPersonIdentityId);
     try {
       const decipher = createDecipheriv(
@@ -266,6 +273,7 @@ export class HostedAuthIdentityEncryptionService {
         hostedPersonIdentityId,
         plaintextDek: generatedDek,
       });
+      await this.keyLifecycle.assertKeyUsable(hostedPersonIdentityId);
       const persisted = await this.keys.createActive({
         hostedPersonIdentityId,
         kmsKeyVersion: this.keyAuthority.kmsKeyVersion,
@@ -306,6 +314,7 @@ export class HostedAuthIdentityEncryptionService {
     ) {
       throw new Error("Hosted-auth identity key version is unavailable");
     }
+    await this.keyLifecycle.assertKeyUsable(hostedPersonIdentityId);
     const plaintextDek = await this.keyAuthority.unwrapDek({
       hostedPersonIdentityId,
       wrappedDekCiphertext: record.wrappedDekCiphertext,

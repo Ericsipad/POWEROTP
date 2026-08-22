@@ -4,6 +4,7 @@ import type {
   HostedAuthDeletionEvidenceDisposition,
   HostedAuthIdentityDeletionRepository,
 } from "./hosted-auth-identity-deletion-contracts.js";
+import type { HostedAuthIdentityCryptoShredder } from "./hosted-auth-identity-crypto-shredding.js";
 
 export const HOSTED_AUTH_DELETION_LEASE_MS = 15 * 60 * 1_000;
 
@@ -39,6 +40,10 @@ export class HostedAuthIdentityDeletionOrchestrator {
       "markDeletedForPerson"
     >,
     private readonly evidencePolicy: EvidencePolicy,
+    private readonly cryptoShredder: Pick<
+      HostedAuthIdentityCryptoShredder,
+      "shred"
+    >,
     private readonly now: () => Date = () => new Date(),
   ) {}
 
@@ -105,6 +110,10 @@ export class HostedAuthIdentityDeletionOrchestrator {
     const evidence = await this.evidencePolicy(
       candidate.hostedPersonIdentityId,
     );
+    await this.cryptoShredder.shred({
+      hostedPersonIdentityId: candidate.hostedPersonIdentityId,
+      completedAt,
+    });
     await this.bindings.markDeletedForPerson(
       candidate.hostedPersonIdentityId,
     );
