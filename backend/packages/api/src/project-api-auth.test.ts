@@ -3,7 +3,10 @@ import { describe, it } from "node:test";
 
 import type { Db } from "mongodb";
 
-import { authenticateProjectApiKey } from "./project-api-auth.js";
+import {
+  authenticateApiKey,
+  authenticateProjectApiKey,
+} from "./project-api-auth.js";
 import type { ApiKeyDocument, ProjectDocument } from "./persistence.js";
 import { hashToken } from "./security.js";
 
@@ -47,6 +50,16 @@ describe("project API key source allowlist", () => {
     const { db } = fixture(["203.0.113.0/24"]);
     await assert.rejects(
       authenticateProjectApiKey(db, { API_KEY_HASH_SECRET: secret }, "test-project", undefined, "203.0.113.4"),
+      (error: unknown) => error instanceof Error && error.message === "authentication_required",
+    );
+    await assert.rejects(
+      authenticateProjectApiKey(
+        db,
+        { API_KEY_HASH_SECRET: secret },
+        "wrong-project",
+        `Bearer ${rawKey}`,
+        "203.0.114.4",
+      ),
       (error: unknown) => error instanceof Error && error.message === "authentication_required",
     );
   });
@@ -93,5 +106,27 @@ describe("project API key source allowlist", () => {
         (error: unknown) => error instanceof Error && error.message === "source_ip_not_allowed",
       );
     }
+  });
+
+  it("enforces the same policy on project-key routes without a slug", async () => {
+    const { db, project } = fixture(["203.0.113.0/24"]);
+    assert.equal(
+      await authenticateApiKey(
+        db,
+        { API_KEY_HASH_SECRET: secret },
+        `Bearer ${rawKey}`,
+        "203.0.113.44",
+      ),
+      project,
+    );
+    await assert.rejects(
+      authenticateApiKey(
+        db,
+        { API_KEY_HASH_SECRET: secret },
+        `Bearer ${rawKey}`,
+        "198.51.100.44",
+      ),
+      (error: unknown) => error instanceof Error && error.message === "source_ip_not_allowed",
+    );
   });
 });

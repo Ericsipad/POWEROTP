@@ -23,9 +23,10 @@ interface RouteParams {
 export const POST = apiRoute<RouteParams>(async (request, { params }) => {
   const { config, dataStores, verifications } = await getServerContext();
   const { interactionId } = await params;
+  const sourceIp = clientIp(request);
   await enforceRateLimit(
     dataStores.rateLimitStore,
-    `rl:response:${clientIp(request) ?? "unknown"}`,
+    `rl:response:${sourceIp ?? "unknown"}`,
     20,
     60,
   );
@@ -52,6 +53,7 @@ export const POST = apiRoute<RouteParams>(async (request, { params }) => {
       dataStores.db,
       config,
       request.headers.get("authorization") ?? undefined,
+      sourceIp,
     );
     if (project._id !== verification.projectId) {
       throw new ApiError("verification_not_found", 404);

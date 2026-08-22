@@ -3,7 +3,7 @@ import { WIDGET_STATUS_TOKEN_AUDIENCE, verifyInteractionToken } from "@powerotp/
 import { authenticateApiKey } from "@powerotp/api/project-api-auth.js";
 import { NextResponse } from "next/server";
 
-import { apiRoute } from "@/lib/api-route";
+import { apiRoute, clientIp } from "@/lib/api-route";
 import { getServerContext } from "@/lib/server-context";
 
 interface RouteParams {
@@ -40,6 +40,7 @@ export const GET = apiRoute<RouteParams>(async (request, { params }) => {
       dataStores.db,
       config,
       request.headers.get("authorization") ?? undefined,
+      clientIp(request),
     );
     if (project._id !== verification.projectId) {
       throw new ApiError("verification_not_found", 404);

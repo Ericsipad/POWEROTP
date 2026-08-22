@@ -42,6 +42,7 @@ Do not mark a phase/step implemented, deployed, remote-green, or certified witho
 - P3-S1 correction — 2026-08-22 04:33 UTC, removed nonexistent legacy-project compatibility
 - P3-S2 — completed 2026-08-22 04:48 UTC, exact return URLs and isolated method/assurance settings
 - P3-S3 — completed 2026-08-22 04:59 UTC, optional canonical backend IPv4/IPv6 CIDR allowlist
+- P3-S3 correction — 2026-08-22 05:08 UTC, enforced allowlists on non-slug result routes
 - P3-S4 through P15-S6 — not started
 
 Update this index after every execution step with a link to that step's latest timestamped entry.
@@ -2159,3 +2160,36 @@ Known limits and next step:
   replacement control.
 - P3-S4 — add Project-card service controls, immutable mode explanation, hosted URLs, balance
   visibility, and audit history while keeping template controls disabled until Phase 5.
+
+## 2026-08-22 05:08 UTC — P3-S3 correction: complete project-key route enforcement
+
+Finding and correction:
+
+- Post-push route review found that the verification status and response route families use the
+  lower-level `authenticateApiKey` helper because their URLs identify an interaction rather than a
+  project slug. The initial P3-S3 commit enforced the allowlist only in
+  `authenticateProjectApiKey`, leaving the API-key branches of those two routes unrestricted.
+- Moved source-IP enforcement into the lower-level authentication path while preserving exact-slug
+  validation before source authorization in the slug-aware wrapper. Both result routes now pass
+  their trusted resolved client IP. Browser interaction-token branches remain unchanged because
+  they are not customer-backend API-key requests.
+- Added direct-helper enforcement coverage plus an ordering assertion that a wrong project slug
+  still returns authentication failure before source authorization.
+
+Affected files:
+
+- `backend/packages/api/src/project-api-auth.ts`
+- `backend/packages/api/src/project-api-auth.test.ts`
+- `backend/apps/server/app/v1/verifications/[interactionId]/route.ts`
+- `backend/apps/server/app/v1/verifications/[interactionId]/response/route.ts`
+- `docs/POWEROTP_SIGNIN_AD_SERVICE_AS_BUILT.md`
+
+Focused verification:
+
+- API tests passed (484).
+- API package and backend production builds passed.
+
+Commit, push, and remote check:
+
+- The P3-S3 correction is ready for commit and push. Final commit, push, and one remote result check
+  are reported in the post-push handoff.

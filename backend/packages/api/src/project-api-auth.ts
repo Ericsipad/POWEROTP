@@ -15,6 +15,21 @@ export async function authenticateApiKey(
   db: Db,
   config: Pick<ProductionConfig, "API_KEY_HASH_SECRET">,
   authorizationHeader: string | undefined,
+  sourceIp: string | undefined,
+): Promise<ProjectDocument> {
+  const project = await authenticateApiKeyCredential(
+    db,
+    config,
+    authorizationHeader,
+  );
+  enforceSourceIp(project, sourceIp);
+  return project;
+}
+
+async function authenticateApiKeyCredential(
+  db: Db,
+  config: Pick<ProductionConfig, "API_KEY_HASH_SECRET">,
+  authorizationHeader: string | undefined,
 ): Promise<ProjectDocument> {
   const match = /^Bearer\s+(\S+)$/.exec(authorizationHeader ?? "");
   if (!match) throw new ApiError("authentication_required", 401);
@@ -29,7 +44,6 @@ export async function authenticateApiKey(
     .collection<ProjectDocument>("projects")
     .findOne({ _id: apiKey.projectId });
   if (!project?.active) throw new ApiError("authentication_required", 401);
-
   return project;
 }
 
@@ -40,11 +54,19 @@ export async function authenticateProjectApiKey(
   authorizationHeader: string | undefined,
   sourceIp: string | undefined,
 ): Promise<ProjectDocument> {
-  const project = await authenticateApiKey(db, config, authorizationHeader);
+  const project = await authenticateApiKeyCredential(
+    db,
+    config,
+    authorizationHeader,
+  );
   if (project.slug !== projectSlug) throw new ApiError("authentication_required", 401);
+  enforceSourceIp(project, sourceIp);
+  return project;
+}
+
+function enforceSourceIp(project: ProjectDocument, sourceIp: string | undefined): void {
   const allowlist = project.authSettings?.backendIpAllowlist ?? [];
   if (!isIpAllowed(sourceIp, allowlist)) {
     throw new ApiError("source_ip_not_allowed", 403);
   }
-  return project;
 }
