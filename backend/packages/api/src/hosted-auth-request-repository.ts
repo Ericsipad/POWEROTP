@@ -14,6 +14,10 @@ import {
 } from "@powerotp/contracts";
 import type { Collection, Db } from "mongodb";
 
+import type {
+  HostedAuthRetentionWriter,
+  HostedAuthTerminalRetentionDetails,
+} from "./hosted-auth-retention-repository.js";
 import { decryptString, encryptString, safeEqual } from "./security.js";
 
 export const HOSTED_AUTH_RUNTIME_DATABASE_NAME = "powerotp_auth_runtime";
@@ -89,6 +93,7 @@ export class HostedAuthRequestRepository {
   constructor(
     db: Db,
     private readonly resultEncryptionKey: string,
+    private readonly retention: HostedAuthRetentionWriter,
     collection?: RequestCollection,
   ) {
     if (resultEncryptionKey.length < 32) {
@@ -135,6 +140,7 @@ export class HostedAuthRequestRepository {
     state: TerminalState;
     completedAt: Date;
     result: TerminalResult;
+    retention: HostedAuthTerminalRetentionDetails;
   }): Promise<boolean> {
     const authRequestId = HostedAuthRequestIdSchema.parse(input.authRequestId);
     const state = HostedAuthRequestStateSchema.parse(input.state);
@@ -150,6 +156,29 @@ export class HostedAuthRequestRepository {
       JSON.stringify(input.result),
       this.resultEncryptionKey,
     );
+    const request = await this.requests.findOne({
+      _id: authRequestId,
+      "scope.projectId": input.projectId,
+      state: { $nin: terminalHostedAuthRequestStates },
+      expiresAt: { $gt: input.completedAt },
+    });
+    if (
+      !request ||
+      terminalHostedAuthRequestStates.includes(request.state as TerminalState) ||
+      request.expiresAt <= input.completedAt
+    ) {
+      return false;
+    }
+
+    await this.retention.retain({
+      ...input.retention,
+      authRequestId,
+      projectId: request.scope.projectId,
+      flow: request.scope.flow,
+      outcome: state as TerminalState,
+      createdAt: request.createdAt,
+      completedAt: input.completedAt,
+    });
     const update = await this.requests.updateOne(
       {
         _id: authRequestId,

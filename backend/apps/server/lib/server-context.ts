@@ -37,6 +37,7 @@ import { ChallengeService } from "@powerotp/api/challenge-service.js";
 import { loadConfig, type ProductionConfig } from "@powerotp/api/config.js";
 import { connectDataStores, type DataStores } from "@powerotp/api/dependencies.js";
 import { createBrevoEmailService } from "@powerotp/api/email.js";
+import { ensureHostedAuthRetentionIndexes } from "@powerotp/api/hosted-auth-retention-repository.js";
 import { ensureHostedAuthRequestIndexes } from "@powerotp/api/hosted-auth-request-repository.js";
 import { ModalSessionService } from "@powerotp/api/modal-session-service.js";
 import { NodeService } from "@powerotp/api/node-service.js";
@@ -109,6 +110,7 @@ async function buildServerContext(): Promise<ServerContext> {
   await Promise.all([
     ensureIndexes(dataStores.db),
     ensureHostedAuthRequestIndexes(dataStores.authRuntimeDb),
+    ensureHostedAuthRetentionIndexes(dataStores.authRetentionDb),
   ]);
 
   const challenges = new ChallengeService(dataStores.db, config);

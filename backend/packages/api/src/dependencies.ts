@@ -3,10 +3,12 @@ import { type Db, MongoClient } from "mongodb";
 
 import type { ProductionConfig } from "./config.js";
 import { hostedAuthRuntimeDatabase } from "./hosted-auth-request-repository.js";
+import { hostedAuthRetentionDatabase } from "./hosted-auth-retention-repository.js";
 
 export interface DataStores {
   db: Db;
   authRuntimeDb: Db;
+  authRetentionDb: Db;
   /** The underlying `MongoClient`, exposed alongside `db` so services that
    * need real multi-document transactions (e.g.
    * `backend/packages/api/src/balance-service.ts#applyLedgerEntry`) can call
@@ -41,6 +43,7 @@ export async function connectDataStores(
   return {
     db: mongo.db("powerotp"),
     authRuntimeDb: hostedAuthRuntimeDatabase(mongo),
+    authRetentionDb: hostedAuthRetentionDatabase(mongo),
     client: mongo,
     rateLimitStore: valkey,
     async isReady() {

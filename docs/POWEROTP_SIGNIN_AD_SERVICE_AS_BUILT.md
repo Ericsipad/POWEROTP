@@ -25,7 +25,8 @@ Do not mark a phase/step implemented, deployed, remote-green, or certified witho
 - P2-S1 TLS correction — 2026-08-21 22:56 UTC, verified pooler login and CA trust
 - P2-S2 — completed 2026-08-22 00:49 UTC, MongoDB hot auth-request repository
 - P2-S2 timeout correction — 2026-08-22 01:02 UTC, fixed ten-minute active ceremony
-- P2-S3 through P15-S6 — not started
+- P2-S3 — completed 2026-08-22 01:17 UTC, durable redacted retention before publication
+- P2-S4 through P15-S6 — not started
 
 Update this index after every execution step with a link to that step's latest timestamped entry.
 
@@ -1106,3 +1107,73 @@ Commit, push, and remote check:
 Next step:
 
 - P2-S3 remains the next dependency step.
+
+## 2026-08-22 01:17 UTC — P2-S3: durable redacted auth-request retention
+
+Status and scope:
+
+- P2-S3 is complete. It adds only the separate durable MongoDB auth-request retention repository
+  and enforces durable write-before-terminal-result publication.
+- Project bindings, wrapped keys, KMS integration, identity sagas, provider adapters, MCP behavior,
+  runtime HTTP handlers, Passport, and BotBlocker remain unchanged.
+
+Implemented data and behavior:
+
+- Added the `powerotp_auth_retention` database and `authRequestRetention` collection on POWEROTP's
+  existing protected MongoDB deployment. It is separate from both the primary `powerotp` database
+  and short-lived `powerotp_auth_runtime` database.
+- Retention records use a strict allowlist containing only request/project/flow, authentication
+  method, optional redacted binding/provider/balance references, canonical assurance and verification
+  levels, terminal outcome and stable failure reason, correlation ID, request/completion times, and
+  an explicit finite retention expiry.
+- The repository rejects unknown fields, unsorted or duplicate levels, impossible timestamps,
+  successful records with failure reasons, and non-success records without stable failure reasons.
+  Poll tokens and hashes, browser handles, PII, provider secrets, complete client results, and
+  sensitive payloads have no accepted storage field.
+- Exact duplicate retention writes are idempotent through request-ID upsert. A changed replay for
+  the same request fails as a conflict instead of rewriting canonical audit evidence.
+- Terminal publication first confirms that the matching project request remains active, writes the
+  durable redacted record, and only then performs the guarded hot-store update. A failed retention
+  write leaves the hot request active and its terminal result unavailable.
+- Startup creates exact-date retention-expiry, project/completion, and correlation lookup indexes.
+  No default legal retention duration was invented; later callers must supply the approved finite
+  expiry.
+
+Affected files:
+
+- `backend/packages/api/src/hosted-auth-retention-repository.ts`
+- `backend/packages/api/src/hosted-auth-retention-repository.test.ts`
+- `backend/packages/api/src/hosted-auth-request-repository.ts`
+- `backend/packages/api/src/hosted-auth-request-repository.test.ts`
+- `backend/packages/api/src/hosted-auth-request-repository.test-support.ts`
+- `backend/packages/api/src/dependencies.ts`
+- `backend/apps/server/lib/server-context.ts`
+- `docs/POWEROTP_SIGNIN_AD_SERVICE_AS_BUILT.md`
+
+Security, compatibility, and migration impact:
+
+- Durable support/billing/audit data cannot contain the short-lived polling credential or complete
+  client result. Database isolation keeps retained evidence independent from runtime TTL deletion.
+- Publication fails closed when durable storage is unavailable. Retry uses the exact duplicate as an
+  idempotent durable write, while conflicting evidence remains immutable.
+- This is an additive database/index boundary on the existing MongoDB deployment. It adds no
+  environment variable, does not modify `.env`, and changes no public HTTP contract.
+
+Focused verification:
+
+- `npm run test -w @powerotp/api` — passed, including redaction, ordering, durable-write failure,
+  duplicate/conflict, index, expiry-validation, and database-isolation coverage.
+- `npm run lint -w @powerotp/api` — passed.
+- `npm run build -w @powerotp/api` followed by `npm run lint -w @powerotp/backend` — passed for
+  generated API declarations and server startup wiring.
+- No full-monorepo verification was run locally; remote Verify remains the complete pushed check.
+
+Commit, push, and remote check:
+
+- The coherent P2-S3 commit contains this entry. Its final hash, push confirmation, and one remote
+  Verify result check are reported in the post-push session handoff.
+
+Next step:
+
+- P2-S4 — add only project binding, wrapped-key metadata, hosted-auth template, and non-request
+  security-event schemas without beginning per-person cryptography/KMS integration or identity sagas.

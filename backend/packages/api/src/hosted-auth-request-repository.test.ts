@@ -1,100 +1,26 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { hostedAuthRealms } from "@powerotp/contracts";
-import type { Collection, Db } from "mongodb";
+import type { Db } from "mongodb";
 
 import {
   ensureHostedAuthRequestIndexes,
   HOSTED_AUTH_REQUEST_COLLECTION_NAME,
-  HostedAuthRequestRepository,
-  type HostedAuthRequestDocument,
 } from "./hosted-auth-request-repository.js";
-
-const body = "A".repeat(43);
-const authRequestId = `har_${body}`;
-const pollToken = `hpt_${body}`;
-const scope = {
-  projectId: "project_12345678",
-  realm: hostedAuthRealms.powerotp_pii,
-  flow: "signup" as const,
-};
-
-class MemoryCollection {
-  readonly documents = new Map<string, HostedAuthRequestDocument>();
-  readonly indexes: Array<{ keys: object; options: object }> = [];
-
-  async createIndex(keys: object, options: object) {
-    this.indexes.push({ keys, options });
-    return String(options);
-  }
-
-  async insertOne(document: HostedAuthRequestDocument) {
-    this.documents.set(document._id, structuredClone(document));
-    return { acknowledged: true, insertedId: document._id };
-  }
-
-  async findOne(filter: Record<string, unknown>) {
-    const document = this.documents.get(String(filter._id));
-    if (
-      !document ||
-      (filter["scope.projectId"] !== undefined &&
-        document.scope.projectId !== filter["scope.projectId"]) ||
-      (filter["scope.flow"] !== undefined &&
-        document.scope.flow !== filter["scope.flow"])
-    ) {
-      return null;
-    }
-    return structuredClone(document);
-  }
-
-  async updateOne(
-    filter: Record<string, unknown>,
-    update: { $set: Partial<HostedAuthRequestDocument> },
-  ) {
-    const document = this.documents.get(String(filter._id));
-    const expiresAt = filter.expiresAt as { $gt?: Date } | undefined;
-    const terminal = ["succeeded", "failed", "canceled", "expired"];
-    if (
-      !document ||
-      document.scope.projectId !== filter["scope.projectId"] ||
-      terminal.includes(document.state) ||
-      (expiresAt?.$gt && document.expiresAt <= expiresAt.$gt)
-    ) {
-      return { acknowledged: true, matchedCount: 0, modifiedCount: 0 };
-    }
-    this.documents.set(document._id, { ...document, ...update.$set });
-    return { acknowledged: true, matchedCount: 1, modifiedCount: 1 };
-  }
-
-  async deleteOne(filter: Record<string, unknown>) {
-    const document = this.documents.get(String(filter._id));
-    if (
-      document &&
-      (!(filter.purgeAt instanceof Date) ||
-        filter.purgeAt.getTime() === document.purgeAt.getTime())
-    ) {
-      this.documents.delete(document._id);
-      return { acknowledged: true, deletedCount: 1 };
-    }
-    return { acknowledged: true, deletedCount: 0 };
-  }
-}
-
-function repository(collection = new MemoryCollection()) {
-  return {
-    collection,
-    repository: new HostedAuthRequestRepository(
-      {} as Db,
-      "result-encryption-key".repeat(2),
-      collection as unknown as Collection<HostedAuthRequestDocument>,
-    ),
-  };
-}
+import {
+  authRequestId,
+  body,
+  MemoryHostedAuthRequestCollection,
+  MemoryHostedAuthRetentionWriter,
+  pollToken,
+  requestRepository,
+  scope,
+  successRetention,
+} from "./hosted-auth-request-repository.test-support.js";
 
 describe("HostedAuthRequestRepository", () => {
   it("creates the dedicated exact-date TTL and scoped lookup indexes", async () => {
-    const collection = new MemoryCollection();
+    const collection = new MemoryHostedAuthRequestCollection();
     const db = {
       collection(name: string) {
         assert.equal(name, HOSTED_AUTH_REQUEST_COLLECTION_NAME);
@@ -118,7 +44,7 @@ describe("HostedAuthRequestRepository", () => {
 
   it("enforces the fixed ten-minute active-TTL boundary", async () => {
     const createdAt = new Date("2026-08-21T23:00:00.000Z");
-    const { repository: requests, collection } = repository();
+    const { repository: requests, collection } = requestRepository();
     const created = await requests.create({
       authRequestId,
       scope,
@@ -155,7 +81,7 @@ describe("HostedAuthRequestRepository", () => {
   });
 
   it("persists only the poll-token hash and verifies project, flow, and token", async () => {
-    const { repository: requests, collection } = repository();
+    const { repository: requests, collection } = requestRepository();
     await requests.create({ authRequestId, scope, pollToken });
     const stored = collection.documents.get(authRequestId);
 
@@ -190,7 +116,7 @@ describe("HostedAuthRequestRepository", () => {
     const createdAt = new Date("2026-08-21T23:00:00.000Z");
     const completedAt = new Date(createdAt.getTime() + 60_000);
     const result = { projectUserId: `pusr_${body}`, assuranceMethods: ["webauthn"] };
-    const { repository: requests, collection } = repository();
+    const { repository: requests, collection } = requestRepository();
     await requests.create({ authRequestId, scope, pollToken, createdAt });
 
     assert.equal(
@@ -200,6 +126,7 @@ describe("HostedAuthRequestRepository", () => {
         state: "succeeded",
         completedAt,
         result,
+        retention: successRetention,
       }),
       true,
     );
@@ -236,7 +163,7 @@ describe("HostedAuthRequestRepository", () => {
 
   it("cannot replace a terminal result or publish after active expiry", async () => {
     const createdAt = new Date("2026-08-21T23:00:00.000Z");
-    const { repository: requests } = repository();
+    const { repository: requests } = requestRepository();
     await requests.create({
       authRequestId,
       scope,
@@ -249,6 +176,10 @@ describe("HostedAuthRequestRepository", () => {
       state: "failed" as const,
       completedAt: new Date(createdAt.getTime() + 1_000),
       result: { failureReason: "authentication_failed" },
+      retention: {
+        ...successRetention,
+        failureReason: "authentication_failed" as const,
+      },
     };
     assert.equal(await requests.publishTerminal(first), true);
     assert.equal(
@@ -256,7 +187,7 @@ describe("HostedAuthRequestRepository", () => {
       false,
     );
 
-    const second = repository().repository;
+    const second = requestRepository().repository;
     await second.create({
       authRequestId,
       scope,
@@ -270,5 +201,55 @@ describe("HostedAuthRequestRepository", () => {
       }),
       false,
     );
+  });
+
+  it("writes durable retention before publishing a terminal result", async () => {
+    const events: string[] = [];
+    const collection = new MemoryHostedAuthRequestCollection(events);
+    const retention = new MemoryHostedAuthRetentionWriter(events);
+    const { repository: requests } = requestRepository(collection, retention);
+    const createdAt = new Date("2026-08-22T01:00:00.000Z");
+    await requests.create({ authRequestId, scope, pollToken, createdAt });
+
+    assert.equal(
+      await requests.publishTerminal({
+        authRequestId,
+        projectId: scope.projectId,
+        state: "succeeded",
+        completedAt: new Date(createdAt.getTime() + 1_000),
+        result: { projectUserId: `pusr_${body}` },
+        retention: successRetention,
+      }),
+      true,
+    );
+    assert.deepEqual(events, ["retain", "publish"]);
+    assert.equal(retention.records[0]?.flow, scope.flow);
+    assert.equal(retention.records[0]?.createdAt.getTime(), createdAt.getTime());
+  });
+
+  it("does not publish when durable retention fails", async () => {
+    const events: string[] = [];
+    const collection = new MemoryHostedAuthRequestCollection(events);
+    const retention = new MemoryHostedAuthRetentionWriter(
+      events,
+      new Error("retention unavailable"),
+    );
+    const { repository: requests } = requestRepository(collection, retention);
+    const createdAt = new Date("2026-08-22T01:00:00.000Z");
+    await requests.create({ authRequestId, scope, pollToken, createdAt });
+
+    await assert.rejects(
+      requests.publishTerminal({
+        authRequestId,
+        projectId: scope.projectId,
+        state: "succeeded",
+        completedAt: new Date(createdAt.getTime() + 1_000),
+        result: { projectUserId: `pusr_${body}` },
+        retention: successRetention,
+      }),
+      /retention unavailable/,
+    );
+    assert.deepEqual(events, ["retain"]);
+    assert.equal(collection.documents.get(authRequestId)?.state, "created");
   });
 });
