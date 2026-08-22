@@ -53,6 +53,45 @@ export class ProjectIdentityBindingRepository {
     }
     throw new Error("Conflicting hosted-auth project binding");
   }
+
+  async findByProjectPerson(
+    projectId: string,
+    hostedPersonIdentityId: ProjectIdentityBindingRecord["hostedPersonIdentityId"],
+  ): Promise<ProjectIdentityBindingRecord | null> {
+    const document = await this.bindings.findOne({
+      projectId,
+      hostedPersonIdentityId,
+    });
+    if (!document) return null;
+    const { _id, ...record } = document;
+    return ProjectIdentityBindingRecordSchema.parse({
+      bindingId: _id,
+      ...record,
+    });
+  }
+
+  async createOrGet(
+    input: ProjectIdentityBindingRecord,
+  ): Promise<ProjectIdentityBindingRecord> {
+    const record = ProjectIdentityBindingRecordSchema.parse(input);
+    const { bindingId, ...fields } = record;
+    await this.bindings.updateOne(
+      {
+        projectId: record.projectId,
+        hostedPersonIdentityId: record.hostedPersonIdentityId,
+      },
+      { $setOnInsert: { _id: bindingId, ...fields } },
+      { upsert: true },
+    );
+    const persisted = await this.findByProjectPerson(
+      record.projectId,
+      record.hostedPersonIdentityId,
+    );
+    if (!persisted) {
+      throw new Error("Hosted-auth project binding is unavailable");
+    }
+    return persisted;
+  }
 }
 
 type WrappedKeyCollection = Pick<

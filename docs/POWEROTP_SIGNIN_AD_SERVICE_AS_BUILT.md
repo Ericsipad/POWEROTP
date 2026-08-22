@@ -28,7 +28,8 @@ Do not mark a phase/step implemented, deployed, remote-green, or certified witho
 - P2-S3 — completed 2026-08-22 01:17 UTC, durable redacted retention before publication
 - P2-S4 — completed 2026-08-22 01:28 UTC, durable hosted-auth supporting schemas
 - P2-S5 — completed 2026-08-22 01:38 UTC, per-person envelope encryption and KMS
-- P2-S6 through P15-S6 — not started
+- P2-S6 — completed 2026-08-22 01:48 UTC, KMS-backed pairwise and lookup derivation rotation
+- P2-S7 through P15-S6 — not started
 
 Update this index after every execution step with a link to that step's latest timestamped entry.
 
@@ -1323,3 +1324,74 @@ Next step:
 
 - P2-S6 — add project-user-ID pepper derivation, dedicated keyed lookup secrets, and key rotation
   without beginning P2-S7 person/profile/contact creation sagas.
+
+## 2026-08-22 01:48 UTC — P2-S6: KMS-backed pairwise and lookup derivation rotation
+
+Status and scope:
+
+- P2-S6 is complete. It adds only project-user-ID derivation, dedicated keyed lookup derivation,
+  versioned rotation behavior, immutable binding reuse, and lookup-key-version persistence.
+- Person/profile/contact creation sagas, provider adapters, MCP behavior, runtime HTTP handlers,
+  `.env`, Passport, and BotBlocker remain unchanged.
+
+Implemented data and behavior:
+
+- Added AWS KMS `GenerateMac` integration using HMAC-SHA-256. Project-user derivation and each
+  global/mode/channel lookup purpose require independently configured KMS HMAC keys; duplicate key
+  IDs across domains are rejected, and application code receives only 256-bit MAC outputs.
+- Project user IDs derive from the private person ID, a zero delimiter, and the project ID under the
+  current versioned project-subject KMS key. The result is validated as the canonical `pusr_`
+  identifier and persisted with its derivation version.
+- Added atomic project/person binding lookup and insert-if-absent behavior. A stored binding is
+  returned before any new derivation, so project IDs remain immutable across key rotation and
+  concurrent creation retains one canonical binding.
+- Added dedicated `global_contact_link`, `powerotp_pii_email`, `powerotp_pii_phone`,
+  `didit_pii_email`, and `didit_pii_phone` lookup domains. New values use the current key version;
+  reads derive candidates for the current and explicitly retained prior versions.
+- Applied the production Supabase migration adding required positive `lookup_key_version` to
+  `hosted_auth.contacts`. The contact uniqueness key now includes mode, channel, key version, and
+  lookup hash. Existing empty production storage was assigned version 1 during migration, and the
+  default was removed so future writes must state their version.
+
+Affected files:
+
+- `backend/packages/api/src/hosted-auth-keyed-derivation.ts`
+- `backend/packages/api/src/hosted-auth-keyed-derivation.test.ts`
+- `backend/packages/api/src/hosted-auth-keyed-derivation-migration.test.ts`
+- `backend/packages/api/src/hosted-auth-durable-repository.ts`
+- `supabase/migrations/20260822020000_p2_s6_lookup_key_rotation.sql`
+- `docs/POWEROTP_SIGNIN_AD_SERVICE_AS_BUILT.md`
+
+Security, compatibility, and migration impact:
+
+- Domain-specific KMS keys and purpose-bound lookup messages prevent project-subject, global-link,
+  custody-mode, email, and phone derivations from being substituted. Same-person IDs differ across
+  projects.
+- Derivation peppers and lookup secrets remain exclusively in KMS; MongoDB stores only immutable
+  public pairwise IDs and versions, while Supabase stores only lookup MACs and versions. KMS denial
+  fails closed without creating a binding or lookup result.
+- Rotation is additive: persisted project IDs are never recomputed, and retained lookup versions
+  remain queryable while new lookup writes use the current version. Removing an old lookup key from
+  the configured KMS key ring intentionally removes authority to query that version.
+- No environment variable, route, provider credential, client response, identity saga, Passport
+  behavior, or BotBlocker behavior changed.
+
+Focused verification:
+
+- `npm run test -w @powerotp/api` — passed (439 tests), including domain separation, cross-project
+  unlinkability, KMS denial, binding persistence/restart, rotation, migration, and secret-exclusion
+  coverage.
+- `npm run lint -w @powerotp/api` — passed.
+- `npm run build -w @powerotp/api` — passed.
+- Production Supabase migration `p2_s6_lookup_key_rotation` applied successfully.
+- No full-monorepo verification was run locally; remote Verify remains the complete pushed check.
+
+Commit, push, and remote check:
+
+- The coherent P2-S6 commit contains this entry. Its final hash, push confirmation, and one remote
+  Verify result check are reported in the post-push session handoff.
+
+Next step:
+
+- P2-S7 — add the person/profile/contact creation saga and compensation while preserving the
+  P2-S1 through P2-S6 store, custody, cryptographic, immutable-binding, and rotation boundaries.
