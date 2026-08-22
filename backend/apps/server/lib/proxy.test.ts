@@ -3,7 +3,6 @@ import { afterEach, describe, it } from "node:test";
 
 import { NextRequest } from "next/server";
 
-import { HOSTED_AUTH_REALM_REQUEST_HEADER } from "./hosted-auth-realms.js";
 import { proxy } from "../proxy.js";
 
 const previousPublicAppUrl = process.env.PUBLIC_APP_URL;
@@ -96,13 +95,15 @@ describe("backend hosted-auth host routing", () => {
     );
 
     assert.equal(health.status, 200);
-    assert.equal(health.headers.get("x-middleware-next"), "1");
-    assert.equal(
-      health.headers.get(
-        `x-middleware-request-${HOSTED_AUTH_REALM_REQUEST_HEADER}`,
-      ),
-      "authx.powerotp.com",
-    );
+    assert.equal(health.headers.get("cache-control"), "no-store");
+    assert.deepEqual(await health.json(), {
+      service: "powerotp-hosted-auth",
+      status: "ok",
+      environment: "production",
+      identityDataMode: "powerotp_pii",
+      realm: "authx.powerotp.com",
+      rpId: "authx.powerotp.com",
+    });
     assert.equal(api.status, 404);
     assert.equal(api.headers.get("cache-control"), "no-store");
     assert.deepEqual(await api.json(), {
@@ -125,20 +126,10 @@ describe("backend hosted-auth host routing", () => {
   it("does not alter API-host routing", () => {
     process.env.HOSTED_AUTH_DEPLOYMENT_ENVIRONMENT = "production";
     const response = proxy(
-      new NextRequest("https://api.powerotp.com/v1/capabilities", {
-        headers: {
-          [HOSTED_AUTH_REALM_REQUEST_HEADER]: "authx.powerotp.com",
-        },
-      }),
+      new NextRequest("https://api.powerotp.com/v1/capabilities"),
     );
 
     assert.equal(response.status, 200);
     assert.equal(response.headers.get("x-middleware-next"), "1");
-    assert.equal(
-      response.headers.get(
-        `x-middleware-request-${HOSTED_AUTH_REALM_REQUEST_HEADER}`,
-      ),
-      null,
-    );
   });
 });

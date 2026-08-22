@@ -49,9 +49,6 @@ export const HOSTED_AUTH_DEPLOYMENTS = {
   },
 } as const;
 
-export const HOSTED_AUTH_REALM_REQUEST_HEADER =
-  "x-powerotp-hosted-auth-realm";
-
 export type HostedAuthDeploymentEnvironment =
   keyof typeof HOSTED_AUTH_DEPLOYMENTS;
 export type HostedAuthIdentityDataMode = "powerotp_pii" | "didit_pii";
@@ -93,18 +90,6 @@ export function resolveHostedAuthRealm(
     if (normalizedHostname === realm.hostname) {
       return { environment, identityDataMode, ...realm };
     }
-  }
-  return null;
-}
-
-export function resolveHostedAuthRealmFromValidatedHostname(
-  hostname: string,
-): HostedAuthRealm | null {
-  for (const environment of Object.keys(
-    HOSTED_AUTH_DEPLOYMENTS,
-  ) as HostedAuthDeploymentEnvironment[]) {
-    const realm = resolveHostedAuthRealm(hostname, environment);
-    if (realm) return realm;
   }
   return null;
 }

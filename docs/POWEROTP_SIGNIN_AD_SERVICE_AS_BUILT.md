@@ -36,6 +36,7 @@ Do not mark a phase/step implemented, deployed, remote-green, or certified witho
 - P3-S0 — completed 2026-08-22 03:32 UTC, hosted-auth DNS/TLS/routing/deployment isolation
 - P3-S0 proxy correction — 2026-08-22 03:44 UTC, authenticated public-realm handoff
 - P3-S0 runtime correction — 2026-08-22 03:51 UTC, single realm authority across runtimes
+- P3-S0 health correction — 2026-08-22 04:02 UTC, direct host-proxy health response
 - P3-S1 through P15-S6 — not started
 
 Update this index after every execution step with a link to that step's latest timestamped entry.
@@ -1854,6 +1855,38 @@ Focused verification:
 Commit, push, and remote check:
 
 - This correction is included in a second P3-S0 follow-up commit. Final push and replacement
+  Verify/deployment status are reported in the post-push handoff.
+
+Next step:
+
+- P3-S1 remains unchanged.
+
+## 2026-08-22 04:02 UTC — P3-S0 correction: direct host-proxy health response
+
+Finding and correction:
+
+- Production showed that App Platform/Next.js did not preserve the middleware-owned request header
+  into the route handler in the form required by the realm health implementation. The public host
+  remained available and correctly validated in Next.js Proxy, which already enforced all hosted
+  realm routing.
+- Simplified the permanent design so Proxy directly returns the no-store realm health JSON after
+  exact environment/hostname resolution. Removed the duplicate health route, its test, internal
+  handoff header, and route-inventory entry. Hosted routes still fail closed before later handlers
+  exist, while `api.powerotp.com` routing remains unchanged.
+- This follows the supported App Platform multi-domain deployment and Next.js Proxy direct-response
+  model and requires no droplet, second service, caller-supplied host authority, or cross-runtime
+  metadata handoff.
+
+Focused verification:
+
+- `npm run test -w @powerotp/backend` — passed (22 tests).
+- The first lint attempt found only stale generated `.next` route declarations after deleting the
+  route file. `npm run build -w @powerotp/backend` regenerated the route manifest and passed;
+  `npm run lint -w @powerotp/backend` then passed.
+
+Commit, push, and remote check:
+
+- This correction is included in the final P3-S0 follow-up commit. Final push and replacement
   Verify/deployment status are reported in the post-push handoff.
 
 Next step:
