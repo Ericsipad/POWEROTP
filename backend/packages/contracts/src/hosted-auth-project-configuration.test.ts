@@ -27,6 +27,7 @@ const settings = {
     identityKycRequired: true,
     livenessRequired: false,
   },
+  backendIpAllowlist: [],
 };
 
 describe("hosted-auth project configuration contracts", () => {
@@ -58,6 +59,12 @@ describe("hosted-auth project configuration contracts", () => {
   it("permits isolated partial updates but rejects empty and unknown updates", () => {
     assert.equal(
       UpdateHostedAuthProjectSettingsSchema.safeParse({ signinEnabled: false }).success,
+      true,
+    );
+    assert.equal(
+      UpdateHostedAuthProjectSettingsSchema.safeParse({
+        backendIpAllowlist: ["203.0.113.4/32", "2001:db8::/48"],
+      }).success,
       true,
     );
     assert.equal(UpdateHostedAuthProjectSettingsSchema.safeParse({}).success, false);

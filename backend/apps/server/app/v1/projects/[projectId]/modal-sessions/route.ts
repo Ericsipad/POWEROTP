@@ -23,16 +23,18 @@ interface RouteParams {
 export const POST = apiRoute<RouteParams>(async (request, { params }) => {
   const { config, dataStores, modalSessions } = await getServerContext();
   const { projectId: slug } = await params;
+  const sourceIp = clientIp(request);
 
   const project = await authenticateProjectApiKey(
     dataStores.db,
     config,
     slug,
     request.headers.get("authorization") ?? undefined,
+    sourceIp,
   );
   await enforceRateLimit(
     dataStores.rateLimitStore,
-    `rl:modal-sessions:${clientIp(request) ?? "unknown"}`,
+    `rl:modal-sessions:${sourceIp ?? "unknown"}`,
     30,
     60,
   );

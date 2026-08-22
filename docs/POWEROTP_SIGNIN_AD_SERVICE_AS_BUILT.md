@@ -41,7 +41,8 @@ Do not mark a phase/step implemented, deployed, remote-green, or certified witho
 - P3-S1 — completed 2026-08-22 04:23 UTC, immutable project custody/realm identifiers and hosted URLs
 - P3-S1 correction — 2026-08-22 04:33 UTC, removed nonexistent legacy-project compatibility
 - P3-S2 — completed 2026-08-22 04:48 UTC, exact return URLs and isolated method/assurance settings
-- P3-S3 through P15-S6 — not started
+- P3-S3 — completed 2026-08-22 04:59 UTC, optional canonical backend IPv4/IPv6 CIDR allowlist
+- P3-S4 through P15-S6 — not started
 
 Update this index after every execution step with a link to that step's latest timestamped entry.
 
@@ -2086,3 +2087,75 @@ Known limits and next step:
   to their later phases; no fake execution path was added.
 - P3-S3 — add the optional backend IPv4/IPv6 CIDR allowlist without changing P3-S2 return URL or
   authentication policy behavior.
+
+## 2026-08-22 04:59 UTC — P3-S3: project backend IP/CIDR allowlist
+
+Status and scope:
+
+- P3-S3 is complete. Customer projects can optionally restrict project-API-key requests to
+  canonical IPv4 and IPv6 CIDRs as defense in depth.
+- P3-S4 Project-card controls, hosted credential handlers, provider adapters, Passport, MCP,
+  BotBlocker behavior, the internal landing-page demo, and `.env` were not changed.
+
+Implemented contracts, data, and behavior:
+
+- Added `backendIpAllowlist` to the hosted-auth project settings contract. New projects default to
+  an empty list, so serverless clients and clients without stable egress addresses continue to work.
+- The existing authenticated, owner-scoped, CSRF-protected auth-settings PATCH canonicalizes each
+  CIDR to its network address before persistence and rejects malformed ranges, ambiguous decimal
+  IPv4, integer/hex alternatives, zone or bracket syntax, dotted IPv6, IPv4-mapped IPv6, invalid
+  prefix syntax, and duplicate canonical networks.
+- Project API authentication still validates the bearer API key and exact project slug first.
+  A non-empty allowlist then requires the trusted request source to match a same-family CIDR;
+  missing, malformed, mapped, or out-of-range source addresses fail closed with
+  `source_ip_not_allowed`. An empty allowlist skips only the network restriction, never API-key
+  authentication.
+- Enforcement is centralized in `authenticateProjectApiKey` and therefore covers the existing
+  project-key verification, modal-session, and auth-session route families without duplicating
+  policy in handlers.
+
+Authorization, immutability, and isolation:
+
+- Another customer cannot read or mutate the allowlist. Allowlist-only updates preserve the P3-S1
+  custody mode, opaque identifier, realm/RP configuration, and hosted URLs; they also preserve all
+  P3-S2 return URLs, signup/signin enablement, methods, and assurance policy.
+- Existing verification settings, allowed origins, and BotBlocker site/configuration remain
+  isolated. The operator-owned landing-page demo still has no hosted-auth configuration.
+
+Affected files:
+
+- `backend/packages/contracts/src/hosted-auth-project-configuration.ts`
+- `backend/packages/contracts/src/hosted-auth-project-configuration.test.ts`
+- `backend/packages/api/src/ip-cidr.ts`
+- `backend/packages/api/src/ip-cidr.test.ts`
+- `backend/packages/api/src/project-api-auth.ts`
+- `backend/packages/api/src/project-api-auth.test.ts`
+- `backend/packages/api/src/project-service.ts`
+- `backend/packages/api/src/project-service.test.ts`
+- `backend/apps/server/app/v1/projects/[projectId]/verifications/route.ts`
+- `backend/apps/server/app/v1/projects/[projectId]/modal-sessions/route.ts`
+- `backend/apps/server/app/v1/projects/[projectId]/auth-sessions/route.ts`
+- `frontend/lib/contracts/projects.ts`
+- `docs/POWEROTP_SIGNIN_AD_SERVICE_AS_BUILT.md`
+
+Focused verification:
+
+- Contracts tests passed (267).
+- API tests passed (483), including IPv4/IPv6 canonicalization and matching, malformed/bypass
+  rejection, mandatory API-key authentication, unrestricted empty-list behavior, enforced source
+  authorization, owner authorization, and settings isolation.
+- Backend route tests passed (25).
+- Backend and frontend production builds passed.
+
+Commit, push, and remote check:
+
+- The coherent P3-S3 change is ready for commit and push. Final commit, push, and one remote Verify/
+  deployment result check are reported in the post-push handoff.
+
+Known limits and next step:
+
+- The allowlist relies on the deployment's existing trusted Cloudflare/App Platform client-IP
+  resolution boundary. It is intentionally optional and is not an identity, recovery, or API-key
+  replacement control.
+- P3-S4 — add Project-card service controls, immutable mode explanation, hosted URLs, balance
+  visibility, and audit history while keeping template controls disabled until Phase 5.

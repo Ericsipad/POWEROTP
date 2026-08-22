@@ -63,12 +63,17 @@ export const HostedAuthAssurancePolicySchema = z
   })
   .strict();
 
+export const HostedAuthBackendIpAllowlistSchema = z
+  .array(z.string().trim().min(3).max(64))
+  .max(100);
+
 export const HostedAuthProjectSettingsSchema = z
   .object({
     signupEnabled: z.boolean(),
     signinEnabled: z.boolean(),
     methodPolicy: HostedAuthMethodPolicySchema,
     assurancePolicy: HostedAuthAssurancePolicySchema,
+    backendIpAllowlist: HostedAuthBackendIpAllowlistSchema,
   })
   .strict();
 
@@ -92,6 +97,7 @@ export const DEFAULT_HOSTED_AUTH_PROJECT_SETTINGS = {
     identityKycRequired: false,
     livenessRequired: false,
   },
+  backendIpAllowlist: [],
 } as const satisfies HostedAuthProjectSettings;
 
 export type HostedAuthReturnUrls = z.infer<typeof HostedAuthReturnUrlsSchema>;

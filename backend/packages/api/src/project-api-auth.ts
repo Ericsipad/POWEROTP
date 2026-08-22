@@ -2,6 +2,7 @@ import type { Db } from "mongodb";
 
 import type { ProductionConfig } from "./config.js";
 import { ApiError } from "./errors.js";
+import { isIpAllowed } from "./ip-cidr.js";
 import type { ApiKeyDocument, ProjectDocument } from "./persistence.js";
 import { hashToken } from "./security.js";
 
@@ -37,8 +38,13 @@ export async function authenticateProjectApiKey(
   config: Pick<ProductionConfig, "API_KEY_HASH_SECRET">,
   projectSlug: string,
   authorizationHeader: string | undefined,
+  sourceIp: string | undefined,
 ): Promise<ProjectDocument> {
   const project = await authenticateApiKey(db, config, authorizationHeader);
   if (project.slug !== projectSlug) throw new ApiError("authentication_required", 401);
+  const allowlist = project.authSettings?.backendIpAllowlist ?? [];
+  if (!isIpAllowed(sourceIp, allowlist)) {
+    throw new ApiError("source_ip_not_allowed", 403);
+  }
   return project;
 }

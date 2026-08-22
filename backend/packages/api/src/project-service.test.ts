@@ -10,6 +10,7 @@ import type { Db, MongoClient } from "mongodb";
 import type { BotBlockerSiteDocument } from "./botblocker-site-persistence.js";
 import { verifyBotBlockerWebhookId } from "./botblocker-webhook.js";
 import {
+  canonicalizeBackendIpAllowlist,
   canonicalizeHostedAuthReturnUrls,
   ProjectService,
 } from "./project-service.js";
@@ -358,6 +359,27 @@ describe("ProjectService hosted-auth project configuration", () => {
     );
   });
 
+  it("canonicalizes backend CIDRs and rejects duplicates and bypass forms", () => {
+    assert.deepEqual(
+      canonicalizeBackendIpAllowlist([
+        "203.0.113.129/24",
+        "2001:0db8:0001::1234/48",
+      ]),
+      ["203.0.113.0/24", "2001:db8:1::/48"],
+    );
+    for (const invalid of [
+      ["203.0.113.01/24"],
+      ["::ffff:203.0.113.1/128"],
+      ["203.0.113.1/24", "203.0.113.200/24"],
+    ]) {
+      assert.throws(
+        () => canonicalizeBackendIpAllowlist(invalid),
+        (error: unknown) =>
+          error instanceof Error && error.message === "invalid_backend_ip_allowlist",
+      );
+    }
+  });
+
   it("authorizes and isolates return URL and auth setting changes", async () => {
     const { service, projects, sites } = fixture(undefined, "production");
     const created = await service.create("usr_owner", validInput);
@@ -374,11 +396,16 @@ describe("ProjectService hosted-auth project configuration", () => {
           identityKycRequired: true,
           livenessRequired: true,
         },
+        backendIpAllowlist: ["203.0.113.129/24", "2001:0db8::1/32"],
       },
     );
     assert.equal(settings.signupEnabled, true);
     assert.equal(settings.signinEnabled, false);
     assert.deepEqual(settings.methodPolicy, projectBefore.authSettings!.methodPolicy);
+    assert.deepEqual(settings.backendIpAllowlist, [
+      "203.0.113.0/24",
+      "2001:db8::/32",
+    ]);
 
     const urls = await service.replaceAuthReturnUrls(
       "usr_owner",
@@ -392,6 +419,14 @@ describe("ProjectService hosted-auth project configuration", () => {
       },
     );
     assert.deepEqual(await service.getAuthReturnUrls("usr_owner", created.project.id), urls);
+    await service.updateAuthSettings("usr_owner", created.project.id, {
+      backendIpAllowlist: ["198.51.100.25/32"],
+    });
+    assert.deepEqual(await service.getAuthReturnUrls("usr_owner", created.project.id), urls);
+    assert.equal(
+      (await service.getAuthSettings("usr_owner", created.project.id)).signupEnabled,
+      true,
+    );
 
     for (const field of [
       "identityDataMode",

@@ -24,6 +24,7 @@ import {
   HOSTED_AUTH_DEPLOYMENTS,
   type HostedAuthDeploymentEnvironment,
 } from "./hosted-auth-realms.js";
+import { canonicalizeIpCidr, InvalidIpCidrError } from "./ip-cidr.js";
 import {
   PLATFORM_ADMIN_USER_ID,
   type ApiKeyDocument,
@@ -325,9 +326,15 @@ export class ProjectService {
     ip?: string,
   ): Promise<HostedAuthProjectSettings> {
     const existing = await this.#ownedProject(customerId, projectId);
+    const canonicalInput = input.backendIpAllowlist === undefined
+      ? input
+      : {
+          ...input,
+          backendIpAllowlist: canonicalizeBackendIpAllowlist(input.backendIpAllowlist),
+        };
     const authSettings = {
       ...existing.authSettings,
-      ...input,
+      ...canonicalInput,
     };
     const updated = await this.#projects.findOneAndUpdate(
       { _id: projectId, customerId },
@@ -604,6 +611,21 @@ export function canonicalizeHostedAuthReturnUrls(
       canonicalizeHostedAuthReturnUrl(value, environment),
     ]),
   ) as HostedAuthReturnUrls;
+}
+
+export function canonicalizeBackendIpAllowlist(input: readonly string[]): string[] {
+  try {
+    const canonical = input.map(canonicalizeIpCidr);
+    if (new Set(canonical).size !== canonical.length) {
+      throw new InvalidIpCidrError("duplicate_ip_cidr");
+    }
+    return canonical;
+  } catch (error) {
+    if (error instanceof InvalidIpCidrError) {
+      throw new ProjectError("invalid_backend_ip_allowlist", 400);
+    }
+    throw error;
+  }
 }
 
 function canonicalizeHostedAuthReturnUrl(
