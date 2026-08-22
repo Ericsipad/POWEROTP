@@ -71,6 +71,15 @@ export class ProjectIdentityBindingRepository {
     });
   }
 
+  async hasForPerson(hostedPersonIdentityId: string): Promise<boolean> {
+    const document = await this.bindings.findOne({
+      hostedPersonIdentityId: HostedPersonIdentityIdSchema.parse(
+        hostedPersonIdentityId,
+      ),
+    });
+    return document !== null;
+  }
+
   async createOrGet(
     input: ProjectIdentityBindingRecord,
   ): Promise<ProjectIdentityBindingRecord> {
@@ -97,7 +106,7 @@ export class ProjectIdentityBindingRepository {
 
 type WrappedKeyCollection = Pick<
   Collection<WrappedIdentityKeyDocument>,
-  "deleteOne" | "findOne" | "updateOne"
+  "deleteOne" | "find" | "findOne" | "updateOne"
 >;
 
 export class WrappedIdentityKeyRepository {
@@ -155,6 +164,49 @@ export class WrappedIdentityKeyRepository {
       status: "active",
     });
     return result.deletedCount === 1;
+  }
+
+  async listActiveBefore(
+    before: Date,
+    limit: number,
+    after?: Readonly<{ createdAt: Date; hostedPersonIdentityId: string }>,
+  ): Promise<WrappedIdentityKeyRecord[]> {
+    if (Number.isNaN(before.getTime())) {
+      throw new Error("A valid hosted-auth wrapped-key cutoff is required");
+    }
+    if (!Number.isInteger(limit) || limit < 1 || limit > 1_000) {
+      throw new Error("Hosted-auth wrapped-key scan limit must be 1-1000");
+    }
+    const afterFilter = after
+      ? {
+          $or: [
+            { createdAt: { $gt: after.createdAt } },
+            {
+              createdAt: after.createdAt,
+              _id: {
+                $gt: HostedPersonIdentityIdSchema.parse(
+                  after.hostedPersonIdentityId,
+                ),
+              },
+            },
+          ],
+        }
+      : {};
+    const documents = await this.keys
+      .find({
+        status: "active",
+        createdAt: { $lt: before },
+        ...afterFilter,
+      })
+      .sort({ createdAt: 1, _id: 1 })
+      .limit(limit)
+      .toArray();
+    return documents.map(({ _id, ...record }) => {
+      if (_id !== record.hostedPersonIdentityId) {
+        throw new Error("Hosted-auth wrapped-key identity mismatch");
+      }
+      return WrappedIdentityKeyRecordSchema.parse(record);
+    });
   }
 }
 

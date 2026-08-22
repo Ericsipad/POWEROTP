@@ -30,7 +30,8 @@ Do not mark a phase/step implemented, deployed, remote-green, or certified witho
 - P2-S5 — completed 2026-08-22 01:38 UTC, per-person envelope encryption and KMS
 - P2-S6 — completed 2026-08-22 01:48 UTC, KMS-backed pairwise and lookup derivation rotation
 - P2-S7 — completed 2026-08-22 02:07 UTC, person/profile/contact creation saga and compensation
-- P2-S8 through P15-S6 — not started
+- P2-S8 — completed 2026-08-22 02:19 UTC, pending identity reconciliation and orphan detection
+- P2-S9 through P15-S6 — not started
 
 Update this index after every execution step with a link to that step's latest timestamped entry.
 
@@ -1469,3 +1470,75 @@ Known limits and next step:
   its opaque persistence reference and does not call a provider.
 - P2-S8 — add reconciliation workers and orphan detection for pending/partial identity artifacts
   without beginning P2-S9 retention/deletion/Didit cleanup orchestration.
+
+## 2026-08-22 02:19 UTC — P2-S8: pending identity reconciliation and orphan detection
+
+Status and scope:
+
+- P2-S8 is complete. It adds only bounded stale-pending claims, identity-artifact inspection,
+  retry dispatch, safe partial-store compensation, and standalone wrapped-key orphan detection.
+- P2-S9 retention/deletion/Didit cleanup orchestration, provider adapters, MCP behavior, runtime HTTP
+  handlers, `.env`, Passport, and BotBlocker remain unchanged.
+
+Implemented data and behavior:
+
+- Added a reconciliation repository that atomically claims stale pending person roots with
+  `FOR UPDATE SKIP LOCKED` and a refreshed `updated_at` lease. Immediate duplicate worker runs
+  therefore do not dispatch the same retry twice; a failed item becomes eligible again only after
+  the fixed 15-minute stale interval.
+- Artifact inspection checks the complete person/profile/contact/encrypted-attribute shape, exact
+  custody-mode RP ID, pending statuses, and credential/consent/verification dependents without
+  reading contact plaintext, lookup hashes, ciphertext, or provider payloads.
+- Complete `powerotp_pii` artifacts are retried only when their separate active wrapped DEK exists.
+  Complete `didit_pii` artifacts are retried without a wrapped DEK; an unexpected wrapped key is
+  compensated first. Retry dispatch carries only private person/profile IDs and immutable mode.
+- Safely removable partial Supabase units are deleted in one guarded PostgreSQL transaction, then
+  any active wrapped key is idempotently compensated. State changes, foreign-key dependents, or
+  concurrent completion cause cleanup to fail/skip without partial row deletion.
+- Stale active wrapped keys are paged deterministically and compared with authoritative Supabase
+  person existence. Keys with no person and no immutable project binding are deleted; a binding
+  blocks cleanup. Paging continues past legitimate live keys so later orphans cannot starve.
+- Provider-referenced malformed Didit artifacts are surfaced as `provider_cleanup_required` and
+  preserved for P2-S9 rather than losing the reference or beginning provider deletion here.
+- Each claimed identity and orphan-key candidate is failure-isolated, so one retry/store failure
+  does not prevent independent artifacts from reconciling.
+
+Affected files:
+
+- `backend/packages/api/src/hosted-auth-identity-reconciliation.ts`
+- `backend/packages/api/src/hosted-auth-identity-reconciliation-repository.ts`
+- `backend/packages/api/src/hosted-auth-identity-reconciliation.test.ts`
+- `backend/packages/api/src/hosted-auth-durable-repository.ts`
+- `docs/POWEROTP_SIGNIN_AD_SERVICE_AS_BUILT.md`
+
+Security, compatibility, and migration impact:
+
+- Reconciliation never derives contact equality, searches another custody mode, attaches a profile,
+  merges roots, creates/changes a project binding, decrypts PII, or moves credentials across realms.
+- Active or bound identities and artifacts with later-phase dependents are not destructively
+  reconciled. Didit provider deletion and legal retention remain entirely deferred to P2-S9.
+- Existing P2-S1/P2-S6 columns, constraints, and indexes are sufficient. No Supabase or MongoDB
+  migration, environment value, provider credential, public route, client response, deployment
+  configuration, Passport behavior, or BotBlocker behavior changed.
+
+Focused verification:
+
+- `npm run test -w @powerotp/api` — passed (455 tests), including orphan detection, retry,
+  duplicate-run lease behavior, both custody modes, missing-key/partial-store cleanup, scan
+  pagination, protected binding/provider artifacts, and per-item failure isolation.
+- `npm run lint -w @powerotp/api` — passed.
+- `npm run build -w @powerotp/api` — passed.
+- No full-monorepo verification was run locally; remote Verify remains the complete pushed check.
+
+Commit, push, and remote check:
+
+- The coherent P2-S8 commit contains this entry. Its final hash, push confirmation, and one remote
+  Verify result check are reported in the post-push session handoff.
+
+Known limits and next step:
+
+- The worker accepts an injected idempotent retry continuation; later signup orchestration supplies
+  that continuation when it activates the P2-S7 creation path. No provider or HTTP behavior is
+  fabricated in this infrastructure step.
+- P2-S9 — add retention/deletion/Didit cleanup orchestration while preserving P2-S8 claims,
+  failure isolation, custody boundaries, immutable bindings, and cryptographic compensation.
