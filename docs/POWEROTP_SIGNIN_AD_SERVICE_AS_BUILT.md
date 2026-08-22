@@ -27,7 +27,8 @@ Do not mark a phase/step implemented, deployed, remote-green, or certified witho
 - P2-S2 timeout correction — 2026-08-22 01:02 UTC, fixed ten-minute active ceremony
 - P2-S3 — completed 2026-08-22 01:17 UTC, durable redacted retention before publication
 - P2-S4 — completed 2026-08-22 01:28 UTC, durable hosted-auth supporting schemas
-- P2-S5 through P15-S6 — not started
+- P2-S5 — completed 2026-08-22 01:38 UTC, per-person envelope encryption and KMS
+- P2-S6 through P15-S6 — not started
 
 Update this index after every execution step with a link to that step's latest timestamped entry.
 
@@ -1253,3 +1254,72 @@ Next step:
 - P2-S5 — add per-person DEK generation, AEAD associated-data envelope encryption, KMS integration,
   and wrapped-key persistence without beginning P2-S6 project-user-ID/lookup-secret derivation or
   key rotation.
+
+## 2026-08-22 01:38 UTC — P2-S5: per-person envelope encryption and KMS
+
+Status and scope:
+
+- P2-S5 is complete. It adds only per-person DEK creation, field-bound AEAD envelope encryption, a
+  concrete AWS KMS key-wrapping adapter, and wrapped-key persistence in the durable retention
+  database.
+- Project-user-ID derivation, keyed lookup secrets, key rotation, identity sagas, provider adapters,
+  MCP behavior, runtime HTTP handlers, Passport, and BotBlocker remain unchanged.
+
+Implemented data and behavior:
+
+- Added a strict encrypted-field envelope for `email`, `phone`, and `derived_date_of_birth` using
+  AES-256-GCM with a fresh 96-bit nonce and 128-bit authentication tag. Associated data is a
+  deterministic tuple of `hostedPersonIdentityId`, field name, positive schema version, and
+  canonical purpose, so moving or relabeling ciphertext fails authentication.
+- Added one random 256-bit DEK per hosted person. The service reuses the persisted active key for
+  that person, zeroes transient plaintext-key buffers after use, and never returns or persists the
+  DEK.
+- Added `AwsKmsHostedAuthIdentityKeyAuthority` using AWS KMS Encrypt/Decrypt operations. KMS
+  encryption context binds the private person ID and fixed hosted-identity-DEK purpose; denial,
+  missing output, malformed key length, and key-version mismatch fail closed.
+- Added an insert-only wrapped-key repository over `wrappedIdentityKeys`. Concurrent creation keeps
+  the first persisted active wrapped key and loads that canonical key without replacing it.
+  MongoDB stores only the person reference, logical KMS key version, KMS ciphertext, status, and
+  creation time.
+- Supabase encrypted attribute rows continue to hold only the field envelope components. The
+  wrapped DEK remains in `powerotp_auth_retention`, and usable key authority remains in KMS.
+  Therefore neither a Supabase dump nor a MongoDB dump alone can decrypt recoverable PII.
+- Added the AWS KMS SDK package dependency. The adapter accepts an injected production client or
+  client configuration; no environment variable or `.env` change was made.
+
+Affected files:
+
+- `backend/packages/api/src/hosted-auth-identity-encryption.ts`
+- `backend/packages/api/src/hosted-auth-identity-encryption.test.ts`
+- `backend/packages/api/src/hosted-auth-durable-schemas.ts`
+- `backend/packages/api/src/hosted-auth-durable-repository.ts`
+- `backend/packages/api/package.json`
+- `backend/package-lock.json`
+- `docs/POWEROTP_SIGNIN_AD_SERVICE_AS_BUILT.md`
+
+Security, compatibility, and migration impact:
+
+- Tests reject person, field, schema-version, purpose, nonce/ciphertext/tag substitution, KMS
+  wrapping and unwrapping denial, plaintext-key persistence, and cross-database key/ciphertext
+  co-location.
+- Existing Supabase columns and the P2-S4 MongoDB collection/index are used without migration.
+  This step adds no route, client response, provider credential, project identifier derivation,
+  lookup hash, key rotation behavior, or environment requirement.
+
+Focused verification:
+
+- `npm run test -w @powerotp/api` — passed (433 tests).
+- `npm run lint -w @powerotp/api` — passed.
+- `npm run build -w @powerotp/api` followed by `npm run lint -w @powerotp/backend` — passed for
+  generated API declarations and backend package compatibility.
+- No full-monorepo verification was run locally; remote Verify remains the complete pushed check.
+
+Commit, push, and remote check:
+
+- The coherent P2-S5 commit contains this entry. Its final hash, push confirmation, and one remote
+  Verify result check are reported in the post-push session handoff.
+
+Next step:
+
+- P2-S6 — add project-user-ID pepper derivation, dedicated keyed lookup secrets, and key rotation
+  without beginning P2-S7 person/profile/contact creation sagas.

@@ -3,10 +3,13 @@ import type { Collection, Db } from "mongodb";
 import {
   HostedAuthSecurityEventRecordSchema,
   ProjectIdentityBindingRecordSchema,
+  WrappedIdentityKeyRecordSchema,
   type HostedAuthSecurityEventDocument,
   type HostedAuthSecurityEventRecord,
   type ProjectIdentityBindingDocument,
   type ProjectIdentityBindingRecord,
+  type WrappedIdentityKeyDocument,
+  type WrappedIdentityKeyRecord,
 } from "./hosted-auth-durable-schemas.js";
 
 export const PROJECT_IDENTITY_BINDINGS_COLLECTION_NAME =
@@ -49,6 +52,61 @@ export class ProjectIdentityBindingRepository {
       return "duplicate";
     }
     throw new Error("Conflicting hosted-auth project binding");
+  }
+}
+
+type WrappedKeyCollection = Pick<
+  Collection<WrappedIdentityKeyDocument>,
+  "findOne" | "updateOne"
+>;
+
+export class WrappedIdentityKeyRepository {
+  private readonly keys: WrappedKeyCollection;
+
+  constructor(db: Db, collection?: WrappedKeyCollection) {
+    this.keys =
+      collection ??
+      db.collection<WrappedIdentityKeyDocument>(
+        WRAPPED_IDENTITY_KEYS_COLLECTION_NAME,
+      );
+  }
+
+  async findActive(
+    hostedPersonIdentityId: string,
+  ): Promise<WrappedIdentityKeyRecord | null> {
+    const document = await this.keys.findOne({
+      _id: hostedPersonIdentityId,
+      status: "active",
+    });
+    if (!document) return null;
+    const { _id, ...record } = document;
+    if (_id !== record.hostedPersonIdentityId) {
+      throw new Error("Hosted-auth wrapped-key identity mismatch");
+    }
+    return WrappedIdentityKeyRecordSchema.parse(record);
+  }
+
+  async createActive(
+    input: WrappedIdentityKeyRecord,
+  ): Promise<Readonly<{ outcome: "inserted" | "existing"; record: WrappedIdentityKeyRecord }>> {
+    const record = WrappedIdentityKeyRecordSchema.parse(input);
+    if (record.status !== "active") {
+      throw new Error("Only active hosted-auth wrapped keys can be created");
+    }
+    const document = { _id: record.hostedPersonIdentityId, ...record };
+    const result = await this.keys.updateOne(
+      { _id: document._id },
+      { $setOnInsert: document },
+      { upsert: true },
+    );
+    if (result.upsertedCount === 1) {
+      return { outcome: "inserted", record };
+    }
+    const existing = await this.findActive(record.hostedPersonIdentityId);
+    if (!existing) {
+      throw new Error("Hosted-auth identity key is unavailable");
+    }
+    return { outcome: "existing", record: existing };
   }
 }
 

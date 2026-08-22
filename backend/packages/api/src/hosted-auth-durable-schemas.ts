@@ -103,6 +103,9 @@ export const WrappedIdentityKeyRecordSchema = z
 export type WrappedIdentityKeyRecord = z.infer<
   typeof WrappedIdentityKeyRecordSchema
 >;
+export interface WrappedIdentityKeyDocument extends WrappedIdentityKeyRecord {
+  _id: string;
+}
 
 const RichTextMarksSchema = z
   .array(z.enum(["bold", "italic", "underline"]))
