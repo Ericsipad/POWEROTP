@@ -12,6 +12,10 @@ indefinite retention.
 
 ## Custody modes
 
+The immutable mode selects contact custody and realm isolation; it does not select whether optional
+Didit age/KYC/liveness/biometric capabilities may run. Those capabilities are independently enabled
+for projects in either mode and use the same private person-level Didit mapping.
+
 `powerotp_pii`:
 
 - POWEROTP is controller and contact custodian.
@@ -28,6 +32,9 @@ indefinite retention.
 - Didit authenticates contact. Brevo/SMS/voice cannot silently replace that route.
 
 WebAuthn calls neither contact provider. A custody-mode change requires a new project.
+
+For either mode, all PII and full evidence produced by a Didit identity capability remains at Didit.
+POWEROTP stores opaque mapping/session/evidence references and normalized non-PII claims only.
 
 ## Data classes
 
@@ -48,12 +55,15 @@ systems:
   mapping; no client exposure; account lifecycle plus approved period; hosted deletion orchestrator.
 - `consent_evidence` — POWEROTP/Supabase; no client exposure; approved audit period; hosted deletion
   orchestrator subject to required evidence holds. P0-S3 owns its exact purposes and wording.
-- `verification_claim_and_minimal_evidence` — POWEROTP/Supabase; clients receive only
-  project-authorized outcomes, never the evidence; approved legal/audit period; hosted deletion
-  orchestrator subject to required evidence holds.
-- `provider_verification_media_process_and_purge` — Didit only; no client or POWEROTP database copy;
-  deleted after a durable minimal decision/evidence record is established, subject to the provider
-  capability's configured hard cap; Didit deletion adapter with retry/reconciliation.
+- `verification_claim_and_provider_reference` — POWEROTP/Supabase; normalized threshold/assurance
+  claim, policy/method/time/expiry, and opaque Didit session/evidence references only; clients
+  receive project-authorized outcomes, never the references or evidence; approved legal/audit
+  period; hosted deletion orchestrator subject to required evidence holds.
+- `provider_verification_pii_and_evidence` — Didit only, including returned contact/identity fields,
+  DOB, document fields/images, selfies, liveness media, biometric templates, and full decisions; no
+  client or POWEROTP database copy; capability-specific approved finite retention; Didit deletion
+  adapter with retry/reconciliation. POWEROTP references are useful for proof/audit only while Didit
+  lawfully retains the underlying record.
 - `provider_retained_face` — Didit only and only for the separately enabled biometric-authentication
   capability; no client or POWEROTP database copy; capability-policy retention; Didit deletion
   adapter with retry/reconciliation.
@@ -96,6 +106,8 @@ purposes, text, vendor disclosures, and production gates are locked in
    harmless and must be bounded by service roles, KMS grants, network rules, and audit.
 6. Provider operations use mode/purpose-specific adapters. Signed callbacks are timestamp checked,
    replay protected, ordered, and reconciled before changing authoritative state.
+   End-user identity capture uses backend-created Didit sessions through the reviewed Web SDK; the
+   browser receives only that operation's session URL/token, never the provider API key.
 7. Support/admin access is audited and cannot directly authorize recovery, replace a credential, or
    disclose PII/evidence to a client. Recovery requires the defined end-user proof path.
 8. Deletion is a saga: mark the identity deleting, block new authentication, purge hot data,
@@ -126,6 +138,9 @@ purposes, text, vendor disclosures, and production gates are locked in
   security owners.
 - Logging/analytics leakage — redact PII, contact values, keys, tokens, cookies, credential IDs,
   provider secrets, and evidence; every service owner, enforced by platform logging policy.
+- Provider-decision overcollection — configure and validate each workflow's returned-data policy;
+  parse transiently only what the claim evaluator needs and never persist full decisions/media;
+  provider-adapter and identity owners.
 - Deletion failure or provider orphan — durable deletion state, idempotent retries, reconciliation,
   and operator alerting; hosted deletion orchestrator owner.
 

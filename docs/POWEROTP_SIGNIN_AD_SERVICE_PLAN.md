@@ -71,9 +71,9 @@ opaque identifier and server-side project state, never on a guessable project-na
 1. The client backend creates a signup authentication request with its project API key and receives
    `authRequestId`, `hostedUrl`, `pollToken`, `statusUrl`, and the active-request expiry.
 2. The backend keeps `pollToken` server-side and redirects the browser only to `hostedUrl`.
-3. POWEROTP resolves or creates the custody-mode authentication profile, verifies contact through
-   the configured custodian, creates a realm-specific passkey when needed, and applies required
-   age/identity policy.
+3. POWEROTP authenticates an existing realm passkey or creates a restricted pending profile and
+   realm passkey first, then verifies contact through the configured custodian and applies the
+   project's required age/identity policy.
 4. POWEROTP redirects the browser to the exact project signup return URL with only
    `authRequestId` and a non-authoritative completion hint.
 5. The client backend polls `statusUrl` with both its API key and shown-once `pollToken`.
@@ -254,8 +254,9 @@ These decisions are canonical for this service:
    authorize credential replacement.
 9. Existing phone-passkey authentication uses native WebAuthn hybrid QR. Mobile transfer for Didit
    or recovery uses a distinct single-use POWEROTP handoff QR bound to the current auth request.
-10. Password fallback, client PII release, cross-site cookies, third-party authentication-page
-    scripts, and per-project WebAuthn credentials are excluded from v1.
+10. Password fallback, client PII release, cross-site cookies, customer/advertising authentication-
+    page scripts, and per-project WebAuthn credentials are excluded from v1. The reviewed Didit Web
+    SDK is the sole provider UI integration allowed during an explicit Didit session.
 11. Template 1 is the only MVP page template. Sign-up and sign-in are separate page entities with
     independent settings even though Template 1 has the same visual arrangement for each.
 12. The existing POWEROTP MCP remains public, generic, anonymous, project-unaware, and read-only.
@@ -263,6 +264,15 @@ These decisions are canonical for this service:
 13. POWEROTP never creates a cross-project login session. Each project request receives fresh
     authentication; clients exclusively own their local sessions, refresh tokens, expiration, and
     logout.
+14. New-user onboarding establishes the realm passkey before contact or optional qualification.
+    The passkey identifies the POWEROTP profile; project bindings and current claims authorize it.
+    Missing, declined, abandoned, or expired qualification leaves a restricted profile and never
+    revokes an otherwise-valid passkey.
+15. `identityDataMode` selects contact custody only. A `powerotp_pii` person may use any separately
+    enabled Didit identity capability without moving contact custody to Didit.
+16. End-user Didit capture uses backend-created Sessions API operations plus the reviewed Didit Web
+    SDK. POWEROTP never uploads browser-captured provider media through standalone APIs for these
+    flows.
 
 ### Permanent Didit identity mapping
 
@@ -279,6 +289,12 @@ The permanent person-level mapping is
 but never share passkeys or cookies. Clients receive none of these identifiers. A Didit
 hosted-session token is temporary routing material for one provider screen and is never used as the
 permanent identity mapping.
+
+All Didit-returned contact/identity PII, document data, selfies, liveness media, biometric
+templates, and full provider evidence remain in Didit's controlled systems under the configured
+capability retention. POWEROTP stores only the opaque mapping, provider session/evidence references,
+normalized non-PII claims, policy/version, timestamps, expiry, and audit/billing linkage. A client
+receives neither the mapping nor provider data.
 
 ## 10. Trust boundaries, storage, and database models
 
@@ -299,8 +315,9 @@ permanent identity mapping.
 - `recoveryMethods`: keyed email lookup for both modes; encrypted/masked destination and Brevo
   delivery metadata only for `powerotp_pii`; Didit verification references only for `didit_pii`.
 - `consentRecords`: policy/text version, purpose, locale, exact decision, timestamp, and evidence.
-- `identityVerifications`: vendor-neutral Didit outcome, encrypted derived date of birth when
-  retained, policy version, minimal signed evidence, expiry/recheck date, and deletion status.
+- `identityVerifications`: vendor-neutral threshold/assurance claims, provider session/evidence
+  references, source/method, policy version, verified/expiry/recheck dates, and deletion status. It
+  contains no recoverable Didit-returned DOB, document field, media, or full decision.
 
 **Runtime authentication store — minimal hot/portable data**
 
@@ -444,28 +461,30 @@ POWEROTP never merges person roots from email equality alone:
 3. When the realm profile is authenticated, do not create another person/profile/Didit User/contact
    record. Issue a one-time credential-management grant before the user explicitly adds a new-device
    passkey. Check required verification claims and create or reuse the project binding.
-4. When no identity is recognized, show POWEROTP's privacy notice and mode-specific consent.
-5. Collect the configured contact identifier and compute its keyed lookup. `powerotp_pii` may verify
+4. When no identity is recognized, show POWEROTP's identity/passkey privacy notice and obtain the
+   exact hosted-identity consent before creating a pending person/profile.
+5. Generate and verify WebAuthn registration for the exact target RP ID (`authx.powerotp.com` or
+   `authz.powerotp.com`), with a random challenge, discoverable credential, required user
+   verification, credential-ID uniqueness, and the selected attestation policy. Persist the
+   realm-profile public credential before starting contact or provider qualification.
+6. Collect the configured contact identifier and compute its keyed lookup. `powerotp_pii` may verify
    through Brevo email or enabled POWEROTP SMS/voice; `didit_pii` uses Didit email/phone only. An
-   existing lookup requires mode-appropriate contact authentication before continuing.
-6. For a new person, create the pending person identity and target-mode authentication profile. When
-   the person root already exists through verified contact, add only the missing target-mode profile.
+   existing lookup requires mode-appropriate contact authentication and the defined explicit
+   linking/merge proof before the pending credential can attach to an existing person root.
 7. In `didit_pii`, create the permanent Didit User with `potpDiditId`, store the returned
    `diditInternalId`, and perform Didit email verification. In `powerotp_pii`, encrypt the email in
    Supabase and perform POWEROTP/Brevo email verification.
-8. Generate WebAuthn registration options for the exact target RP ID (`authx.powerotp.com` or
-   `authz.powerotp.com`), a random challenge, discoverable credential, and required user verification.
-9. Verify challenge, origin, RP ID, user verification, credential ID uniqueness, authenticator data,
-   and the selected attestation policy, then store the public credential.
-10. Perform only the project's missing required age/KYC/liveness enrollment steps. Reuse valid
+8. Perform only the project's missing required age/KYC/liveness enrollment steps. Reuse valid
     identity-level claims without purchasing a duplicate provider verification.
-    Failure/decline revokes the pending credential, removes an otherwise-empty pending profile, and
-    never exposes poll success.
-11. Create or idempotently reuse the immutable project binding, commit the identity saga, durably
+9. Missing, declined, abandoned, or expired qualification leaves the passkey and profile restricted,
+   creates no successful project binding, and never exposes poll success. Retry resumes from fresh
+   passkey authentication and the currently missing contact/claim step.
+10. Create or idempotently reuse the immutable project binding, commit the identity saga, durably
     write the redacted retention record, expose the three-minute poll result, and redirect the
     browser to `signupReturnUrl`.
-12. Failed or abandoned enrollment expires and is reconciled without leaving an active partial
-    identity, Didit mapping, or project binding.
+11. Failed or abandoned enrollment expires and is reconciled without deleting a valid passkey.
+    Unusable provider artifacts and unverified contact attempts are cleaned independently; no
+    unauthorized project binding survives.
 
 ### Returning sign-in
 
@@ -513,6 +532,8 @@ POWEROTP never issues or controls a client website session.
 
 - One authentication profile can hold multiple named passkeys: phone, laptop, synced passkey, and
   hardware key.
+- Every signup/signin/qualification completion surface offers an explicit “add this device” or “add
+  another device” action after fresh authentication. It never silently enrolls a device.
 - Adding a credential requires a one-time credential-management grant issued after fresh
   authentication or completed recovery.
 - A newly registered credential does not delete existing credentials.
@@ -575,9 +596,14 @@ POWEROTP never issues or controls a client website session.
   separate prices, consent, retention, validity, and recheck rules.
 - `didit_pii` always uses Didit for contact email authentication. `powerotp_pii` uses Brevo for
   contact authentication and calls Didit only for enabled age/KYC/liveness/biometric capabilities.
-- Didit-backed email/phone OTP uses POWEROTP's branded contact UI over Didit's APIs. Age,
-  KYC/document, liveness, face-match, biometric-authentication, and recovery proof beyond simple
-  contact use Didit's branded hosted pages and return to the originating POWEROTP auth request.
+- Didit-backed email/phone OTP uses POWEROTP's branded contact UI over Didit's APIs. End-user
+  age/KYC/document/liveness/face-match/biometric/recovery capture uses a backend-created Didit
+  session opened through `@didit-protocol/sdk-web`: modal on desktop and full viewport on
+  mobile/PWA. Cross-device QR remains available, and camera/iframe incompatibility falls back to the
+  same session's top-level Didit redirect.
+- POWEROTP's page retains its own logo, consent, progress, navigation, and project branding around
+  Didit's standard branded provider UI. POWEROTP does not enable or price the optional Didit
+  white-label feature merely to achieve this co-branded shell.
 - For `didit_pii`, POWEROTP creates the persistent Didit User during contact-profile enrollment.
   For `powerotp_pii`, it creates that User only when the person first uses a Didit capability.
   Both paths send the person-root `potpDiditId` as `vendor_data`, store the returned
@@ -588,13 +614,16 @@ POWEROTP never issues or controls a client website session.
 - The provider is accessed through an internal vendor-neutral verification interface. No Didit SDK
   type appears in the public client API.
 - Signed provider callbacks are timestamp checked, replay protected, ordered, and reconciled.
-- Documents, selfies, liveness media, and biometric templates never reach POWEROTP clients and are
-  not stored in POWEROTP databases.
-- Projects that do not enable Didit biometric authentication use process-and-purge: provider session
-  media is deleted after the durable decision/evidence record is established.
+- Didit-returned PII, documents, selfies, liveness media, biometric templates, and full decisions
+  never reach POWEROTP clients and are not stored in POWEROTP databases. POWEROTP retains only its
+  opaque person mapping, provider session/evidence references, normalized claims, and audit/billing
+  linkage.
+- Projects that do not enable Didit biometric authentication use the capability's approved finite
+  provider retention and deletion policy. POWEROTP's evidence references remain auditable only
+  while Didit lawfully retains the underlying record; provider deletion is retried and reconciled.
 - Enabling Didit biometric authentication explicitly retains the approved face on the persistent
   Didit User for later fresh liveness/face-match sessions. Its consent and retention policy is
-  therefore different from process-and-purge age/KYC.
+  therefore different from the finite age/KYC evidence-retention policy.
 - POWEROTP stores reusable identity-level verification claims with source, method, verified time,
   expiry, policy version, and threshold result. It does not treat a past biometric-authentication
   event as proof of present user presence.
@@ -602,9 +631,17 @@ POWEROTP never issues or controls a client website session.
   configured reuse rate without
   purchasing another Didit verification. A new Didit verification runs only when the required claim
   is absent, stale, or cannot satisfy the new policy.
-- In `didit_pii`, POWEROTP may retrieve verified DOB transiently from the Didit User to derive a new
-  threshold-specific result without storing DOB. Client responses contain only authorized outcomes
-  such as `ageRequirementMet`.
+- In either custody mode, POWEROTP may retrieve verified DOB transiently from the Didit User/session
+  to derive a new threshold-specific result without storing DOB. Client responses contain only
+  authorized outcomes such as `ageRequirementMet`.
+- Basic KYC is one Didit workflow containing ID/OCR, passive liveness, and face match with no
+  Device/IP Analysis. Its observed current feature sum is USD 0.30 after free allowances, but code
+  never hardcodes provider pricing.
+- Document age is a separate ID Verification workflow. Its observed current provider price is
+  USD 0.15. The verified DOB remains at Didit; POWEROTP transiently evaluates the project's
+  arbitrary threshold and stores only the resulting reusable claim.
+- Liveness, face/NFC, biometric authentication, and future Didit modules remain independently
+  selectable by project policy and attach to the same person-level Didit User mapping.
 - Underage and indeterminate outcomes fail closed for the requested policy.
 - Identity deletion crypto-shreds its DEK after the approved account-retention period and separately
   handles legally required non-biometric audit evidence.
@@ -943,15 +980,22 @@ Steps:
 - P4-S5: Didit email/phone contact verification APIs with POWEROTP-branded UI contract.
 - P4-S6: minimum signed webhook verification and replay/order handling.
 - P4-S7: provider polling reconciliation and outage behavior.
-- P4-S8: Didit age, KYC, and liveness hosted-session adapters required by signup policy.
-- P4-S9: reusable claim persistence/evaluation needed to complete signup.
+- P4-S8: purpose-specific Didit Sessions API adapters for document age, no-IP basic KYC
+  (ID/OCR + passive liveness + face match), and liveness; validate exact workflow graph,
+  returned-data policy, environment, person-level `vendor_data`, and computed provider price without
+  persisting provider PII or starting a browser ceremony.
+- P4-S9: provider-reference-backed reusable claim persistence/evaluation, transient DOB threshold
+  derivation, expiry/recheck policy, and per-project reuse charging needed to complete signup.
 
 Acceptance: `powerotp_pii` routes contact only through POWEROTP providers; `didit_pii` routes contact
 only through Didit; WebAuthn calls neither; required signup assurance has real adapters and never a
-stub-success path.
+stub-success path. Either custody mode can invoke optional Didit assurance against the same
+person-level mapping; basic KYC contains no Device/IP Analysis; provider PII/media remains at Didit.
 
 Focused tests: provider-routing matrix, purpose tags, duplicate Didit User retry, webhook
-forgery/replay/order, provider outage, balance race/insufficiency, and interaction linkage.
+forgery/replay/order, provider outage, exact workflow/price/environment binding, no-IP KYC,
+document-age transient threshold derivation, provider-PII non-persistence, balance
+race/insufficiency, reuse charging, and interaction linkage.
 
 ### Phase 5 — Template 1 content and renderers
 
@@ -999,37 +1043,47 @@ Steps:
 - P6-S9: refresh/back, concurrent-tab, duplicate-create, and retry behavior.
 - P6-S10: baseline CSP/security headers, request/IP/project/identity-lookup/recovery-destination
   limits, baseline secret redaction, and service-worker no-cache boundaries.
+- P6-S11: Didit Web SDK host boundary with desktop modal, mobile/PWA full-viewport presentation,
+  cross-device QR continuity, top-level redirect fallback, co-branded POWEROTP shell, and
+  non-authoritative browser callbacks.
 
 Acceptance: browser never receives poll token/API key; polling is authoritative; durable retention
 precedes success; direct entry cannot open-redirect; sensitive responses cannot be cached.
 
 Focused tests: token theft/replay, wrong project/key, response loss, TTL boundaries, session fixation,
 open redirect, realm mismatch, concurrent tabs, duplicate create, CSP, cache and service-worker
-inspection.
+inspection, SDK callback forgery, camera denial/iframe fallback, cross-device completion, and proof
+that the browser receives neither API key nor authoritative provider result.
 
 ### Phase 7 — Sign-up
 
 Steps:
 
 - P7-S1: fresh realm WebAuthn discovery and existing-profile branch.
-- P7-S2: mode-specific email lookup, root/profile duplicate prevention, and required consent.
-- P7-S3: cross-mode candidate detection, existing-profile proof, and one-time linking grant.
-- P7-S4: new person or missing-profile saga.
-- P7-S5: `powerotp_pii` contact enrollment through Brevo/SMS/voice policy.
-- P7-S6: `didit_pii` contact enrollment and permanent Didit mapping.
-- P7-S7: realm-specific WebAuthn registration options.
-- P7-S8: registration verification and credential persistence.
-- P7-S9: required reusable-claim check/provider branch.
-- P7-S10: idempotent project binding and saga commit.
+- P7-S2: hosted-identity/passkey notice, consent, and pending person/profile saga.
+- P7-S3: realm-specific WebAuthn registration options.
+- P7-S4: registration verification and restricted credential persistence.
+- P7-S5: mode-specific email lookup, root/profile duplicate prevention, and explicit pending-
+  credential linking rules.
+- P7-S6: cross-mode candidate detection, existing-profile proof, and one-time linking grant.
+- P7-S7: `powerotp_pii` contact enrollment through Brevo/SMS/voice policy.
+- P7-S8: `didit_pii` contact enrollment and permanent Didit mapping.
+- P7-S9: required reusable-claim check/provider branch without revoking the passkey on an
+  unsatisfied qualification.
+- P7-S10: idempotent authorized project binding and saga commit.
 - P7-S11: retention write and poll-result publication.
-- P7-S12: compensation/rollback for contact, credential, claim, and binding failures.
+- P7-S12: compensation/cleanup for contact, provider, claim, and binding failures while preserving
+  every otherwise-valid restricted passkey/profile.
 
 Acceptance: one person can hold both isolated profiles without duplicate root/Didit User; private
-keys remain in authenticators; repeat signup returns the same binding; partial work is reconciled.
+keys remain in authenticators; passkey registration precedes contact/qualification; failed or
+missing qualification cannot authorize a project and cannot delete the valid passkey; repeat signup
+returns the same binding; partial work is reconciled.
 
 Focused tests: both-mode matrix, existing root/missing profile, challenge replay, wrong RP/origin,
-duplicate credential, repeat signup, provider failure, required-claim failure after passkey, consent,
-rollback, and cross-project IDs.
+duplicate credential, repeat signup, provider failure, restricted profile after required-claim
+failure, retry after fresh passkey authentication, consent-before-registration, pending-credential
+linking, cleanup without credential deletion, and cross-project IDs.
 
 ### Phase 8 — Sign-in
 
@@ -1095,16 +1149,18 @@ Steps:
 
 - P11-S1: fresh biometric-authentication adapter.
 - P11-S2: biometric signin and biometric recovery branches.
-- P11-S3: Didit branded redirect/return UX on desktop/mobile.
+- P11-S3: Didit Web SDK biometric UX on desktop/mobile/PWA using the shared Phase 6 modal,
+  full-viewport, cross-device, and redirect-fallback boundary.
 - P11-S4: person-level claim derivation and threshold evaluation.
 - P11-S5: claim expiry/policy evaluation.
 - P11-S6: cross-client reuse charging and retention linkage.
-- P11-S7: process-and-purge session deletion/retry.
+- P11-S7: capability-specific finite session/evidence retention, deletion, and retry.
 - P11-S8: retained-face policy and consent enforcement.
 - P11-S9: Didit User deletion and evidence reconciliation.
 
-Acceptance: no provider media/evidence reaches clients; completion is durable; valid policy results
-are reusable; retained faces exist only under biometric-auth consent; deletion failures are visible.
+Acceptance: no provider PII/media/full evidence reaches POWEROTP storage or clients; completion is
+durable; valid policy results are reusable; retained faces exist at Didit only under biometric-auth
+consent; deletion failures are visible.
 
 Focused tests: biometric wrong-user/liveness/face failure, forged/replayed/out-of-order webhook,
 cancellation, outage, threshold/expiry change, underage fail-closed, reuse charging race, deletion

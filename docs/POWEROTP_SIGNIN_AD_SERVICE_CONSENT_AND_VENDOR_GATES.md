@@ -20,7 +20,8 @@ begun.
 - `didit_contact_custody_and_authentication` — `didit_pii` only; Didit's persistent User stores and
   verifies contact for hosted authentication.
 - `age_assurance` — an optional Didit-backed age requirement decision. A still-valid minimal
-  identity claim may be reused across projects under this disclosed purpose.
+  document-derived threshold claim may be reused and charged across projects under this disclosed
+  purpose without disclosing DOB or rerunning the provider while the claim remains valid.
 - `identity_kyc_assurance` — optional Didit-backed identity/KYC assurance. A still-valid minimal
   identity claim may be reused across projects under this disclosed purpose.
 - `liveness_and_face_enrollment` — optional liveness and face processing for the current configured
@@ -34,6 +35,16 @@ locale, timestamp, affirmative action, and withdrawal/deletion path. Didit is na
 collection begins and before biometric capture. A past biometric-authentication event is not current
 user presence; every biometric authentication is a fresh provider ceremony.
 
+The POWEROTP page may frame Didit's standard branded flow through the reviewed Didit Web SDK after
+consent. POWEROTP branding remains around the provider UI; the optional paid Didit white-label
+feature is not implied. SDK completion is presentation-only: only the authenticated webhook/poll
+decision can establish a claim.
+
+All PII and full evidence returned by Didit remains in Didit's controlled systems. POWEROTP stores
+only opaque provider references and normalized non-PII claims; a project receives only the
+purpose-authorized outcome. POWEROTP sells the authentication/attestation service, not provider PII
+or evidence.
+
 ## Didit production gates
 
 All applicable gates must be evidenced before any Didit-backed hosted-auth capability is enabled in
@@ -42,7 +53,8 @@ production:
 1. Counsel-approved POWEROTP controller notice and capability-specific consent.
 2. Didit named before provider collection or biometric capture.
 3. Written contractual carve-out permitting the intended reusable hosted-identity and assurance
-   model without violating competing-service restrictions.
+   and per-project attestation/reuse charging model without violating competing-service,
+   redistribution, or evidence-access restrictions.
 4. Approved data-processing and subprocessor terms.
 5. Capability-specific provider retention configured with no indefinite default; process-and-purge
    and retained-face policies remain distinct.
@@ -50,6 +62,11 @@ production:
 7. Provider deletion, retry, and reconciliation behavior validated.
 8. Approved vendor-exit and replacement plan. Public/client contracts remain vendor-neutral and no
    Didit SDK type may appear in them.
+9. Every enabled workflow's exact graph, environment, purpose, returned-data policy, and computed
+   provider price reviewed before activation. Basic KYC must contain ID/OCR, passive liveness, and
+   face match with no Device/IP Analysis; document age must use ID Verification.
+10. Web SDK version/dependency review, CSP/frame/permissions policy, desktop/mobile/PWA camera
+    behavior, cross-device handoff, and top-level redirect fallback validated.
 
 These are production activation gates, not claims that the legal or commercial work is already
 complete. Provider API keys or workflow IDs do not satisfy them.

@@ -13,6 +13,7 @@ Do not mark a phase/step implemented, deployed, remote-green, or certified witho
 - Latest canonical completion — 2026-08-21 05:44 UTC, polling/realms/mobile/PWA roadmap
 - Latest coherence correction — 2026-08-21 05:55 UTC
 - Final review correction — 2026-08-21 06:00 UTC, terminal-result TTL
+- Latest Didit/passkey planning correction — 2026-08-22 09:28 UTC, passkey-first SDK and provider-PII custody
 - P0-S1 — completed 2026-08-21 19:09 UTC, hosted-auth glossary and executable boundaries
 - P0-S2 — completed 2026-08-21 19:26 UTC, data governance and trust boundaries
 - P0-S3 — completed 2026-08-21 19:40 UTC, consent, vendor gates, and claims policy
@@ -2744,3 +2745,87 @@ Known limits and next step:
   vendor-neutral assurance outcomes.
 - P4-S8 — implement Didit age, KYC, and liveness hosted-session adapters required by signup policy
   without beginning reusable claim persistence/evaluation, hosted ceremonies, or P4-S9+.
+
+## 2026-08-22 09:28 UTC — Planning correction: passkey-first Didit SDK and provider-PII custody
+
+Status and scope:
+
+- Documentation-only design correction completed after P4-S7. P4-S8 remains not started.
+- No application code, executable contract, configuration, environment file, database, live Didit
+  resource, build, or test was changed or run. Commit and push were authorized separately after the
+  documentation correction; final delivery status is reported in the session result.
+
+Corrected product and custody decisions:
+
+- `identityDataMode` now explicitly selects contact custody and realm isolation only. Optional Didit
+  age/KYC/liveness/face/NFC/biometric capabilities may run in either mode against the same private
+  person-level Didit mapping; they never reroute `powerotp_pii` contact authentication.
+- All Didit-returned contact/identity PII, DOB, document fields/images, selfies, liveness media,
+  biometric templates, and full decisions remain at Didit under capability-specific finite
+  retention. POWEROTP stores only `potpDiditId`, `diditInternalId`, provider session/evidence
+  references, normalized non-PII claims, policy/method/time/expiry, and billing/audit linkage.
+- Projects receive and pay for authorized authentication/attestation outcomes, never provider IDs,
+  DOB, PII, media, or evidence. A valid person-level claim may be reused and charged on a later
+  project authentication without a new provider purchase.
+
+Corrected passkey and authorization flow:
+
+- A new user sees the hosted-identity/passkey notice and registers a restricted realm passkey before
+  contact collection or optional qualification. Existing users authenticate their realm passkey
+  first.
+- Missing, declined, abandoned, or expired age/KYC qualification prevents an authorized project
+  binding but does not revoke the valid passkey/profile. Retry starts with a fresh WebAuthn
+  assertion and resumes the missing contact/claim step.
+- Every flow may offer explicit “add this device”/“add another device” actions after fresh
+  authentication. Synced passkeys, native hybrid QR, and explicit per-device registration remain
+  user-mediated; no page silently identifies or enrolls a visitor.
+- BotBlocker behavior and scope remain unchanged by this correction.
+
+Corrected Didit provider/UI direction:
+
+- End-user provider capture uses backend-created Sessions API operations opened through the reviewed
+  `@didit-protocol/sdk-web`, not POWEROTP media uploads to standalone APIs.
+- Desktop uses the Didit SDK modal; mobile/PWA uses a full-viewport presentation. Cross-device QR
+  remains available, and camera/iframe incompatibility uses a top-level redirect fallback for the
+  same provider session.
+- POWEROTP branding, consent, progress, and navigation remain around Didit's standard branded UI.
+  The optional Didit white-label feature is not assumed.
+- Basic KYC is ID/OCR + passive liveness + face match with no Device/IP Analysis. Current official
+  feature pricing totals USD 0.30 after free allowances, but provider price is validated from the
+  environment/workflow and never hardcoded.
+- Document age uses ID Verification only (currently USD 0.15 after free allowances). Verified DOB
+  remains at Didit; POWEROTP reads it transiently to derive arbitrary project-threshold claims and
+  persists only the claim.
+
+Live provider/documentation findings:
+
+- Authenticated Didit MCP inspection found the current Free KYC workflows total USD 0.33 because
+  they include Device/IP Analysis; their OCR age restrictions are disabled, so Didit reports no age
+  assurance.
+- The inspected workflows have Didit white-label disabled. The live application has custom colors
+  but no configured POWEROTP logo; the sandbox has default styling. No provider setting was changed.
+- Current official Didit documentation recommends Sessions API plus the Web SDK for end-user flows,
+  with SDK modal/inline support, cross-device behavior, and redirect fallback. Official pricing
+  currently lists ID Verification at USD 0.15, passive liveness at USD 0.10, face match at USD 0.05,
+  Device/IP Analysis at USD 0.03, and optional white-label at USD 0.20.
+
+Roadmap correction:
+
+- P4-S8 now owns purpose-specific document-age, no-IP basic-KYC, and liveness Sessions API adapters
+  plus exact workflow/environment/returned-data/price validation, without browser ceremony work.
+- P4-S9 owns provider-reference-backed reusable claims, transient DOB threshold evaluation,
+  expiry/recheck rules, and per-project reuse charging.
+- Phase 6 owns the shared SDK host/fallback boundary. Phase 7 now registers the restricted passkey
+  before contact/qualification and preserves it during compensation. Phase 11 reuses the same SDK
+  boundary for biometric flows and owns provider evidence-retention/deletion behavior.
+
+Affected documentation:
+
+- `docs/POWEROTP_SIGNIN_AD_SERVICE_PLAN.md`
+- `docs/POWEROTP_SIGNIN_AD_SERVICE_DATA_GOVERNANCE.md`
+- `docs/POWEROTP_SIGNIN_AD_SERVICE_CONSENT_AND_VENDOR_GATES.md`
+- `docs/POWEROTP_SIGNIN_AD_SERVICE_AS_BUILT.md`
+
+Next step:
+
+- P4-S8 remains the next implementation step under the corrected workflow/custody boundary.
