@@ -9,6 +9,10 @@ import {
   MongoHostedAuthDiditWebhookRepository,
 } from "./hosted-auth-didit-webhook-persistence.js";
 import {
+  HostedAuthDiditReconciliationError,
+  type HostedAuthDiditReconciliationSnapshot,
+} from "./hosted-auth-didit-reconciliation.js";
+import {
   HostedAuthDiditWebhookError,
   type HostedAuthDiditWebhookEvent,
 } from "./hosted-auth-didit-webhook.js";
@@ -75,10 +79,25 @@ function event(
     environment: "live",
     providerOperationId: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
     potpDiditId: `pdi_${"A".repeat(43)}`,
+    workflowId: "11111111-2222-4333-8444-555555555555",
     status: "Approved",
     providerCreatedAt: new Date("2026-08-22T07:59:55.000Z"),
     receivedAt: new Date("2026-08-22T08:00:00.000Z"),
     payloadDigest: "digest-one",
+    ...overrides,
+  };
+}
+
+function snapshot(
+  overrides: Partial<HostedAuthDiditReconciliationSnapshot> = {},
+): HostedAuthDiditReconciliationSnapshot {
+  return {
+    providerOperationId: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+    potpDiditId: `pdi_${"A".repeat(43)}`,
+    workflowId: "11111111-2222-4333-8444-555555555555",
+    environment: "live",
+    status: "In Progress",
+    reconciledAt: new Date("2026-08-22T08:00:00.000Z"),
     ...overrides,
   };
 }
@@ -111,6 +130,51 @@ describe("hosted-auth Didit webhook persistence", () => {
     assert.equal(events.documents.size, 2);
     assert.equal(
       cursors.documents.get(current.providerOperationId)?.status,
+      "Approved",
+    );
+  });
+
+  it("reconciles polling into the shared cursor without storing a decision", async () => {
+    const { repository, cursors } = state();
+    assert.equal(await repository.reconcile(snapshot()), "accepted");
+    assert.equal(await repository.reconcile(snapshot()), "unchanged");
+    assert.deepEqual(cursors.documents.get(snapshot().providerOperationId), {
+      _id: snapshot().providerOperationId,
+      environment: "live",
+      potpDiditId: snapshot().potpDiditId,
+      workflowId: snapshot().workflowId,
+      status: "In Progress",
+      source: "poll",
+      reconciledAt: snapshot().reconciledAt,
+    });
+  });
+
+  it("lets an authenticated webhook supersede a poll and rejects binding drift", async () => {
+    const { repository, cursors } = state();
+    await repository.reconcile(snapshot());
+    assert.equal(await repository.record(event()), "accepted");
+    assert.equal(
+      cursors.documents.get(snapshot().providerOperationId)?.source,
+      "webhook",
+    );
+    assert.equal(
+      cursors.documents.get(snapshot().providerOperationId)?.status,
+      "Approved",
+    );
+
+    await assert.rejects(
+      repository.reconcile(
+        snapshot({
+          potpDiditId: `pdi_${"B".repeat(43)}`,
+          status: "Declined",
+        }),
+      ),
+      (error) =>
+        error instanceof HostedAuthDiditReconciliationError &&
+        error.code === "provider_binding_mismatch",
+    );
+    assert.equal(
+      cursors.documents.get(snapshot().providerOperationId)?.status,
       "Approved",
     );
   });

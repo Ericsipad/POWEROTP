@@ -50,7 +50,8 @@ Do not mark a phase/step implemented, deployed, remote-green, or certified witho
 - P4-S4 — completed 2026-08-22 07:25 UTC, crash-safe persistent Didit User person-root mapping
 - P4-S5 — completed 2026-08-22 07:40 UTC, Didit email/phone OTP contact adapters
 - P4-S6 — completed 2026-08-22 07:59 UTC, signed Didit webhook replay/order boundary
-- P4-S7 through P15-S6 — not started
+- P4-S7 — completed 2026-08-22 08:34 UTC, provider polling reconciliation and fail-closed outage behavior
+- P4-S8 through P15-S6 — not started
 
 Update this index after every execution step with a link to that step's latest timestamped entry.
 
@@ -2675,3 +2676,71 @@ Known limits and next step:
   route or consume provider decisions for any ceremony.
 - P4-S7 — implement provider polling reconciliation and outage behavior without beginning assurance
   adapters, hosted ceremonies, or P4-S8+.
+
+## 2026-08-22 08:34 UTC — P4-S7: provider polling reconciliation and outage behavior
+
+Status and scope:
+
+- P4-S7 is complete. The API package now has an internal one-shot Didit decision poller for
+  cold-start, backfill, and missed-webhook reconciliation.
+- Assurance interpretation, hosted-session creation, hosted ceremonies, public routes, P4-S8+, and
+  `.env` were not changed.
+
+Implemented provider and persistence behavior:
+
+- Polling calls only Didit's authenticated
+  `GET /v3/session/{providerOperationId}/decision/` endpoint with a ten-second request timeout,
+  redirects disabled, and the server-side API key.
+- The complete response is validated in memory as a user session with one of Didit's ten exact,
+  case-sensitive statuses. Session ID, opaque `potpDiditId`, purpose workflow ID, and environment
+  must all match the expected operation binding before any state is persisted.
+- Only the PII-free session envelope is reconciled into the existing Mongo session cursor. Full
+  decision details, extracted identity data, contact details, media URLs, and evidence are never
+  persisted by this step.
+- Poll and webhook updates share one transaction-backed cursor. Exact status polls are unchanged;
+  changed polls are marked as poll-sourced; a later authenticated webhook supersedes a polled
+  snapshot. Cross-person, cross-workflow, and cross-environment cursor drift fails closed.
+- Network/timeout failures, HTTP 5xx, rate limits, and a missing known session return a retryable
+  result without changing the cursor or producing a terminal authentication outcome. Exponential
+  polling guidance starts at 10 seconds and is capped at 60 seconds. Provider authentication,
+  malformed payloads, unexpected HTTP responses, and binding mismatches fail closed as permanent
+  integration errors.
+- The poller remains disabled when `DIDIT_API_KEY` is absent.
+
+Didit source validation:
+
+- The authenticated global Didit MCP was consulted for the active organization/application context.
+  No provider object or configuration was changed.
+- Current official Didit webhook, full-flow, verification-status, and retrieve-session documentation
+  confirmed that webhooks remain primary, polling is a cold-start/reconciliation fallback, the
+  decision endpoint is rate-limited, status strings are exact and case-sensitive, and polling may
+  return PII-rich decision content that must not be retained here.
+
+Affected files:
+
+- `backend/packages/api/src/hosted-auth-didit-reconciliation.ts`
+- `backend/packages/api/src/hosted-auth-didit-reconciliation.test.ts`
+- `backend/packages/api/src/hosted-auth-didit-webhook-persistence.ts`
+- `backend/packages/api/src/hosted-auth-didit-webhook-persistence.test.ts`
+- `docs/POWEROTP_SIGNIN_AD_SERVICE_AS_BUILT.md`
+
+Focused verification:
+
+- API package tests passed (526), covering minimal-envelope persistence, exact binding validation,
+  strict status/session-kind contracts, timeout/network/404/429/5xx retry classification, bounded
+  backoff, provider authentication failure, malformed responses, shared-cursor reconciliation,
+  webhook supersession, and binding-drift rejection.
+- The API package production build passed. No full-monorepo verification was run locally; remote
+  Verify remains the complete pushed check.
+
+Commit, push, and remote check:
+
+- The coherent P4-S7 change is ready for commit and push. Final commit, push, and one remote Verify
+  result check are reported in the post-push handoff.
+
+Known limits and next step:
+
+- P4-S7 deliberately exposes provider status only. It does not interpret evidence or map status to
+  vendor-neutral assurance outcomes.
+- P4-S8 — implement Didit age, KYC, and liveness hosted-session adapters required by signup policy
+  without beginning reusable claim persistence/evaluation, hosted ceremonies, or P4-S9+.

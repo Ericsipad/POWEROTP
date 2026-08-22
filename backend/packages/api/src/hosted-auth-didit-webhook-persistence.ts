@@ -1,6 +1,12 @@
 import type { Collection, Db, MongoClient } from "mongodb";
 
 import {
+  HostedAuthDiditReconciliationError,
+  type HostedAuthDiditReconciliationDisposition,
+  type HostedAuthDiditReconciliationRepository,
+  type HostedAuthDiditReconciliationSnapshot,
+} from "./hosted-auth-didit-reconciliation.js";
+import {
   HostedAuthDiditWebhookError,
   type HostedAuthDiditWebhookDisposition,
   type HostedAuthDiditWebhookEvent,
@@ -18,14 +24,17 @@ interface DiditWebhookEventDocument extends HostedAuthDiditWebhookEvent {
 
 interface DiditWebhookCursorDocument {
   _id: string;
-  eventId: string;
-  eventType: HostedAuthDiditWebhookEvent["eventType"];
-  applicationId: string;
+  eventId?: string;
+  eventType?: HostedAuthDiditWebhookEvent["eventType"];
+  applicationId?: string;
   environment: HostedAuthDiditWebhookEvent["environment"];
   potpDiditId: string;
+  workflowId?: string;
   status: string;
-  providerCreatedAt: Date;
-  receivedAt: Date;
+  source: "webhook" | "poll";
+  providerCreatedAt?: Date;
+  receivedAt?: Date;
+  reconciledAt?: Date;
 }
 
 /**
@@ -33,7 +42,9 @@ interface DiditWebhookCursorDocument {
  * same transaction, so a crash cannot consume an event without ordering it.
  */
 export class MongoHostedAuthDiditWebhookRepository
-  implements HostedAuthDiditWebhookRepository
+  implements
+    HostedAuthDiditWebhookRepository,
+    HostedAuthDiditReconciliationRepository
 {
   private readonly events: Collection<DiditWebhookEventDocument>;
   private readonly cursors: Collection<DiditWebhookCursorDocument>;
@@ -69,8 +80,10 @@ export class MongoHostedAuthDiditWebhookRepository
           { _id: event.providerOperationId },
           { session },
         );
+        requireSameBinding(cursor, event);
         disposition =
-          cursor && cursor.providerCreatedAt > event.providerCreatedAt
+          cursor?.providerCreatedAt &&
+          cursor.providerCreatedAt > event.providerCreatedAt
             ? "stale"
             : "accepted";
         await this.events.insertOne(
@@ -87,7 +100,9 @@ export class MongoHostedAuthDiditWebhookRepository
                 applicationId: event.applicationId,
                 environment: event.environment,
                 potpDiditId: event.potpDiditId,
+                ...(event.workflowId ? { workflowId: event.workflowId } : {}),
                 status: event.status,
+                source: "webhook",
                 providerCreatedAt: event.providerCreatedAt,
                 receivedAt: event.receivedAt,
               },
@@ -103,5 +118,60 @@ export class MongoHostedAuthDiditWebhookRepository
       throw new Error("Didit webhook transaction completed without an outcome");
     }
     return disposition;
+  }
+
+  async reconcile(
+    snapshot: HostedAuthDiditReconciliationSnapshot,
+  ): Promise<HostedAuthDiditReconciliationDisposition> {
+    const session = this.client.startSession();
+    let disposition: HostedAuthDiditReconciliationDisposition | undefined;
+    try {
+      await session.withTransaction(async () => {
+        const cursor = await this.cursors.findOne(
+          { _id: snapshot.providerOperationId },
+          { session },
+        );
+        requireSameBinding(cursor, snapshot);
+        disposition = cursor?.status === snapshot.status ? "unchanged" : "accepted";
+        await this.cursors.updateOne(
+          { _id: snapshot.providerOperationId },
+          {
+            $set: {
+              environment: snapshot.environment,
+              potpDiditId: snapshot.potpDiditId,
+              workflowId: snapshot.workflowId,
+              status: snapshot.status,
+              ...(disposition === "accepted" ? { source: "poll" as const } : {}),
+              reconciledAt: snapshot.reconciledAt,
+            },
+          },
+          { session, upsert: true },
+        );
+      });
+    } finally {
+      await session.endSession();
+    }
+    if (!disposition) {
+      throw new Error("Didit reconciliation completed without an outcome");
+    }
+    return disposition;
+  }
+}
+
+function requireSameBinding(
+  cursor: DiditWebhookCursorDocument | null,
+  update:
+    | HostedAuthDiditWebhookEvent
+    | HostedAuthDiditReconciliationSnapshot,
+): void {
+  if (
+    cursor &&
+    (cursor.potpDiditId !== update.potpDiditId ||
+      cursor.environment !== update.environment ||
+      (cursor.workflowId &&
+        update.workflowId &&
+        cursor.workflowId !== update.workflowId))
+  ) {
+    throw new HostedAuthDiditReconciliationError("provider_binding_mismatch");
   }
 }
