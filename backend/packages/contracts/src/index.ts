@@ -27,6 +27,7 @@ export * from "./hosted-auth-data-governance.js";
 export * from "./hosted-auth-identifiers.js";
 export * from "./hosted-auth-ceremony-scopes.js";
 export * from "./hosted-auth-protocol.js";
+export * from "./hosted-auth-project-configuration.js";
 export * from "./hosted-auth-provider-interfaces.js";
 export * from "./hosted-auth-proof-state-machines.js";
 export * from "./hosted-auth-recovery-state-machines.js";

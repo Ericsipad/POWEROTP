@@ -40,7 +40,8 @@ Do not mark a phase/step implemented, deployed, remote-green, or certified witho
 - P3-S0 ingress correction — 2026-08-22 04:10 UTC, explicit authority-aware health route
 - P3-S1 — completed 2026-08-22 04:23 UTC, immutable project custody/realm identifiers and hosted URLs
 - P3-S1 correction — 2026-08-22 04:33 UTC, removed nonexistent legacy-project compatibility
-- P3-S2 through P15-S6 — not started
+- P3-S2 — completed 2026-08-22 04:48 UTC, exact return URLs and isolated method/assurance settings
+- P3-S3 through P15-S6 — not started
 
 Update this index after every execution step with a link to that step's latest timestamped entry.
 
@@ -2015,3 +2016,73 @@ Focused verification:
 - Contracts tests passed (264) and API tests passed (474), including an explicit regression test
   that repeated landing-page demo provisioning creates no hosted-auth configuration.
 - Backend production build and frontend production build passed.
+
+## 2026-08-22 04:48 UTC — P3-S2: return URLs and authentication policy
+
+Status and scope:
+
+- P3-S2 is complete. Customer projects now have isolated hosted-auth enablement, method, and
+  assurance settings plus replaceable exact signup, signin, failure, recovery, and restart URLs.
+- P3-S3 IP/CIDR allowlists, P3-S4 Project-card controls, hosted credential handlers, provider
+  adapters, Passport, MCP, BotBlocker behavior, and `.env` were not changed.
+
+Implemented contracts, routes, data, and behavior:
+
+- Added strict shared contracts for all five named return URLs and for separate signup/signin
+  enablement, signup contact methods, signin methods, minimum-age, KYC, and liveness policy.
+  Passkey remains available in every signin policy; duplicate methods, unknown fields, and empty
+  settings PATCHes are rejected.
+- New customer projects receive a disabled-by-default hosted-auth policy with email signup contact,
+  passkey/email signin, and no additional assurance requirement. Return URLs remain absent until
+  the customer explicitly configures the complete five-URL set.
+- Added authenticated `GET|PATCH /v1/projects/{projectId}/auth-settings` and
+  `GET|PUT /v1/projects/{projectId}/auth-return-urls` routes. Mutations require the existing
+  customer session, CSRF proof, and owner-scoped project update; all responses are `no-store`.
+- Return URL replacement canonicalizes the complete set and rejects fragments, userinfo, wildcard
+  hosts, encoded authorities, backslash parser ambiguity, explicit default or non-default
+  production ports, and all production HTTP. Development HTTP is limited to localhost names.
+- Project responses expose the required auth policy and expose return URLs only after configuration.
+  Configuration updates emit separate hosted-auth audit actions.
+
+Authorization, immutability, and isolation:
+
+- Owner-scoped reads and writes return the same not-found result for another customer. P3-S1
+  custody mode, opaque identifier, realm, RP ID, and generated hosted URLs remain immutable.
+- Hosted-auth updates do not alter the existing verification `enabledMethods`, allowed origins, or
+  BotBlocker site/configuration. The internal landing-page verification demo still receives no
+  hosted-auth configuration.
+
+Affected files:
+
+- `backend/packages/contracts/src/hosted-auth-project-configuration.ts`
+- `backend/packages/contracts/src/hosted-auth-project-configuration.test.ts`
+- `backend/packages/contracts/src/projects.ts`
+- `backend/packages/contracts/src/index.ts`
+- `backend/packages/api/src/persistence.ts`
+- `backend/packages/api/src/project-service.ts`
+- `backend/packages/api/src/project-service.test.ts`
+- `backend/apps/server/app/v1/projects/[projectId]/auth-settings/route.ts`
+- `backend/apps/server/app/v1/projects/[projectId]/auth-return-urls/route.ts`
+- `frontend/lib/contracts/projects.ts`
+- `docs/API_ROUTE_INVENTORY.md`
+- `docs/POWEROTP_SIGNIN_AD_SERVICE_AS_BUILT.md`
+
+Focused verification:
+
+- Contracts tests passed (267).
+- API tests passed (476), including canonicalization, owner authorization, P3-S1 immutability, and
+  verification/BotBlocker settings isolation.
+- Backend route tests passed (25), including the canonical route inventory.
+- Backend and frontend production builds passed.
+
+Commit, push, and remote check:
+
+- The coherent P3-S2 change is ready for commit and push. Final commit, push, and one remote Verify/
+  deployment result check are reported in the post-push handoff.
+
+Known limits and next step:
+
+- The policy is configuration only. Provider execution and hosted browser handlers remain assigned
+  to their later phases; no fake execution path was added.
+- P3-S3 — add the optional backend IPv4/IPv6 CIDR allowlist without changing P3-S2 return URL or
+  authentication policy behavior.

@@ -2,6 +2,28 @@ import type { VerificationType } from "./verification";
 
 export type IdentityDataMode = "powerotp_pii" | "didit_pii";
 
+export interface HostedAuthProjectSettings {
+  signupEnabled: boolean;
+  signinEnabled: boolean;
+  methodPolicy: {
+    signupContactMethods: Array<"email" | "phone">;
+    signinMethods: Array<"passkey" | "email" | "phone" | "biometric">;
+  };
+  assurancePolicy: {
+    minimumAge: number | null;
+    identityKycRequired: boolean;
+    livenessRequired: boolean;
+  };
+}
+
+export interface HostedAuthReturnUrls {
+  signupReturnUrl: string;
+  signinReturnUrl: string;
+  failureReturnUrl: string;
+  recoveryReturnUrl: string;
+  restartUrl: string;
+}
+
 export interface Project {
   id: string;
   name: string;
@@ -25,6 +47,8 @@ export interface Project {
   rpId: string;
   signupHostedUrl: string;
   signinHostedUrl: string;
+  authSettings: HostedAuthProjectSettings;
+  authReturnUrls?: HostedAuthReturnUrls;
   stats: {
     total: number;
     succeeded: number;

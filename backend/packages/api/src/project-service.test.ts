@@ -9,7 +9,10 @@ import type { Db, MongoClient } from "mongodb";
 
 import type { BotBlockerSiteDocument } from "./botblocker-site-persistence.js";
 import { verifyBotBlockerWebhookId } from "./botblocker-webhook.js";
-import { ProjectService } from "./project-service.js";
+import {
+  canonicalizeHostedAuthReturnUrls,
+  ProjectService,
+} from "./project-service.js";
 import type {
   ApiKeyDocument,
   AuditDocument,
@@ -313,6 +316,108 @@ describe("ProjectService hosted-auth project configuration", () => {
       "usr_platform_admin",
     );
     assert.equal([...projects.values()][0]!._id, original._id);
+  });
+
+  it("keeps return URLs exact and rejects redirect-parser bypasses", async () => {
+    const urls = {
+      signupReturnUrl: "https://client.example/auth/signup",
+      signinReturnUrl: "https://client.example/auth/signin?source=powerotp",
+      failureReturnUrl: "https://client.example/auth/failure",
+      recoveryReturnUrl: "https://client.example/auth/recovery",
+      restartUrl: "https://client.example/login",
+    };
+    assert.deepEqual(canonicalizeHostedAuthReturnUrls(urls, "production"), urls);
+
+    for (const invalid of [
+      "http://client.example/callback",
+      "https://user@client.example/callback",
+      "https://client.example/callback#fragment",
+      "https://*.client.example/callback",
+      "https://client.example:8443/callback",
+      "https://client.example:443/callback",
+      "https://%63lient.example/callback",
+      "https:\\\\client.example\\callback",
+    ]) {
+      assert.throws(
+        () =>
+          canonicalizeHostedAuthReturnUrls(
+            { ...urls, signupReturnUrl: invalid },
+            "production",
+          ),
+        (error: unknown) =>
+          error instanceof Error && error.message === "invalid_auth_return_url",
+      );
+    }
+
+    assert.equal(
+      canonicalizeHostedAuthReturnUrls(
+        { ...urls, restartUrl: "http://client.localhost:3000/login" },
+        "development",
+      ).restartUrl,
+      "http://client.localhost:3000/login",
+    );
+  });
+
+  it("authorizes and isolates return URL and auth setting changes", async () => {
+    const { service, projects, sites } = fixture(undefined, "production");
+    const created = await service.create("usr_owner", validInput);
+    const projectBefore = { ...projects.get(created.project.id)! };
+    const siteBefore = structuredClone([...sites.values()][0]!);
+
+    const settings = await service.updateAuthSettings(
+      "usr_owner",
+      created.project.id,
+      {
+        signupEnabled: true,
+        assurancePolicy: {
+          minimumAge: 18,
+          identityKycRequired: true,
+          livenessRequired: true,
+        },
+      },
+    );
+    assert.equal(settings.signupEnabled, true);
+    assert.equal(settings.signinEnabled, false);
+    assert.deepEqual(settings.methodPolicy, projectBefore.authSettings!.methodPolicy);
+
+    const urls = await service.replaceAuthReturnUrls(
+      "usr_owner",
+      created.project.id,
+      {
+        signupReturnUrl: "https://client.example/auth/signup",
+        signinReturnUrl: "https://client.example/auth/signin",
+        failureReturnUrl: "https://client.example/auth/failure",
+        recoveryReturnUrl: "https://client.example/auth/recovery",
+        restartUrl: "https://client.example/login",
+      },
+    );
+    assert.deepEqual(await service.getAuthReturnUrls("usr_owner", created.project.id), urls);
+
+    for (const field of [
+      "identityDataMode",
+      "identifierString",
+      "authRealm",
+      "rpId",
+      "signupHostedUrl",
+      "signinHostedUrl",
+      "enabledMethods",
+      "allowedOrigins",
+    ] as const) {
+      assert.deepEqual(projects.get(created.project.id)![field], projectBefore[field]);
+    }
+    assert.deepEqual([...sites.values()][0], siteBefore);
+    await assert.rejects(
+      service.updateAuthSettings("usr_other", created.project.id, {
+        signinEnabled: true,
+      }),
+      (error: unknown) =>
+        error instanceof Error && error.message === "project_not_found",
+    );
+    await assert.rejects(
+      service.replaceAuthReturnUrls("usr_other", created.project.id, urls),
+      (error: unknown) =>
+        error instanceof Error && error.message === "project_not_found",
+    );
   });
 });
 

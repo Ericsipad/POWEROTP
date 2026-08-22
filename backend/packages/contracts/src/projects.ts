@@ -6,6 +6,10 @@ import {
 } from "./botblocker.js";
 import { HostedAuthIdentityDataModeSchema } from "./hosted-auth-boundaries.js";
 import { ProjectIdentifierStringSchema } from "./hosted-auth-identifiers.js";
+import {
+  HostedAuthProjectSettingsSchema,
+  HostedAuthReturnUrlsSchema,
+} from "./hosted-auth-project-configuration.js";
 import { VerificationTypeSchema } from "./verification.js";
 
 export const ProjectNameSchema = z.string().trim().min(2).max(80);
@@ -123,6 +127,8 @@ export const ProjectSchema = z.object({
   rpId: z.string().min(1).max(253),
   signupHostedUrl: z.string().url(),
   signinHostedUrl: z.string().url(),
+  authSettings: HostedAuthProjectSettingsSchema,
+  authReturnUrls: HostedAuthReturnUrlsSchema.optional(),
   stats: ProjectStatsSchema,
 });
 

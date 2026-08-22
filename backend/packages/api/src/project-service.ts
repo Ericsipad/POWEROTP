@@ -2,12 +2,16 @@ import type {
   BotBlockerProjectSetup,
   CreateProject,
   HostedAuthIdentityDataMode,
+  HostedAuthProjectSettings,
+  HostedAuthReturnUrls,
   Project,
   ProjectCreated,
+  UpdateHostedAuthProjectSettings,
   UpdateProject,
   VerificationType,
 } from "@powerotp/contracts";
 import {
+  DEFAULT_HOSTED_AUTH_PROJECT_SETTINGS,
   DEFAULT_BOTBLOCKER_SITE_CONFIGURATION,
   ProjectIdentifierStringSchema,
 } from "@powerotp/contracts";
@@ -96,6 +100,7 @@ export class ProjectService {
       name: input.name,
       slug,
       ...hostedAuth,
+      authSettings: structuredClone(DEFAULT_HOSTED_AUTH_PROJECT_SETTINGS),
       enabledMethods: input.enabledMethods,
       allowedOrigins: input.allowedOrigins,
       callbackUrl: input.callbackUrl,
@@ -306,6 +311,76 @@ export class ProjectService {
     await this.#ownedProject(customerId, projectId);
   }
 
+  async getAuthSettings(
+    customerId: string,
+    projectId: string,
+  ): Promise<HostedAuthProjectSettings> {
+    return structuredClone((await this.#ownedProject(customerId, projectId)).authSettings);
+  }
+
+  async updateAuthSettings(
+    customerId: string,
+    projectId: string,
+    input: UpdateHostedAuthProjectSettings,
+    ip?: string,
+  ): Promise<HostedAuthProjectSettings> {
+    const existing = await this.#ownedProject(customerId, projectId);
+    const authSettings = {
+      ...existing.authSettings,
+      ...input,
+    };
+    const updated = await this.#projects.findOneAndUpdate(
+      { _id: projectId, customerId },
+      { $set: { authSettings, updatedAt: new Date() } },
+      { returnDocument: "after" },
+    );
+    if (!updated) throw new ProjectError("project_not_found", 404);
+    await this.#audit(
+      customerId,
+      "hosted_auth.settings_updated",
+      "project",
+      projectId,
+      ip,
+    );
+    return structuredClone(this.#requireCustomerProject(updated).authSettings);
+  }
+
+  async getAuthReturnUrls(
+    customerId: string,
+    projectId: string,
+  ): Promise<HostedAuthReturnUrls> {
+    const urls = (await this.#ownedProject(customerId, projectId)).authReturnUrls;
+    if (!urls) throw new ProjectError("auth_return_urls_not_configured", 404);
+    return { ...urls };
+  }
+
+  async replaceAuthReturnUrls(
+    customerId: string,
+    projectId: string,
+    input: HostedAuthReturnUrls,
+    ip?: string,
+  ): Promise<HostedAuthReturnUrls> {
+    await this.#ownedProject(customerId, projectId);
+    const authReturnUrls = canonicalizeHostedAuthReturnUrls(
+      input,
+      this.hostedAuthEnvironment,
+    );
+    const updated = await this.#projects.findOneAndUpdate(
+      { _id: projectId, customerId },
+      { $set: { authReturnUrls, updatedAt: new Date() } },
+      { returnDocument: "after" },
+    );
+    if (!updated) throw new ProjectError("project_not_found", 404);
+    await this.#audit(
+      customerId,
+      "hosted_auth.return_urls_replaced",
+      "project",
+      projectId,
+      ip,
+    );
+    return { ...authReturnUrls };
+  }
+
   /**
    * Idempotently creates or refreshes the operator-owned project backing
    * the public "try it now" demo widget, at a fixed, predictable slug so
@@ -408,6 +483,8 @@ export class ProjectService {
       rpId: project.rpId,
       signupHostedUrl: project.signupHostedUrl,
       signinHostedUrl: project.signinHostedUrl,
+      authSettings: structuredClone(project.authSettings),
+      authReturnUrls: project.authReturnUrls ? { ...project.authReturnUrls } : undefined,
       stats: {
         total: 0,
         succeeded: 0,
@@ -447,6 +524,8 @@ export class ProjectService {
       rpId: project.rpId,
       signupHostedUrl: project.signupHostedUrl,
       signinHostedUrl: project.signinHostedUrl,
+      authSettings: structuredClone(project.authSettings),
+      authReturnUrls: project.authReturnUrls ? { ...project.authReturnUrls } : undefined,
       stats: this.stats
         ? await this.stats.projectStats(project._id)
         : { total: 0, succeeded: 0, failed: 0, byType: { ...emptyByType } },
@@ -506,12 +585,60 @@ export class ProjectService {
       !project.authRealm ||
       !project.rpId ||
       !project.signupHostedUrl ||
-      !project.signinHostedUrl
+      !project.signinHostedUrl ||
+      !project.authSettings
     ) {
       throw new ProjectError("project_configuration_invalid", 500);
     }
     return project as CustomerProjectDocument;
   }
+}
+
+export function canonicalizeHostedAuthReturnUrls(
+  input: HostedAuthReturnUrls,
+  environment: HostedAuthDeploymentEnvironment,
+): HostedAuthReturnUrls {
+  return Object.fromEntries(
+    Object.entries(input).map(([name, value]) => [
+      name,
+      canonicalizeHostedAuthReturnUrl(value, environment),
+    ]),
+  ) as HostedAuthReturnUrls;
+}
+
+function canonicalizeHostedAuthReturnUrl(
+  value: string,
+  environment: HostedAuthDeploymentEnvironment,
+): string {
+  if (value.includes("\\") || /[\u0000-\u001f\u007f]/u.test(value)) {
+    throw new ProjectError("invalid_auth_return_url", 400);
+  }
+  const authority = /^[a-z][a-z\d+.-]*:\/\/([^/?#]*)/iu.exec(value)?.[1];
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new ProjectError("invalid_auth_return_url", 400);
+  }
+  const developmentHttp =
+    environment === "development" &&
+    url.protocol === "http:" &&
+    (url.hostname === "localhost" || url.hostname.endsWith(".localhost"));
+  if (
+    !authority ||
+    (url.protocol !== "https:" && !developmentHttp) ||
+    url.username ||
+    url.password ||
+    url.hash ||
+    url.hostname.includes("*") ||
+    authority.includes("%") ||
+    authority.includes("@") ||
+    (environment !== "development" && url.port) ||
+    authority.toLowerCase() !== url.host
+  ) {
+    throw new ProjectError("invalid_auth_return_url", 400);
+  }
+  return url.toString();
 }
 
 function createHostedAuthProjectConfiguration(

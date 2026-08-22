@@ -1,5 +1,7 @@
 import type {
   AccountClass,
+  HostedAuthProjectSettings,
+  HostedAuthReturnUrls,
   HostedAuthIdentityDataMode,
   ProjectIdentifierString,
   VerificationType,
@@ -99,6 +101,8 @@ export interface ProjectDocument {
   rpId?: string;
   signupHostedUrl?: string;
   signinHostedUrl?: string;
+  authSettings?: HostedAuthProjectSettings;
+  authReturnUrls?: HostedAuthReturnUrls;
   enabledMethods: VerificationType[];
   allowedOrigins: string[];
   callbackUrl?: string;
@@ -134,6 +138,7 @@ export type CustomerProjectDocument = ProjectDocument &
       | "rpId"
       | "signupHostedUrl"
       | "signinHostedUrl"
+      | "authSettings"
     >
   >;
 
