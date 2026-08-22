@@ -1,9 +1,10 @@
 "use client";
 
-import type { Project } from "@/lib/contracts";
+import type { CustomerBalance, Project } from "@/lib/contracts";
 import { useState, type FormEvent } from "react";
 
 import { BotBlockerPanel } from "./botblocker-panel";
+import { HostedAuthServicePanel } from "./hosted-auth-service-panel";
 import { ProjectAccountingPanel } from "./project-accounting-panel";
 import { VerificationTabs } from "./verification-tabs";
 
@@ -13,6 +14,7 @@ interface ProjectCardProps {
   onSetCallback(projectId: string, callbackUrl: string): Promise<void>;
   onProjectUpdated(project: Project): void;
   authenticatedFetch(url: string, init?: RequestInit): Promise<Response>;
+  balance?: CustomerBalance;
 }
 
 export function ProjectCard({
@@ -21,6 +23,7 @@ export function ProjectCard({
   onSetCallback,
   onProjectUpdated,
   authenticatedFetch,
+  balance,
 }: ProjectCardProps) {
   const [showCallback, setShowCallback] = useState(false);
   const [showOrigins, setShowOrigins] = useState(false);
@@ -159,6 +162,12 @@ export function ProjectCard({
           Rotate API key
         </button>
       </div>
+      <HostedAuthServicePanel
+        authenticatedFetch={authenticatedFetch}
+        balance={balance}
+        onProjectUpdated={onProjectUpdated}
+        project={project}
+      />
       <BotBlockerPanel
         projectId={project.id}
         authenticatedFetch={authenticatedFetch}

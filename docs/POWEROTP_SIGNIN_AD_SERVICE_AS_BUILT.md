@@ -43,7 +43,8 @@ Do not mark a phase/step implemented, deployed, remote-green, or certified witho
 - P3-S2 — completed 2026-08-22 04:48 UTC, exact return URLs and isolated method/assurance settings
 - P3-S3 — completed 2026-08-22 04:59 UTC, optional canonical backend IPv4/IPv6 CIDR allowlist
 - P3-S3 correction — 2026-08-22 05:08 UTC, enforced allowlists on non-slug result routes
-- P3-S4 through P15-S6 — not started
+- P3-S4 — completed 2026-08-22 05:19 UTC, Project-card hosted-auth controls and audit visibility
+- P4-S1 through P15-S6 — not started
 
 Update this index after every execution step with a link to that step's latest timestamped entry.
 
@@ -2193,3 +2194,78 @@ Commit, push, and remote check:
 
 - The P3-S3 correction is ready for commit and push. Final commit, push, and one remote result check
   are reported in the post-push handoff.
+
+## 2026-08-22 05:19 UTC — P3-S4: Project-card hosted-auth service controls
+
+Status and scope:
+
+- P3-S4 is complete. Each customer Project card now exposes the existing P3-S1 through P3-S3
+  hosted-auth configuration, account balance, and recent project configuration/security history.
+- No hosted credential ceremony, provider adapter, template persistence/editor, Phase 4, or Phase 5
+  behavior was added. Passport, MCP, BotBlocker policy behavior, the internal landing-page demo,
+  providers, and `.env` remain unchanged.
+
+Implemented UI and behavior:
+
+- Added separate Project-card service controls for sign-up and sign-in enablement/method policy and
+  Didit age/KYC/liveness assurance. The existing independent BotBlocker panel remains the fourth
+  service control; hosted-auth saves do not write BotBlocker configuration.
+- Added the immutable `powerotp_pii`/`didit_pii` custody badge and mode-specific explanation,
+  including that changing custody requires a new project. The generated realm-specific hosted
+  sign-up/sign-in URLs and exact five named return URLs are now visible and editable in place.
+- Exposed the existing customer prepaid balance in each Project card without creating a second
+  balance source or per-project wallet. The dashboard's existing balance refresh remains
+  authoritative and shares its current value with each card.
+- Exposed the P3-S3 backend CIDR allowlist with an empty/serverless-safe state. Updates continue
+  through the existing authenticated, owner-scoped, CSRF-protected settings route and preserve
+  server canonicalization.
+- Added disabled sign-up and sign-in Template 1 selectors/edit buttons. They intentionally perform
+  no reads or writes and remain disabled until Phase 5 provides template persistence and controls.
+
+Audit history and security:
+
+- Added `GET /v1/projects/{projectId}/audit-history`, protected by the existing customer session and
+  exact project ownership check, with `Cache-Control: no-store`.
+- History includes the newest 25 events targeting the owned project or its independently provisioned
+  BotBlocker site. Responses expose only event ID, action, target type, and timestamp; stored IP
+  addresses and event details are deliberately omitted.
+- Added the target/time audit index used by the bounded query and updated the canonical route
+  inventory. Cross-project and non-owner reads return the existing generic project-not-found error.
+
+Affected files:
+
+- `backend/packages/api/src/persistence.ts`
+- `backend/packages/api/src/project-service.ts`
+- `backend/packages/api/src/project-service.test.ts`
+- `backend/apps/server/app/v1/projects/[projectId]/audit-history/route.ts`
+- `frontend/lib/contracts/projects.ts`
+- `frontend/app/dashboard/page.tsx`
+- `frontend/app/dashboard/project-card.tsx`
+- `frontend/app/dashboard/billing-panel.tsx`
+- `frontend/app/dashboard/hosted-auth-service-panel.tsx`
+- `frontend/app/dashboard/hosted-auth-static-details.tsx`
+- `frontend/app/dashboard/project-audit-history.tsx`
+- `frontend/app/dashboard.css`
+- `docs/API_ROUTE_INVENTORY.md`
+- `docs/POWEROTP_SIGNIN_AD_SERVICE_AS_BUILT.md`
+
+Focused verification:
+
+- API tests passed (485), including owner-scoped project/BotBlocker audit selection, ordering,
+  unrelated-target exclusion, and response redaction.
+- Backend route tests passed (25), including canonical route-inventory coverage.
+- Frontend tests passed (4).
+- API package, backend production, and frontend production builds passed.
+
+Commit, push, and remote check:
+
+- The coherent P3-S4 change is ready for commit and push. Final commit, push, and one remote Verify/
+  deployment result check are reported in the post-push handoff.
+
+Known limits and next step:
+
+- Configuration controls are now operational, but hosted browser ceremonies and contact-provider
+  execution remain assigned to later phases. No fake success path was added.
+- Template controls remain visibly disabled and have no backing API or persistence until Phase 5.
+- P4-S1 — add a purpose-separated hosted-auth adapter over the existing Brevo email service without
+  changing custody-mode routing, customer Project controls, `.env`, or unrelated services.

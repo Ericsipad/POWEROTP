@@ -265,6 +265,9 @@ export async function ensureIndexes(db: Db) {
     ensureIndexStep("auditEvents.actorId_occurredAt", () =>
       db.collection<AuditDocument>("auditEvents").createIndex({ actorId: 1, occurredAt: -1 }),
     ),
+    ensureIndexStep("auditEvents.targetId_occurredAt", () =>
+      db.collection<AuditDocument>("auditEvents").createIndex({ targetId: 1, occurredAt: -1 }),
+    ),
     ensureIndexStep("nodes.ip", () =>
       db.collection<NodeDocument>("nodes").createIndex({ ip: 1 }, { unique: true }),
     ),

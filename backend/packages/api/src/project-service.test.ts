@@ -110,6 +110,26 @@ function fixture(
           if (name === failCollection) throw new Error(`${name} failed`);
           audits.push(...documents);
         },
+        find: (filter: { targetId: { $in: string[] } }) => {
+          let results = audits.filter((audit) =>
+            filter.targetId.$in.includes(audit.targetId)
+          );
+          const cursor = {
+            sort: () => {
+              results = results.toSorted(
+                (left, right) =>
+                  right.occurredAt.getTime() - left.occurredAt.getTime(),
+              );
+              return cursor;
+            },
+            limit: (limit: number) => {
+              results = results.slice(0, limit);
+              return cursor;
+            },
+            toArray: async () => results,
+          };
+          return cursor;
+        },
       };
     },
   } as unknown as Db;
@@ -450,6 +470,68 @@ describe("ProjectService hosted-auth project configuration", () => {
     );
     await assert.rejects(
       service.replaceAuthReturnUrls("usr_other", created.project.id, urls),
+      (error: unknown) =>
+        error instanceof Error && error.message === "project_not_found",
+    );
+  });
+
+  it("returns only recent project and BotBlocker audit metadata to the owner", async () => {
+    const { service, sites, audits } = fixture();
+    const created = await service.create("usr_owner", validInput);
+    const siteId = [...sites.keys()][0]!;
+    audits.splice(0);
+    audits.push(
+      {
+        _id: "aud_older",
+        actorId: "usr_owner",
+        action: "hosted_auth.settings_updated",
+        targetType: "project",
+        targetId: created.project.id,
+        occurredAt: new Date("2026-08-21T01:00:00.000Z"),
+        ip: "203.0.113.20",
+        details: { privateValue: "not returned" },
+      },
+      {
+        _id: "aud_newer",
+        actorId: "usr_owner",
+        action: "botblocker_site.updated",
+        targetType: "botblocker_site",
+        targetId: siteId,
+        occurredAt: new Date("2026-08-21T02:00:00.000Z"),
+      },
+      {
+        _id: "aud_unrelated",
+        actorId: "usr_owner",
+        action: "project.updated",
+        targetType: "project",
+        targetId: "prj_unrelated",
+        occurredAt: new Date("2026-08-21T03:00:00.000Z"),
+      },
+    );
+
+    const history = await service.listAuditHistory(
+      "usr_owner",
+      created.project.id,
+    );
+    assert.deepEqual(history.slice(0, 2), [
+      {
+        id: "aud_newer",
+        action: "botblocker_site.updated",
+        targetType: "botblocker_site",
+        occurredAt: "2026-08-21T02:00:00.000Z",
+      },
+      {
+        id: "aud_older",
+        action: "hosted_auth.settings_updated",
+        targetType: "project",
+        occurredAt: "2026-08-21T01:00:00.000Z",
+      },
+    ]);
+    assert.equal(history.some((event) => event.id === "aud_unrelated"), false);
+    assert.equal("details" in history[0]!, false);
+    assert.equal("ip" in history[0]!, false);
+    await assert.rejects(
+      service.listAuditHistory("usr_other", created.project.id),
       (error: unknown) =>
         error instanceof Error && error.message === "project_not_found",
     );

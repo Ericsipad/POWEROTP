@@ -1,6 +1,7 @@
 "use client";
 
 import type {
+  CustomerBalance,
   Project,
   ProjectCreated,
   SessionResponse,
@@ -38,6 +39,7 @@ export default function DashboardPage() {
   const [secrets, setSecrets] = useState<RevealedSecrets>();
   const [error, setError] = useState("");
   const [topupBanner, setTopupBanner] = useState<"success" | "canceled">();
+  const [balance, setBalance] = useState<CustomerBalance>();
 
   useEffect(() => {
     void load();
@@ -190,7 +192,12 @@ export default function DashboardPage() {
       </header>
       <section className="dashboardGrid shell">
         {error && <div className="formError">{error}</div>}
-        {session && <BillingPanel authenticatedFetch={authenticatedFetch} />}
+        {session && (
+          <BillingPanel
+            authenticatedFetch={authenticatedFetch}
+            onBalanceChange={setBalance}
+          />
+        )}
         {session && <ReferralPanel authenticatedFetch={authenticatedFetch} />}
         {!projects.length && !error && (
           <div className="emptyState">Create your first POWEROTP project.</div>
@@ -205,6 +212,7 @@ export default function DashboardPage() {
               setProjects((current) => current.map((p) => (p.id === updated.id ? updated : p)))
             }
             authenticatedFetch={authenticatedFetch}
+            balance={balance}
           />
         ))}
       </section>

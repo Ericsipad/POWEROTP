@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 
 interface BillingPanelProps {
   authenticatedFetch(url: string, init?: RequestInit): Promise<Response>;
+  onBalanceChange?(balance: CustomerBalance): void;
 }
 
 const topupAmounts = [5, 25, 50, 100] as const;
@@ -14,7 +15,10 @@ const topupAmounts = [5, 25, 50, 100] as const;
  * fixed-amount top-up buttons — see `docs/AS_BUILT.md`'s "Customer balance
  * billing" section.
  */
-export function BillingPanel({ authenticatedFetch }: BillingPanelProps) {
+export function BillingPanel({
+  authenticatedFetch,
+  onBalanceChange,
+}: BillingPanelProps) {
   const [balance, setBalance] = useState<CustomerBalance>();
   const [transactions, setTransactions] = useState<FinancialTransaction[]>([]);
   const [status, setStatus] = useState("");
@@ -34,7 +38,11 @@ export function BillingPanel({ authenticatedFetch }: BillingPanelProps) {
       authenticatedFetch("/v1/billing/balance"),
       authenticatedFetch("/v1/billing/ledger"),
     ]);
-    if (balanceResponse.ok) setBalance((await balanceResponse.json()).balance);
+    if (balanceResponse.ok) {
+      const nextBalance = (await balanceResponse.json()).balance as CustomerBalance;
+      setBalance(nextBalance);
+      onBalanceChange?.(nextBalance);
+    }
     if (ledgerResponse.ok) setTransactions((await ledgerResponse.json()).transactions);
   }
 

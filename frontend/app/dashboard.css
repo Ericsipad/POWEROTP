@@ -187,6 +187,144 @@
   padding: 16px;
 }
 
+.hostedAuthPanel {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  margin-top: 20px;
+  padding: 16px;
+}
+
+.hostedAuthPanel > p,
+.hostedAuthPanel form > p,
+.auditHistory p {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.hostedAuthHeading,
+.balanceVisibility,
+.hostedUrlGrid,
+.templateControls {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.hostedAuthHeading h3 {
+  display: inline-block;
+  margin-right: 10px;
+}
+
+.modeBadge {
+  background: #eef0ee;
+  border-radius: 999px;
+  color: var(--night);
+  font-size: 10px;
+  font-weight: 700;
+  padding: 5px 9px;
+  text-transform: uppercase;
+}
+
+.balanceVisibility {
+  align-items: flex-end;
+  display: grid;
+  gap: 2px;
+  justify-items: end;
+}
+
+.balanceVisibility strong {
+  font-size: 20px;
+}
+
+.balanceVisibility span {
+  color: var(--muted);
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.serviceControlGrid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.serviceControl {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+}
+
+.serviceControl legend {
+  font-size: 13px;
+  font-weight: 700;
+  padding: 0 5px;
+}
+
+.serviceControl .statusBadge {
+  justify-self: start;
+}
+
+.hostedUrlGrid {
+  align-items: stretch;
+  margin: 20px 0;
+}
+
+.hostedUrlGrid > div {
+  background: var(--paper);
+  border-radius: 8px;
+  display: grid;
+  flex: 1 1 320px;
+  gap: 8px;
+  padding: 13px;
+}
+
+.hostedUrlGrid code {
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.returnUrlForm {
+  border-top: 1px solid var(--line);
+  padding-top: 16px;
+}
+
+.templateControls {
+  border-bottom: 1px solid var(--line);
+  border-top: 1px solid var(--line);
+  margin-top: 18px;
+  padding: 18px 0;
+}
+
+.templateControls .field {
+  flex: 1 1 230px;
+}
+
+.auditHistory ul {
+  display: grid;
+  gap: 7px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.auditHistory li {
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  font-size: 12px;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 7px 0;
+}
+
+.auditHistory time {
+  color: var(--muted);
+  white-space: nowrap;
+}
+
 .botBlockerPanel {
   border: 1px solid var(--line);
   border-radius: 10px;
@@ -395,6 +533,20 @@
   color: var(--muted);
   font-size: 11px;
   text-transform: uppercase;
+}
+
+@media (max-width: 760px) {
+  .serviceControlGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .balanceVisibility {
+    justify-items: start;
+  }
+
+  .auditHistory li {
+    display: grid;
+  }
 }
 
 .topBanner {

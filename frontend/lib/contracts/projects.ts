@@ -25,6 +25,13 @@ export interface HostedAuthReturnUrls {
   restartUrl: string;
 }
 
+export interface ProjectAuditEvent {
+  id: string;
+  action: string;
+  targetType: string;
+  occurredAt: string;
+}
+
 export interface Project {
   id: string;
   name: string;

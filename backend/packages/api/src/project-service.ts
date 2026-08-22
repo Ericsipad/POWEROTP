@@ -312,6 +312,23 @@ export class ProjectService {
     await this.#ownedProject(customerId, projectId);
   }
 
+  async listAuditHistory(customerId: string, projectId: string) {
+    await this.#ownedProject(customerId, projectId);
+    const site = await this.#botBlockerSites.findOne({ projectId, customerId });
+    const targetIds = site ? [projectId, site._id] : [projectId];
+    const events = await this.#audits
+      .find({ targetId: { $in: targetIds } })
+      .sort({ occurredAt: -1 })
+      .limit(25)
+      .toArray();
+    return events.map((event) => ({
+      id: event._id,
+      action: event.action,
+      targetType: event.targetType,
+      occurredAt: event.occurredAt.toISOString(),
+    }));
+  }
+
   async getAuthSettings(
     customerId: string,
     projectId: string,
